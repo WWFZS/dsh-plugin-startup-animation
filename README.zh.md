@@ -34,7 +34,7 @@ DSH 0.2.1+ 自带插件管理器。打开 **设置 → 插件**，搜索 **开�
 ### 从本仓库安装
 
 ```sh
-dsh plugin --profile <你的 profile> add github:<你的账号>/dsh-plugin-startup-animation
+dsh plugin --profile <你的 profile> add github:WWFZS/dsh-plugin-startup-animation
 ```
 
 然后重启 `dsh`。如果你用的是官方 DSH 桌面版，请从应用内的 **设置 → 插件** 安装——
@@ -43,7 +43,7 @@ dsh plugin --profile <你的 profile> add github:<你的账号>/dsh-plugin-start
 ### 手动安装
 
 ```sh
-git clone https://github.com/<你的账号>/dsh-plugin-startup-animation.git
+git clone https://github.com/WWFZS/dsh-plugin-startup-animation.git
 dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 ```
 
@@ -61,6 +61,27 @@ dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 | MP4 / 壁纸 / 音频 三个页签 | 点卡片即选用；上传即入库。 |
 
 页面右上角的 **立即刷新** 会重载页面让新配置生效。**任何设置都不需要重启 `dsh`。**
+
+### 版本与更新
+
+设置页标题旁有一枚很小的版本号——显示你**实际装上的**版本，直接读包自己的清单。
+
+- **已是最新**：只显示 `版本 1.9.0`，不打扰你。
+- **有新版**：变成 `版本 1.9.0 · 有新版本 2.0.0`，点一下打开 GitHub Release 页，
+  先看改了什么再决定。
+- **检查不到**：离线、防火墙拦了、或者 GitHub 不可达时，就只是一枚安静的版本号。
+  它**不会变成报错状态**——更新检查是锦上添花，不是插件的依赖。
+
+插件**不会自动更新自己**：代码里没有任何"下载并覆盖自身文件"的路径。更新就是你自己
+跑下面这条命令（或用插件管理器），所以一个有问题的版本不可能在你不知情时落到机器上。
+
+```sh
+# 覆盖安装，设置与已上传素材都会保留
+dsh plugin --profile <你的 profile> add github:WWFZS/dsh-plugin-startup-animation
+```
+
+你的配置（`$DSH_HOME/startup-animation.json`）和上传素材
+（`$DSH_HOME/startup-animation-media/`）都在包**外面**，升级不会动它们。
 
 ### 配置文件
 
@@ -108,6 +129,26 @@ dsh plugin --profile <你的 profile> add /该仓库的绝对路径
   统一退回原生启动页。
 - 素材路由完整实现了 `Range`/`ETag`：拖动进度正常，切片响应不会被当成完整文件缓存。
 - 上传素材是**真删**；内置素材只从列表隐藏，包体保持完整。
+
+## 对未来 DSH 版本的兼容性
+
+Harness 迭代很快，而这个插件用到两个内核扩展点（`webserver/index-inject` 做开机覆盖层，
+`webServer.register` 做路由和素材服务）。两处都按"未来内核改了也只降级、不弄坏你的
+Harness"来处理：
+
+| 如果未来的 DSH 改了…… | 会发生什么 |
+|---|---|
+| `webserver/index-inject` 的事件名或签名 | 插件打一条警告，**不带动画**正常启动；显示原生启动页 |
+| `webServer` 服务（路由、素材服务） | 不提供设置页入口；Harness 其余部分完全不受影响 |
+| 设置页插槽 API（`settings.section`） | 设置入口消失，不抛异常 |
+| 运行期其它任何意外 | 每条失败路径都回落到原生启动页——覆盖层永远不允许阻塞启动 |
+
+声明的兼容范围（`engines.dsh`，并镜像一份到 `dsh.engines`，让插件管理器和市场从
+任一位置都能读到）是 `>=0.2.0`。插件**没有任何 npm 依赖**，浏览器半边只从宿主的模块表
+`require('react')`——不存在"随包打进了某个会和内核版本脱节的库"这种隐患。
+
+启动日志会同时写明插件版本和（能读到时）宿主内核版本。万一哪次升级把动画弄没了，
+第一眼就该看那一行。
 
 ## 环境要求
 

@@ -609,16 +609,26 @@ window.__ModuleLoader__.load({
           if (text === '') return null
           const hasUpdate = update !== null && update.updateAvailable === true
           const reachable = update !== null && update.reachable === true
-          /** 副标签：仅在拿到结果后显示，避免加载中闪一下又变。 */
-          // t() 不做变量插值（生态通行做法是 .replace）：直接给它第二参数只会
-          // 原样显示 "{latest}"，所以这里必须自己替换。
+          /**
+           * 副标签只在**真的需要用户行动**时出现。
+           *
+           * 平时标题旁只留一枚安静的版本号。只有两种情况会加字：
+           *   - 有新版本 → 「有新版本 x.y.z」，可点，打开 Release 页；
+           *   - 检查中 → 「检查更新中…」，仅在没有缓存结果的首帧出现。
+           * 「已是最新」「检查不到」都不加字：用户没装新版时不需要被打扰，
+           * 而离线时把"检查不到"挂在标题上只会让人以为插件坏了。
+           * 这两种状态仍然在 title 属性里，鼠标悬停可查。
+           */
           const note = updateChecking
             ? t('updateChecking')
             : hasUpdate && typeof update.latest === 'string'
+              // t() 不做变量插值（生态通行做法是 .replace）：直接给它第二参数
+              // 只会原样显示 "{latest}"，所以这里必须自己替换。
               ? t('updateAvailable').replace('{latest}', update.latest)
               : reachable
                 ? t('updateLatest')
                 : t('updateUnknown')
+          const showNote = updateChecking || hasUpdate
           const releaseUrl =
             hasUpdate && typeof update?.releasesUrl === 'string' && update.releasesUrl !== ''
               ? update.releasesUrl
@@ -627,7 +637,9 @@ window.__ModuleLoader__.load({
             'span',
             { className: 'dsa-set-ver', 'data-update': hasUpdate ? '1' : '0', title: note },
             releaseUrl === ''
-              ? text
+              ? showNote
+                ? `${text} · ${note}`
+                : text
               : h(
                   'button',
                   {

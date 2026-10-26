@@ -1,6 +1,6 @@
 # 素材来源 / Asset provenance
 
-`startup-animation/builtin/` 里的素材用于演示插件能力。**再分发前请自行确认每个文件的授权**。
+`builtin/` 里的素材用于演示插件能力。**再分发前请自行确认每个文件的授权**。
 本文件记录的是它们当前的用途与处理方式，不构成任何授权声明。
 
 ## MP4（3 段）
@@ -33,9 +33,9 @@
 保留目录结构即可，插件按扩展名自动分类：
 
 ```
-startup-animation/builtin/MP4/<任意名>.mp4
-startup-animation/builtin/图片/<任意名>.jpg|png|webp|gif
-startup-animation/builtin/音频/<任意名>.mp3|wav|m4a|flac|opus
+builtin/MP4/<任意名>.mp4
+builtin/图片/<任意名>.jpg|png|webp|gif
+builtin/音频/<任意名>.mp3|wav|m4a|flac|opus
 ```
 
 然后重新生成缩略图 / 压缩版：

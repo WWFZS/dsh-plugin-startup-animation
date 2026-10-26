@@ -40,10 +40,24 @@ export const VERSION = (() => {
   try {
     const raw = fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')
     const parsed = JSON.parse(raw)
-    return typeof parsed.version === 'string' && parsed.version !== '' ? parsed.version : '0.0.0'
+    if (typeof parsed.version === 'string' && parsed.version !== '') return parsed.version
   } catch {
-    return '0.0.0'
+    /* 见下面的调试标记 */
   }
+  // 读不到版本是**打包缺陷**（清单没随包分发），不是运行时环境问题。
+  // 保留 '0.0.0' 让功能继续跑，但要留下痕迹，否则用户只会看到"版本 0.0.0"
+  // 并且每个 Release 都被判成"有新版本"，却无从得知原因。
+  if (typeof process !== 'undefined') {
+    try {
+      process.emitWarning?.(
+        '[startup-animation] 读不到自身的 package.json，版本号回落 0.0.0 —— 安装包缺少清单文件',
+        'StartupAnimationWarning',
+      )
+    } catch {
+      /* 仅诊断 */
+    }
+  }
+  return '0.0.0'
 })()
 
 /** 素材路由（页面侧用根相对路径引用，与参考实现一致，桌面壳同样可达）。 */
@@ -126,21 +140,37 @@ export async function checkForUpdate(options) {
         signal: AbortSignal.timeout(6000),
       })
       let tag = null
+      // `answered` 区分"仓库真的还没有 Release"和"请求根本没被正常应答"：
+      // 前者是正常状态（新仓库），后者是故障（限流/代理/格式变化）。
+      // 两者对用户都只显示"检查不到"，但原因不同，日志和排查靠它。
+      let answered = false
       if (releaseRes.ok) {
+        answered = true
         const body = await releaseRes.json()
         tag = typeof body?.tag_name === 'string' ? body.tag_name : null
       } else {
+        // 404 = 还没有 Release（正常）；其它状态码说明请求本身有问题。
+        if (releaseRes.status === 404) answered = true
         const tagsRes = await doFetch(`https://api.github.com/repos/${slug}/tags?per_page=1`, {
           headers,
           signal: AbortSignal.timeout(6000),
         })
         if (tagsRes.ok) {
+          answered = true
           const tags = await tagsRes.json()
           if (Array.isArray(tags) && tags.length > 0 && typeof tags[0]?.name === 'string') tag = tags[0].name
         }
       }
       if (tag === null) {
-        result = { ok: true, reachable: false, reason: 'no-release', current, latest: null, updateAvailable: false }
+        result = {
+          ok: true,
+          reachable: false,
+          // 仓库还没有任何 Release/tag → 'no-release'；请求未被正常应答 → 'bad-response'。
+          reason: answered ? 'no-release' : 'bad-response',
+          current,
+          latest: null,
+          updateAvailable: false,
+        }
       } else {
         const latest = String(tag).replace(/^v/i, '')
         const cmp = compareVersions(latest, current)

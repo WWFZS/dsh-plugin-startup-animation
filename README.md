@@ -39,7 +39,7 @@ DSH 0.2.1+ ships a plugin manager. Open **Settings → Plugins**, search for
 ### From this repository
 
 ```sh
-dsh plugin --profile <your-profile> add github:<your-account>/dsh-plugin-startup-animation
+dsh plugin --profile <your-profile> add github:WWFZS/dsh-plugin-startup-animation
 ```
 
 Then restart `dsh`. On the official DSH Desktop app, install from the app's own
@@ -48,7 +48,7 @@ Then restart `dsh`. On the official DSH Desktop app, install from the app's own
 ### Manual
 
 ```sh
-git clone https://github.com/<your-account>/dsh-plugin-startup-animation.git
+git clone https://github.com/WWFZS/dsh-plugin-startup-animation.git
 dsh plugin --profile <your-profile> add /absolute/path/to/dsh-plugin-startup-animation
 ```
 
@@ -67,6 +67,30 @@ Open **Settings → Startup Animation** (the entry sits in the sidebar settings 
 
 **Refresh now** (top right of the page) reloads the page so the new settings take effect.
 No restart of `dsh` is needed for any setting.
+
+### Version and updates
+
+The settings title bar carries a small version label — the version you actually
+installed, read from the package's own manifest.
+
+- **Up to date**: just `v1.9.0`, nothing else. No nagging.
+- **Newer release exists**: it turns into `v1.9.0 · Version 2.0.0 available`,
+  and clicking it opens the GitHub release page so you can read the changes.
+- **Check unavailable**: offline, behind a firewall, or GitHub being unreachable
+  leaves the label as a plain version number. It never turns into an error state —
+  the update check is a convenience, not a dependency.
+
+The plugin **never updates itself**. There is no code path that downloads or
+overwrites its own files: updating means you run the command below (or use the
+plugin manager), so a bad release can never land on your machine unasked.
+
+```sh
+# replace, keeping your settings and uploaded media
+dsh plugin --profile <your-profile> add github:WWFZS/dsh-plugin-startup-animation
+```
+
+Your configuration (`$DSH_HOME/startup-animation.json`) and uploaded media
+(`$DSH_HOME/startup-animation-media/`) live outside the package and survive updates.
 
 ### Configuration file
 
@@ -117,6 +141,30 @@ Everything below ships inside the package and appears in the picker:
   never cached as if they were the whole file.
 - Uploaded files are deleted for real; built-in files are only hidden from the list, so the
   package stays intact.
+
+## Compatibility with future DSH releases
+
+DeepSeek Harness moves fast, and this plugin touches two kernel extension points
+(`webserver/index-inject` for the boot overlay, `webServer.register` for routes and
+the media server). Both are handled so that a future kernel change degrades the
+plugin instead of breaking your Harness:
+
+| If a future DSH changes... | What happens |
+|---|---|
+| the `webserver/index-inject` event name or signature | the plugin logs one warning and boots **without** the animation; the stock boot screen shows |
+| the `webServer` service (routes, media serving) | no settings entry is offered; the rest of Harness is untouched |
+| the settings slot API (`settings.section`) | the settings entry disappears; nothing throws |
+| anything else at runtime | every failure path falls back to the native boot screen — the overlay is never allowed to block startup |
+
+Declared compatibility (`engines.dsh`, mirrored into `dsh.engines` so both the
+plugin manager and the market can read it) is `>=0.2.0`. The plugin also has **zero
+npm dependencies**, and its browser half only `require`s `react` from the host's
+module table — so there is no bundled copy of anything that could fall out of sync
+with a newer kernel.
+
+The startup log names both the plugin version and, when readable, the host kernel
+version. If an upgrade ever breaks the animation, that line is the first thing to
+look at.
 
 ## Requirements
 

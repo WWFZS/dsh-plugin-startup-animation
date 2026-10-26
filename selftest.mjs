@@ -558,6 +558,20 @@ await check('更新检查：Release 缺失 → 回退 tags', async () => {
   assert.equal(r.latest, '3.0.0')
   assert.equal(r.updateAvailable, true)
 })
+await check('更新检查：限流/异常应答 → bad-response（不是 no-release）', async () => {
+  resetUpdateCache()
+  const limited = async () => ({ ok: false, status: 429, json: async () => ({}) })
+  const r = await checkForUpdate({ currentVersion: '1.0.0', repoUrl: REPO_URL, fetchImpl: limited, force: true })
+  assert.equal(r.reachable, false)
+  assert.equal(r.reason, 'bad-response')
+})
+await check('更新检查：仓库没有 Release → no-release（正常状态）', async () => {
+  resetUpdateCache()
+  const empty = async () => ({ ok: false, status: 404, json: async () => [] })
+  const r = await checkForUpdate({ currentVersion: '1.0.0', repoUrl: REPO_URL, fetchImpl: empty, force: true })
+  assert.equal(r.reachable, false)
+  assert.equal(r.reason, 'no-release')
+})
 await check('更新检查缓存：命中期内不再请求', async () => {
   resetUpdateCache()
   let calls = 0
@@ -565,6 +579,15 @@ await check('更新检查缓存：命中期内不再请求', async () => {
   await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake, force: true })
   await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake })
   assert.equal(calls, 1, `缓存未生效，请求了 ${calls} 次`)
+})
+await check('发布包必须自带 package.json（否则版本会变成 0.0.0）', () => {
+  // 回归：files 白名单曾漏掉 package.json，make-release 按白名单复制，
+  // 结果用户装到的包读不到自己的版本 → VERSION 回落 '0.0.0'，
+  // 并把每个真实 Release 都判成"有新版本"。
+  const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+  assert.ok(pkg.files.includes('package.json'), 'files 未包含 package.json')
+  // VERSION 依赖能读到自己的清单：这里直接验证读取路径成立。
+  assert.equal(VERSION, pkg.version)
 })
 await check('REPO_URL 指向真实仓库（不是占位符）', () => {
   assert.ok(!REPO_URL.includes('CHANGE_ME'), '仓库地址仍是占位符')

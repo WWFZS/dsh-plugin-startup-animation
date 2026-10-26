@@ -39,6 +39,7 @@
     "./icon.svg": "./icon.svg"
   },
   "files": [
+    "package.json",
     "index.js",
     "client.js",
     "cordis.patch.yml",

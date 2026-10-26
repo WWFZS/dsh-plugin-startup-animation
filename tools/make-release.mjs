@@ -136,6 +136,10 @@ for (const pattern of files) {
   if (!copied.includes(pattern) && fs.existsSync(path.join(sourceDir, pattern))) copyFile(pattern)
 }
 
+// package.json 是包的元数据（版本号、dsh 段、exports 全靠它），任何情况下都必须带。
+// npm 自己总会包含它，但这里是按白名单复制的，漏掉就会出现"装好即 0.0.0"。
+if (!copied.includes('package.json')) copyFile('package.json')
+
 // ── 统计 ──
 const walk = (dir) => {
   let bytes = 0
