@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Startup Animation",
+    "description": "Shows an animated full-screen startup screen while Harness boots. Click anywhere to skip; set your own video or image file as the startup animation."
+  }
+}

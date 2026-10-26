@@ -1,0 +1,335 @@
+/*
+ * startup-animation —— 注入到 index.html 的开机动画样式（head 行）。
+ *
+ * 这是**艺术品层**：配色自带明暗两套（prefers-color-scheme），不依赖应用的
+ * --dsw-alias-* token —— 注入执行时应用样式还没挂上，token 可能根本不存在。
+ * 素材模式（video/image）在 root 上换 data-mode，底部文字强制走浅色 + 深色蒙版，
+ * 素材挂掉时 JS 把 data-mode 切回 css，调色板跟着回落。
+ */
+
+.dsa-root,
+.dsa-root * {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+.dsa-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--dsa-text);
+  background: radial-gradient(1200px 800px at 50% 36%, var(--dsa-bg0), var(--dsa-bg1) 72%);
+  opacity: 1;
+  transition: opacity var(--dsa-fade, 600ms) ease;
+}
+
+.dsa-root[data-state="leaving"] {
+  opacity: 0;
+}
+
+/* 素材未出画 / 素材失败：覆盖层完全透明 —— 原生启动页照常显示，出画瞬间再淡入。
+   pointer-events 同步关闭：透明期间绝不挡原生页面与应用界面的任何点击。 */
+.dsa-root[data-media="loading"],
+.dsa-root[data-media="gone"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── 调色板 ── */
+.dsa-root {
+  --dsa-bg0: #0a0e18;
+  --dsa-bg1: #04060d;
+  --dsa-accent: #4d6bfe;
+  --dsa-accent-2: #8ab4ff;
+  --dsa-text: rgba(255, 255, 255, 0.94);
+  --dsa-text-dim: rgba(255, 255, 255, 0.6);
+  --dsa-track: rgba(255, 255, 255, 0.14);
+  --dsa-pill-bg: rgba(255, 255, 255, 0.08);
+  --dsa-pill-border: rgba(255, 255, 255, 0.18);
+}
+
+@media (prefers-color-scheme: light) {
+  .dsa-root {
+    --dsa-bg0: #f3f6fd;
+    --dsa-bg1: #dde6f8;
+    --dsa-accent: #3b5bdb;
+    --dsa-accent-2: #5c7cfa;
+    --dsa-text: #17203a;
+    --dsa-text-dim: rgba(23, 32, 58, 0.62);
+    --dsa-track: rgba(23, 32, 58, 0.12);
+    --dsa-pill-bg: rgba(23, 32, 58, 0.06);
+    --dsa-pill-border: rgba(23, 32, 58, 0.16);
+  }
+}
+
+/* 素材模式：画面来自用户文件，底部信息固定走浅色 + 深色渐变蒙版保证可读。 */
+.dsa-root[data-mode="media"] {
+  background: #05070d;
+  --dsa-text: rgba(255, 255, 255, 0.94);
+  --dsa-text-dim: rgba(255, 255, 255, 0.66);
+  --dsa-track: rgba(255, 255, 255, 0.2);
+  --dsa-pill-bg: rgba(255, 255, 255, 0.1);
+  --dsa-pill-border: rgba(255, 255, 255, 0.22);
+}
+
+/* ── 素材层（video / image），盖在背景上、压在 HUD 之下 ── */
+.dsa-media {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+
+.dsa-root[data-mode="media"] .dsa-media {
+  display: block;
+}
+
+.dsa-root[data-mode="media"][data-media="gone"] {
+  --dsa-bg0: #0a0e18;
+  --dsa-bg1: #04060d;
+}
+
+.dsa-root[data-mode="media"][data-media="gone"] .dsa-media {
+  display: none;
+}
+
+.dsa-media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.28) 0%, rgba(0, 0, 0, 0) 34%, rgba(0, 0, 0, 0) 58%, rgba(0, 0, 0, 0.55) 100%);
+  pointer-events: none;
+}
+
+.dsa-video,
+.dsa-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* 静态图片来一点极缓的呼吸，避免"贴纸感"。 */
+.dsa-root[data-still="1"] .dsa-img {
+  animation: dsa-breathe 18s ease-in-out infinite alternate;
+}
+
+@keyframes dsa-breathe {
+  from { transform: scale(1); }
+  to { transform: scale(1.07); }
+}
+
+/* ── 中心场景（内置动画；素材挂掉时也是这里的兜底画面）── */
+.dsa-scene {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: dsa-scene-in 0.5s ease both;
+}
+
+.dsa-root[data-mode="media"][data-media="ok"] .dsa-scene {
+  visibility: hidden;
+}
+
+@keyframes dsa-scene-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dsa-emblem {
+  position: relative;
+  width: 112px;
+  height: 112px;
+}
+
+.dsa-ring {
+  position: absolute;
+  border-radius: 50%;
+}
+
+.dsa-ring.r1 {
+  inset: 0;
+  border: 3px solid transparent;
+  border-top-color: var(--dsa-accent);
+  border-right-color: var(--dsa-accent-2);
+  animation: dsa-spin 1.15s linear infinite;
+}
+
+.dsa-ring.r2 {
+  inset: 15px;
+  border: 3px solid transparent;
+  border-bottom-color: var(--dsa-accent-2);
+  border-left-color: var(--dsa-accent);
+  animation: dsa-spin-rev 1.7s linear infinite;
+}
+
+.dsa-core {
+  position: absolute;
+  inset: 34px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, var(--dsa-accent-2), var(--dsa-accent) 62%, transparent 74%);
+  animation: dsa-pulse 2.1s ease-in-out infinite;
+}
+
+@keyframes dsa-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes dsa-spin-rev {
+  to { transform: rotate(-360deg); }
+}
+
+@keyframes dsa-pulse {
+  0%, 100% { transform: scale(0.9); opacity: 0.82; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+.dsa-title {
+  margin-top: 30px;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--dsa-text);
+  text-align: center;
+}
+
+/* ── HUD：进度条 + 状态行 + 跳过胶囊（素材模式下也显示）── */
+.dsa-hud {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(340px, calc(100vw - 48px));
+  pointer-events: none;
+}
+
+.dsa-bar {
+  position: relative;
+  width: 100%;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--dsa-track);
+  overflow: hidden;
+}
+
+.dsa-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--dsa-prog, 4%);
+  min-width: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--dsa-accent), var(--dsa-accent-2));
+  transition: width 0.35s ease;
+}
+
+/* 拿不到内核真实进度时改流光。 */
+.dsa-bar[data-indeterminate="1"] .dsa-fill {
+  width: 38%;
+  animation: dsa-slide 1.5s ease-in-out infinite;
+}
+
+@keyframes dsa-slide {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(300%); }
+}
+
+.dsa-status {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--dsa-text-dim);
+  text-align: center;
+}
+
+.dsa-skip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--dsa-pill-bg);
+  border: 1px solid var(--dsa-pill-border);
+  font-size: 12px;
+  color: var(--dsa-text-dim);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.dsa-skip-glyph {
+  font-size: 9px;
+  transform: translateX(1px);
+}
+
+/* 素材模式下隐藏标题场景后，跳过胶囊就是唯一提示——保持常驻。 */
+.dsa-root[data-state="leaving"] .dsa-hud,
+.dsa-root[data-state="leaving"] .dsa-sound {
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+/* ── 声音开关：独立命中区，点它只开声音、不跳过（默认隐藏）── */
+.dsa-sound {
+  position: absolute;
+  left: 22px;
+  bottom: 22px;
+  z-index: 3;
+  display: none;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: var(--dsa-pill-bg);
+  border: 1px solid var(--dsa-pill-border);
+  font-size: 12px;
+  color: var(--dsa-text-dim);
+  cursor: pointer;
+}
+
+.dsa-sound[data-visible="1"] {
+  display: inline-flex;
+}
+
+/* ── 无障碍：尊重系统"减少动态效果" ── */
+@media (prefers-reduced-motion: reduce) {
+  .dsa-ring.r1,
+  .dsa-ring.r2,
+  .dsa-core,
+  .dsa-bar[data-indeterminate="1"] .dsa-fill,
+  .dsa-root[data-still="1"] .dsa-img {
+    animation: none;
+  }
+
+  .dsa-ring.r1 {
+    border-top-color: var(--dsa-accent);
+    border-right-color: transparent;
+  }
+
+  .dsa-ring.r2 {
+    border-bottom-color: var(--dsa-accent-2);
+    border-left-color: transparent;
+  }
+
+  .dsa-core {
+    opacity: 0.9;
+    transform: none;
+  }
+}

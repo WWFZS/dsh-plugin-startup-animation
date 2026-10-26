@@ -1,0 +1,1644 @@
+/**
+ * startup-animation —— 宿主半边。
+ *
+ * 两件事，仅此而已：
+ *   ① 给 `webserver/index-inject` 贡献三行结构化注入（global 配置 + 样式 + 运行时脚本），
+ *      它们在页面自己的启动脚本之前/之间挂上**全屏开机动画覆盖层**；
+ *   ② 用带 Range/ETag 的路由把用户指定的动画素材提供给浏览器。
+ *
+ * 设计约束（来自 dsh-video-skin 踩过的坑，逐条遵守）：
+ *   - `export const inject = []`，且不 import 任何 DSH/第三方包（只用 node: 内建）：
+ *     对象级 inject 会把 apply 推迟到服务就绪之后，而桌面壳的注入表在宿主启动时
+ *     收集一次、没有刷新路径 —— 订阅晚于那次收集，注入行就永远进不了表。
+ *     模块求值期的任何 import 失败也等于插件全灭，node: 内建没有这条路径。
+ *   - 注入行只推 `kind:'global' | 'style' | 'script'`，绝不推 `kind:'script-src'`：
+ *     后者在桌面壳上失败会把 `__DSH_BOOT_READY__` 打掉，整个应用起不来。
+ *   - style 行推在 script 行之前（渲染器按 placement 分组，但页面侧解释器按数组顺序）。
+ *   - 任何一步（读配置、读素材、读运行时文件）出错都只 warn 并跳过，绝不向上抛：
+ *     插件出问题时页面回落到内核原生启动页，动画缺席而已。
+ *   - 素材路径做逃逸防护（包内相对路径不许 `../` 跳出包根），配置来自文件也不读包外。
+ */
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+/** Cordis 诊断用的插件名。 */
+export const name = 'startup-animation'
+
+/** 没有必需服务：`webServer` 用 `ctx.inject` 迟到接入，不阻塞 apply。 */
+export const inject = []
+
+/** 与 package.json 的 version 保持一致。 */
+export const VERSION = '1.7.1'
+
+/** 素材路由（页面侧用根相对路径引用，与参考实现一致，桌面壳同样可达）。 */
+export const ASSET_ROUTE = '/dsh-startup-animation/asset'
+
+/** 管理路由：GET 状态 / POST 上传或开关 / DELETE 恢复默认。 */
+export const MANAGE_ROUTE = '/dsh-startup-animation/manage'
+
+/** 上传上限 128 MiB。 */
+export const MEDIA_LIMIT_BYTES = 128 * 1024 * 1024
+
+/** 上传素材的落盘目录（$DSH_HOME 下，固定，不接受客户端路径）。 */
+export const MEDIA_DIR_NAME = 'startup-animation-media'
+
+/** 内置素材库目录名（包内，随插件分发，见 builtin/README 一节的分类结构）。 */
+export const BUILTIN_DIR_NAME = 'builtin'
+
+/** 注入到页面的配置全局名。 */
+export const BOOT_GLOBAL = '__DSA_BOOT__'
+
+/**
+ * 所有可调项的默认值。默认状态"装上就开箱即用"：
+ * 不指定素材也有一个原创的 CSS 动画。
+ */
+export const DEFAULT_CONFIG = Object.freeze({
+  /** 是否显示开机动画。false = 运行时不挂载（原版标配启动页）；注入行本身仍然常驻。 */
+  enabled: true,
+  /** 动画素材：'' = 原版标配（不显示动画）；绝对路径或包内相对路径 = 自己的文件。 */
+  file: '',
+  /** 展示时长（秒）：MP4 与壁纸素材共用的主配置，用户可调 3–15。 */
+  durationSec: 5,
+  /** 启动画面上的大标题；'' = 运行时用内置文案。 */
+  title: 'DeepSeek Harness',
+  /** 视频素材是否尝试带声音播放（普通浏览器被拦会自动退回静音）。 */
+  sound: false,
+  /** 音量 0..1。 */
+  volume: 1,
+  /** 开机音频总开关：开 = 动画期间播放所选音频，并强制视频静音（要听视频声就关掉它）；跳过动画时音频同步停止。 */
+  audioEnabled: false,
+  /** 开机音频素材：'' = 不播；绝对路径或包内相对路径（builtin/音频/…）= 自己的文件。 */
+  audioFile: '',
+  /** 音频音量 0..1。 */
+  audioVolume: 1,
+  /** 交接淡出时长（固定值，不是"剩余时间"）。 */
+  fadeMs: 600,
+  /** 点击/按键跳过时的淡出时长——要短，用户已经决定不等了。 */
+  skipFadeMs: 240,
+  /** 动画的最短展示时间，防止一闪而过。 */
+  minMs: 900,
+  /** 内核迟迟不就绪的上界：到点先转成"启动较慢"（并乐观视为就绪）。 */
+  holdMs: 20000,
+  /** holdMs 之后的宽限，到点才真的让开，免得把动画拦腰截断。 */
+  holdGraceMs: 4000,
+  /** 视频开始播但一帧都出不来，多久判定素材坏了。 */
+  noFrameMs: 10000,
+  /** 时长未知（duration=Infinity）时的唯一上界。 */
+  endlessMs: 20000,
+  /** 是否显示真实启动进度条（内核暴露进度弧时用真实值，否则流光）。 */
+  progress: true,
+  /** 状态行文字；'' = 运行时按浏览器语言选择中/英。 */
+  hint: '',
+  /** "点击画面跳过"胶囊文案；'' = 运行时按语言选择。 */
+  skipLabel: '',
+  /** 声音被浏览器拦下时开关的文案；'' = 运行时按语言选择。 */
+  soundLabel: '',
+})
+
+/** 素材扩展名 → 运行时呈现方式。不支持的扩展名只让该素材降级，不影响动画本身。 */
+const ASSET_KINDS = Object.freeze({
+  '.mp4': 'video',
+  '.m4v': 'video',
+  '.webm': 'video',
+  '.ogv': 'video',
+  '.ogg': 'video',
+  '.gif': 'image',
+  '.apng': 'image',
+  '.webp': 'image',
+  '.png': 'still',
+  '.jpg': 'still',
+  '.jpeg': 'still',
+  // 音频（开机音频域专用；kind='audio' 不进 boot.file 的视频/图片管线）。
+  '.mp3': 'audio',
+  '.wav': 'audio',
+  '.m4a': 'audio',
+  '.aac': 'audio',
+  '.flac': 'audio',
+  '.opus': 'audio',
+})
+
+/**
+ * 取一个安全的错误描述。
+ * @param {unknown} error 任意抛出的值。
+ * @returns {string} 一行文本。
+ */
+function describe(error) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * DSH_HOME 的位置。宿主进程通常已经带着 `DSH_HOME`，没有时退回 `~/.dsh`。
+ * @param {NodeJS.ProcessEnv} [env] 环境变量表。
+ * @param {() => string} [homedir] home 目录提供者。
+ * @returns {string | undefined} DSH_HOME 的绝对路径。
+ */
+export function resolveDshHome(env = process.env, homedir) {
+  const fromEnv = env && typeof env.DSH_HOME === 'string' && env.DSH_HOME !== '' ? env.DSH_HOME : undefined
+  if (fromEnv !== undefined) return path.resolve(fromEnv)
+  try {
+    const home = typeof homedir === 'function' ? homedir() : undefined
+    return home === undefined ? undefined : path.join(home, '.dsh')
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 读一个 JSON 文件；不存在/坏了都返回 `undefined` 而不是抛。
+ * @param {string} file 绝对路径。
+ * @returns {Record<string, unknown> | undefined} 解析出的对象。
+ */
+export function readJsonFile(file) {
+  try {
+    const text = fs.readFileSync(file, 'utf8')
+    const parsed = JSON.parse(text)
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 数字夹取：NaN/类型不对回默认值，±Infinity 夹到边界。
+ * @param {unknown} value 原始值。 @param {number} fallback 默认值。
+ * @param {number} min 下界。 @param {number} max 上界。
+ * @returns {number} 夹好的数字。
+ */
+function clampNumber(value, fallback, min, max) {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (Number.isNaN(n)) return fallback
+  if (n < min) return min
+  if (n > max) return max
+  return n
+}
+
+/**
+ * 非空字符串取值；类型不对/空串回默认值。
+ * @param {unknown} value 原始值。 @param {string} fallback 默认值。
+ * @returns {string} 字符串。
+ */
+function pickString(value, fallback) {
+  return typeof value === 'string' && value !== '' ? value : fallback
+}
+
+/**
+ * 展示时长夹取：3–15 秒（含），四舍五入取整；非法值回退默认 5。
+ * @param {unknown} value 原始值。 @param {number} [fallback] 默认值。
+ * @returns {number} 3..15 的整数秒。
+ */
+export function clampDurationSec(value, fallback = 5) {
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return fallback
+  const rounded = Math.round(n)
+  if (rounded < 3) return 3
+  if (rounded > 15) return 15
+  return rounded
+}
+
+/**
+ * 把包内相对路径解析到绝对路径，并挡住 `../` 逃逸。
+ * @param {string} packageRoot 包根。 @param {string} relative 包内相对路径。
+ * @returns {string} 绝对路径。
+ */
+function resolveInsidePackage(packageRoot, relative) {
+  const base = path.resolve(packageRoot)
+  const abs = path.resolve(base, relative)
+  const root = base.endsWith(path.sep) ? base : base + path.sep
+  if (abs !== base && !abs.startsWith(root)) {
+    throw new Error(`path escapes the package: ${relative}`)
+  }
+  return abs
+}
+
+/**
+ * 内置视频的"网页版"变体后缀：`多重影像.mp4` 分发的是 `多重影像.web.mp4`
+ * （1080p / faststart / 去音轨，构建期由 tools/optimize-builtin.mjs 生成）。
+ *
+ * 为什么带后缀而不是覆盖原文件：仓库里保留 4K 原片作为源素材，用户拿到的包只有
+ * 压缩版。查找时**先看变体**，没有就回落原文件 —— 变体缺失不影响功能。
+ */
+export const WEB_VARIANT_SUFFIX = '.web.mp4'
+
+/**
+ * 给内置视频找实际分发文件：优先 `*.web.mp4`，否则原文件。
+ * @param {string} filePath 声明的素材路径（绝对）。 @param {string} packageRoot 包根。
+ * @returns {string} 实际要发送的文件绝对路径。
+ */
+export function preferredAssetPath(filePath, packageRoot) {
+  if (path.extname(filePath).toLowerCase() !== '.mp4') return filePath
+  const candidate = `${filePath.slice(0, -4)}${WEB_VARIANT_SUFFIX}`
+  try {
+    const stat = fs.statSync(candidate)
+    if (stat.isFile() && stat.size > 0) return candidate
+  } catch {
+    /* 没有变体就用原文件 */
+  }
+  return filePath
+}
+
+/**
+ * 解析素材路径：绝对路径 = 用户自己的文件；相对路径 = 包内并做逃逸防护。
+ * 存在性与"非空普通文件"在这里一起验证。
+ * @param {string} file '' 表示不用素材。 @param {string} packageRoot 包根。
+ * @returns {string | undefined} 绝对路径；'' 输入返回 undefined。
+ */
+function resolveAssetFile(file, packageRoot) {
+  if (file === '') return undefined
+  const declared = path.isAbsolute(file) ? path.normalize(file) : resolveInsidePackage(packageRoot, file)
+  // 内置视频可能只有 .web.mp4 变体（发布包里不含 4K 原片）：先按变体找。
+  const candidates = path.isAbsolute(file) ? [declared] : [preferredAssetPath(declared, packageRoot), declared]
+  for (const abs of candidates) {
+    let stat
+    try {
+      stat = fs.statSync(abs)
+    } catch {
+      continue
+    }
+    if (!stat.isFile() || stat.size <= 0) continue
+    return abs
+  }
+  throw new Error(`not a non-empty file (${file})`)
+}
+
+/**
+ * 配置文件合并（包内一份、DSH_HOME 一份，后者优先），只取 `boot` 段。
+ * @param {{ packageRoot: string, homeDir?: string }} options 位置。
+ * @returns {{ raw: Record<string, unknown>, sources: string[] }} 合并后的 boot 段与命中文件。
+ */
+export function loadRawBoot(options) {
+  const sources = []
+  /** @type {Record<string, unknown>} */
+  let raw = {}
+  const candidates = [path.join(options.packageRoot, 'startup-animation.config.json')]
+  if (typeof options.homeDir === 'string' && options.homeDir !== '') {
+    candidates.push(path.join(options.homeDir, 'startup-animation.json'))
+  }
+  for (const file of candidates) {
+    const parsed = readJsonFile(file)
+    if (parsed === undefined) continue
+    sources.push(file)
+    const boot = parsed.boot
+    if (typeof boot === 'object' && boot !== null && !Array.isArray(boot)) {
+      raw = { ...raw, ...boot }
+    }
+  }
+  return { raw, sources }
+}
+
+/**
+ * 端到端：读配置文件 → 合并默认值 → 夹取 → 解析素材。
+ * 每次索引渲染都会调用（很便宜），所以改完 JSON 刷新/重启即可生效。
+ *
+ * @param {{ packageRoot: string, homeDir?: string, route: string }} options 位置。
+ * @returns {{ client: Record<string, unknown>, assetPath: string | undefined, warnings: string[] }} 运行时配置。
+ */
+export function loadConfig(options) {
+  const warnings = []
+  const { raw } = loadRawBoot(options)
+  const d = DEFAULT_CONFIG
+
+  /** @type {string | undefined} */
+  let assetPath
+  /** @type {string} */
+  let mode = 'css'
+  /** @type {boolean} */
+  let still = false
+  const file = pickString(raw.file, d.file)
+  if (file !== '' && raw.enabled !== false) {
+    try {
+      assetPath = resolveAssetFile(file, options.packageRoot)
+      if (assetPath !== undefined) {
+        const kind = ASSET_KINDS[path.extname(assetPath).toLowerCase()]
+        if (kind === undefined || kind === 'audio') {
+          warnings.push(`boot.file: unsupported type "${path.extname(assetPath) || '?'}" — 启动画面支持 mp4/webm/ogv/ogg 视频与 gif/apng/webp/png/jpg 图片（音频请在"开机音频"里选择），已回落到内置动画`)
+          assetPath = undefined
+        } else {
+          // 运行时只认 video/image 两种素材模式；'still'（png/jpg）是 image 的静帧子类，
+          // 走 image 分支（叠加 cfg.still 控制缓慢呼吸），否则图片素材根本不会被挂出来。
+          mode = kind === 'still' ? 'image' : kind
+          still = kind === 'still'
+        }
+      }
+    } catch (error) {
+      warnings.push(`boot.file: ${describe(error)} — 已回落到内置动画`)
+      assetPath = undefined
+      mode = 'css'
+      still = false
+    }
+  }
+
+  // ── 开机音频域：开关 + 素材（只收音频类型；经 ?path= 通道取流）──
+  const audioEnabled = raw.audioEnabled === true
+  /** @type {string} */
+  let audioSrc = ''
+  /** @type {string} */
+  let audioName = ''
+  /** @type {boolean} */
+  let audioBuiltin = false
+  if (audioEnabled) {
+    const af = pickString(raw.audioFile, d.audioFile)
+    if (af !== '') {
+      try {
+        const abs = resolveAssetFile(af, options.packageRoot)
+        if (ASSET_KINDS[path.extname(abs).toLowerCase()] === 'audio') {
+          audioSrc = `${options.route}?path=${encodeURIComponent(af)}`
+          audioName = path.basename(abs)
+          audioBuiltin = af.replace(/\\/g, '/').startsWith(`${BUILTIN_DIR_NAME}/`)
+        } else {
+          warnings.push(`boot.audioFile: "${path.extname(abs) || '?'}" 不是音频（支持 mp3/wav/m4a/aac/flac/opus），已忽略`)
+        }
+      } catch (error) {
+        warnings.push(`boot.audioFile: ${describe(error)} — 已忽略`)
+      }
+    }
+  }
+
+  // 共用主配置：MP4 与壁纸素材的最短展示时长 = durationSec（3–15 秒，点击跳过不受它限制）。
+  // 旧的分类键（videoSec/imageSec，未发布过的中间版本）作为回退读取；
+  // 内置 CSS 动画维持短 minMs（够看出动画即可，防止一闪而过）。
+  const durationSec = clampDurationSec(
+    raw.durationSec !== undefined
+      ? raw.durationSec
+      : raw.videoSec !== undefined
+        ? raw.videoSec
+        : raw.imageSec,
+    d.durationSec,
+  )
+  const minMs =
+    mode === 'video' || mode === 'image'
+      ? durationSec * 1000
+      : clampNumber(raw.minMs, d.minMs, 0, 10000)
+
+  const client = {
+    version: VERSION,
+    enabled: raw.enabled !== false,
+    mode,
+    still,
+    /** 素材路由（mode 非 css 时页面请求它）；无素材为 ''。 */
+    src: assetPath === undefined ? '' : options.route,
+    title: pickString(raw.title, d.title),
+    sound: raw.sound === true,
+    volume: clampNumber(raw.volume, d.volume, 0, 1),
+    audioEnabled,
+    audioSrc,
+    audioVolume: clampNumber(raw.audioVolume, d.audioVolume, 0, 1),
+    fadeMs: clampNumber(raw.fadeMs, d.fadeMs, 100, 6000),
+    skipFadeMs: clampNumber(raw.skipFadeMs, d.skipFadeMs, 60, 2000),
+    minMs,
+    durationSec,
+    holdMs: clampNumber(raw.holdMs, d.holdMs, 2000, 120000),
+    holdGraceMs: clampNumber(raw.holdGraceMs, d.holdGraceMs, 0, 30000),
+    noFrameMs: clampNumber(raw.noFrameMs, d.noFrameMs, 1500, 30000),
+    endlessMs: clampNumber(raw.endlessMs, d.endlessMs, 3000, 60000),
+    progress: raw.progress !== false,
+    hint: pickString(raw.hint, ''),
+    skipLabel: pickString(raw.skipLabel, ''),
+    soundLabel: pickString(raw.soundLabel, ''),
+  }
+
+  return { client, assetPath, warnings }
+}
+
+/**
+ * 造一个"按 mtime+size 缓存"的运行时文件读取器。
+ *
+ * 缓存的意义不只是省 IO：桌面壳只在宿主启动时收集一次注入表，所以运行时文本是否
+ * 新鲜由那次收集决定；每次收集都会 stat 一次，改了文件重启即可生效。
+ *
+ * @param {string} packageRoot 包根目录。
+ * @returns {(file: string) => string} 读取器（读不到时抛出，由调用方降级）。
+ */
+function makeRuntimeReader(packageRoot) {
+  const cache = new Map()
+  return (file) => {
+    const target = path.join(packageRoot, 'runtime', file)
+    const stat = fs.statSync(target)
+    const hit = cache.get(file)
+    if (hit !== undefined && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.text
+    const text = fs.readFileSync(target, 'utf8')
+    cache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, text })
+    return text
+  }
+}
+
+/** 让出事件循环 await 用（删除重试必须让发送流的 fd 异步关闭）。 */
+const sleepMs = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms)
+})
+
+/** 正在发送中的素材流：filePath → Set<stream>。删除前先释放，避免 Windows 句柄占用 → EPERM。 */
+const ACTIVE_STREAMS = new Map()
+
+/**
+ * 登记一条发送流，并在流关闭时自动注销。
+ * @param {string} filePath 素材路径。 @param {import('node:fs').ReadStream} stream 读取流。
+ */
+export function trackStream(filePath, stream) {
+  let set = ACTIVE_STREAMS.get(filePath)
+  if (set === undefined) {
+    set = new Set()
+    ACTIVE_STREAMS.set(filePath, set)
+  }
+  set.add(stream)
+  stream.once('close', () => {
+    set.delete(stream)
+    if (set.size === 0) ACTIVE_STREAMS.delete(filePath)
+  })
+}
+
+/**
+ * 释放某个文件的全部发送流（真删素材前调用）。
+ * @param {string} filePath 素材路径。 @returns {number} 被销毁的流数量。
+ */
+export function releaseStreams(filePath) {
+  const set = ACTIVE_STREAMS.get(filePath)
+  if (set === undefined) return 0
+  const streams = [...set]
+  ACTIVE_STREAMS.delete(filePath)
+  for (const stream of streams) {
+    try {
+      stream.destroy()
+    } catch {
+      /* 已关闭 */
+    }
+  }
+  return streams.length
+}
+
+/**
+ * 发送流打开/读取失败的统一处理：响应头还没出去 → 回 404 文本（客户端 onerror
+ * 优雅隐藏预览，而不是"空响应断连"）；头已出去 → 只能断连。
+ * @param {import('node:http').ServerResponse} res 响应对象。
+ */
+function failStream(res) {
+  if (res.headersSent) {
+    res.destroy()
+    return
+  }
+  try {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('startup animation asset unreadable')
+  } catch {
+    res.destroy()
+  }
+}
+
+/**
+ * 把一个文件按 HTTP 语义发给浏览器：ETag + Range + HEAD。
+ *
+ * 缓存头分两种：
+ *   - **整片**响应用 `no-cache` + `ETag`：要回源校验一次，没换素材就是 304，秒回；
+ *   - **切片（206）**响应用 `no-store`：绝不允许播放器把部分响应当完整资源缓存，
+ *     否则下次会拿到截断副本（表现为黑屏，硬刷新却正常）。
+ *
+ * @param {import('node:http').IncomingMessage} req 入站请求。
+ * @param {import('node:http').ServerResponse} res 响应对象。
+ * @param {string} filePath 素材的绝对路径。
+ */
+export function serveAsset(req, res, filePath) {
+  let stat
+  try {
+    stat = fs.statSync(filePath)
+  } catch {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end('startup animation asset not found')
+    return
+  }
+
+  const size = stat.size
+  const etag = `"${size.toString(16)}-${Math.round(stat.mtimeMs).toString(16)}"`
+  const range = parseRange(req.headers.range, size)
+
+  if (range === 'unsatisfiable') {
+    res.writeHead(416, { 'Content-Range': `bytes */${size}`, 'Accept-Ranges': 'bytes' })
+    res.end()
+    return
+  }
+
+  /** @type {Record<string, string | number>} */
+  const headers = {
+    'Content-Type': contentTypeFor(filePath),
+    'Accept-Ranges': 'bytes',
+    ETag: etag,
+  }
+
+  if (range !== null) {
+    headers['Cache-Control'] = 'no-store'
+    headers['Content-Length'] = range.end - range.start + 1
+    headers['Content-Range'] = `bytes ${range.start}-${range.end}/${size}`
+    res.writeHead(206, headers)
+    if (req.method === 'HEAD') {
+      res.end()
+      return
+    }
+    const stream = fs.createReadStream(filePath, { start: range.start, end: range.end })
+    stream.on('error', () => failStream(res))
+    // 客户端中途断开（视频 seek 取消/页面卸载）→ 立刻销毁源流，否则句柄泄漏
+    // 会让该文件在 Windows 上永远删不掉（EPERM）。
+    res.on('close', () => {
+      if (!res.writableEnded) stream.destroy()
+    })
+    trackStream(filePath, stream)
+    stream.pipe(res)
+    return
+  }
+
+  headers['Cache-Control'] = 'no-cache'
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, headers)
+    res.end()
+    return
+  }
+  headers['Content-Length'] = size
+  res.writeHead(200, headers)
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  const stream = fs.createReadStream(filePath)
+  stream.on('error', () => failStream(res))
+  res.on('close', () => {
+    if (!res.writableEnded) stream.destroy()
+  })
+  trackStream(filePath, stream)
+  stream.pipe(res)
+}
+
+/**
+ * 解析单段 Range 头。
+ * @param {unknown} value `Range` 请求头。
+ * @param {number} size 文件大小。
+ * @returns {null | { start: number, end: number } | 'unsatisfiable'} null = 没有/忽略 Range。
+ */
+export function parseRange(value, size) {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!/^bytes=/i.test(trimmed)) return null
+  const spec = trimmed.slice(6).trim()
+  if (spec === '' || spec.includes(',')) return null
+  const match = /^(\d*)-(\d*)$/.exec(spec)
+  if (match === null) return null
+  const [, rawStart, rawEnd] = match
+  if (rawStart === '' && rawEnd === '') return null
+  if (rawStart === '') {
+    const suffix = Number(rawEnd)
+    if (!Number.isFinite(suffix) || suffix <= 0) return 'unsatisfiable'
+    const start = Math.max(0, size - suffix)
+    return { start, end: size - 1 }
+  }
+  const start = Number(rawStart)
+  const end = rawEnd === '' ? size - 1 : Number(rawEnd)
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null
+  if (start >= size || start > end) return 'unsatisfiable'
+  return { start, end: Math.min(end, size - 1) }
+}
+
+/**
+ * 素材扩展名 → Content-Type。
+ * @param {string} filePath 文件路径。
+ * @returns {string} MIME。
+ */
+export function contentTypeFor(filePath) {
+  switch (path.extname(filePath).toLowerCase()) {
+    case '.mp4':
+    case '.m4v':
+      return 'video/mp4'
+    case '.webm':
+      return 'video/webm'
+    case '.ogv':
+    case '.ogg':
+      return 'video/ogg'
+    case '.gif':
+      return 'image/gif'
+    case '.apng':
+      return 'image/apng'
+    case '.webp':
+      return 'image/webp'
+    case '.png':
+      return 'image/png'
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg'
+    case '.mp3':
+      return 'audio/mpeg'
+    case '.wav':
+      return 'audio/wav'
+    case '.m4a':
+      return 'audio/mp4'
+    case '.aac':
+      return 'audio/aac'
+    case '.flac':
+      return 'audio/flac'
+    case '.opus':
+      return 'audio/opus'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
+/** 卡片/小预览用的缩略图目录名（包内每个素材分类下都有一份）。 */
+export const THUMB_DIR_NAME = '.thumbs'
+
+/** 图片类素材才做缩略图（视频走浏览器自己的封面帧）。 */
+const THUMBABLE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.apng'])
+
+/**
+ * 找一张图片素材的缩略图（构建期由 tools/make-thumbs.mjs 生成，随包分发）。
+ *
+ * 存在性和命名规则都在这一个地方：`<同名>.<内容哈希前8位>.jpg`。找不到就返回
+ * `undefined`，调用方回落到原图 —— 缩略图是性能优化，绝不能成为"素材显示不出来"的原因。
+ *
+ * @param {string} filePath 素材的绝对路径。
+ * @returns {string | undefined} 缩略图绝对路径。
+ */
+export function thumbnailFor(filePath) {
+  if (!THUMBABLE.has(path.extname(filePath).toLowerCase())) return undefined
+  const dir = path.join(path.dirname(filePath), THUMB_DIR_NAME)
+  const stem = path.parse(filePath).name
+  let entries
+  try {
+    entries = fs.readdirSync(dir)
+  } catch {
+    return undefined
+  }
+  const prefix = `${stem}.`
+  for (const entry of entries) {
+    if (!entry.startsWith(prefix) || !entry.endsWith('.jpg')) continue
+    const abs = path.join(dir, entry)
+    try {
+      if (fs.statSync(abs).isFile()) return abs
+    } catch {
+      continue
+    }
+  }
+  return undefined
+}
+
+/**
+ * 清掉素材目录里遗留的上传临时文件（`.upload-*.part`）。
+ *
+ * 崩溃/断电/进程被杀都会留下半截临时文件；它们不参与列表，只会一直占着几十 MB。
+ * 启动时扫一次，超过 1 天的才删（避免误删另一个仍在进行的慢速上传）。
+ *
+ * @param {string | undefined} homeDir DSH_HOME。
+ * @returns {number} 删除的文件数。
+ */
+export function sweepUploadTempFiles(homeDir) {
+  if (typeof homeDir !== 'string' || homeDir === '') return 0
+  const dir = path.join(homeDir, MEDIA_DIR_NAME)
+  let entries
+  try {
+    entries = fs.readdirSync(dir)
+  } catch {
+    return 0
+  }
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000
+  let removed = 0
+  for (const name of entries) {
+    if (!name.startsWith('.upload-') || !name.endsWith('.part')) continue
+    const abs = path.join(dir, name)
+    try {
+      if (fs.statSync(abs).mtimeMs > cutoff) continue
+      fs.rmSync(abs, { force: true })
+      removed += 1
+    } catch {
+      /* 尽力而为 */
+    }
+  }
+  return removed
+}
+
+/**
+ * 把 `boot` 段的改动合并写进 `$DSH_HOME/startup-animation.json`（其余键原样保留）。
+ * `patch` 里的 `undefined` 与 `removes` 中的键都表示删除（回到默认值）。
+ *
+ * 为什么走文件而不是浏览器存储：桌面壳页面的存储可用性取决于自定义协议是否被注册成
+ * privileged，不确定的事不押注；文件在哪个形态下都一样，而且用户能直接打开看/改。
+ *
+ * @param {string | undefined} homeDir DSH_HOME。
+ * @param {Record<string, unknown>} patch 要写入的 boot 键。
+ * @param {string[]} [removes] 要删除的 boot 键。
+ * @returns {string} 写入的文件绝对路径。
+ */
+export function writeHomeBootPatch(homeDir, patch, removes = []) {
+  if (typeof homeDir !== 'string' || homeDir === '') throw new Error('DSH_HOME is unavailable')
+  const file = path.join(homeDir, 'startup-animation.json')
+  const current = readJsonFile(file) ?? {}
+  const existing = typeof current.boot === 'object' && current.boot !== null && !Array.isArray(current.boot) ? current.boot : {}
+  /** @type {Record<string, unknown>} */
+  const boot = { ...existing }
+  for (const key of removes) delete boot[key]
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) delete boot[key]
+    else boot[key] = value
+  }
+  const next = { ...current }
+  if (Object.keys(boot).length === 0) delete next.boot
+  else next.boot = boot
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  // 原子写：先写临时文件再 rename。管理接口是并发可达的（多个页面同时开着设置页），
+  // 直接 writeFileSync 有截断窗口 —— 崩在中间会让配置文件变成半截 JSON，
+  // 下次 loadConfig 读不出任何配置（用户视角是"动画突然全没了"）。
+  const temp = `${file}.${process.pid}.${Date.now().toString(36)}.tmp`
+  fs.writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
+  try {
+    fs.renameSync(temp, file)
+  } catch (error) {
+    fs.rmSync(temp, { force: true })
+    throw error
+  }
+  return file
+}
+
+/**
+ * 从文件名挑扩展名；不在白名单里直接拒绝（与其让用户面对黑屏，不如当场说清楚）。
+ * @param {string} filename 客户端文件名。
+ * @returns {string | undefined} 带点的扩展名。
+ */
+export function pickMediaExtension(filename) {
+  const ext = path.extname(String(filename ?? '')).toLowerCase()
+  return Object.hasOwn(ASSET_KINDS, ext) ? ext : undefined
+}
+
+/**
+ * 上传落盘文件名净化：保留用户原始文件名（含中文），只去掉路径与非法字符。
+ * 去掉任何目录部分、控制符与 Windows 非法字符（`<>:"|?*`），限长 110；
+ * 结果为空（如 `..`）时返回 ''，由调用方兜底命名。
+ *
+ * @param {string} filename 客户端上传的原始文件名。
+ * @returns {string} 净化后的文件名（不含目录）。
+ */
+export function sanitizeUploadName(filename) {
+  const base = path.basename(String(filename ?? '').replace(/\\/g, '/'))
+  let name = base.replace(/[\x00-\x1f\x7f<>:"|?*]/g, '_').trim()
+  name = name.replace(/^\.+/, '')
+  if (name === '' || name === '.' || name === '..') return ''
+  const ext = path.extname(name)
+  if (name.length > 110) name = name.slice(0, Math.max(1, 110 - ext.length)) + ext
+  return name
+}
+
+/**
+ * 在素材目录里为上传挑一个不冲突的目标路径：
+ * 原名 → `name (1).ext` → `name (2).ext` → … → 时间戳兜底。
+ *
+ * @param {string} rootDir 素材目录（已确保存在）。
+ * @param {string} filename 净化后的文件名。
+ * @returns {string} 绝对目标路径。
+ */
+export function uniqueUploadTarget(rootDir, filename) {
+  const ext = path.extname(filename)
+  const stem = filename.slice(0, filename.length - ext.length)
+  for (let i = 0; i < 100; i += 1) {
+    const candidate = i === 0 ? filename : `${stem} (${i})${ext}`
+    const target = path.join(rootDir, candidate)
+    if (!fs.existsSync(target)) return target
+  }
+  return path.join(rootDir, `${stem}-${Date.now().toString(36)}${ext}`)
+}
+
+/**
+ * 列出素材库（内置 + 上传合并）：
+ *   - `builtin/` 下每个子目录是一个内置分类（如 MP4、图片）；tombstone 条目不出现；
+ *   - `$DSH_HOME/startup-animation-media/` 里的用户上传文件**按扩展名自动归类**：
+ *     视频 → MP4 分类，图片 → 图片（壁纸）分类，条目标记 `uploaded: true`。
+ *
+ * "删除内置"只写 tombstone（包内文件保留，宣传仓库完整）；上传素材的删除是真删（见 removeUploadedFile）。
+ *
+ * @param {string} packageRoot 包根。
+ * @param {string[]} [deleted] 已移除（tombstone）的内置相对路径列表。
+ * @param {string} [homeDir] DSH_HOME（提供后才扫描上传目录）。
+ * @returns {Array<{ id: string, files: Array<{ path: string, name: string, size: number, uploaded?: boolean }> }>} 分类列表。
+ */
+export function scanLibrary(packageRoot, deleted = [], homeDir) {
+  const hidden = new Set(deleted)
+  const rootDir = path.join(packageRoot, BUILTIN_DIR_NAME)
+  /** @type {Array<{ id: string, files: Array<{ path: string, name: string, size: number, uploaded?: boolean }> }>} */
+  const categories = []
+  let dirs
+  try {
+    dirs = fs.readdirSync(rootDir, { withFileTypes: true })
+  } catch {
+    dirs = []
+  }
+  const byName = (a, b) => a.name.localeCompare(b.name)
+  for (const dir of dirs) {
+    if (!dir.isDirectory()) continue
+    const catDir = path.join(rootDir, dir.name)
+    let files
+    try {
+      files = fs.readdirSync(catDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    /** @type {Array<{ path: string, name: string, size: number, uploaded?: boolean }>} */
+    const items = []
+    // 内置视频的原片与网页版变体（`*.web.mp4`）在用户眼里是**同一个素材**：
+    // 对外只报原片的名字（配置里写的、tombstone 记的都是它），体积按实际分发的
+    // 文件算。这样开发仓库（两份都在）与发布包（只有变体）看到的是同一份列表，
+    // 用户以前标记移除过的条目也不会因为改名而"复活"。
+    // 直接枚举"逻辑条目"：每个逻辑名对应一个实际分发文件。
+    //   - 有 `X.web.mp4` → 逻辑名 `X.mp4`，分发 `X.web.mp4`（发布包只有这一份）
+    //   - 只有 `X.mp4`   → 逻辑名 `X.mp4`，分发 `X.mp4`（开发期的 4K 母版，URL 仍可访问）
+    /** @type {Map<string, string>} 逻辑名 → 分发文件名 */
+    const videoEntries = new Map()
+    for (const file of files) {
+      if (!file.isFile()) continue
+      const lower = file.name.toLowerCase()
+      if (lower.endsWith(WEB_VARIANT_SUFFIX)) {
+        videoEntries.set(`${file.name.slice(0, -WEB_VARIANT_SUFFIX.length)}.mp4`, file.name)
+      }
+    }
+    for (const file of files) {
+      if (!file.isFile()) continue
+      const lower = file.name.toLowerCase()
+      if (lower.endsWith(WEB_VARIANT_SUFFIX)) continue
+      if (path.extname(lower) !== '.mp4') continue
+      if (!videoEntries.has(file.name)) videoEntries.set(file.name, file.name)
+    }
+
+    // 视频：每个逻辑条目一条（不会把母版和变体各列一次）。
+    for (const [logicalName, servedName] of videoEntries) {
+      const rel = `${BUILTIN_DIR_NAME}/${dir.name}/${logicalName}`
+      if (hidden.has(rel)) continue
+      let size = 0
+      try {
+        size = fs.statSync(path.join(catDir, servedName)).size
+      } catch {
+        continue
+      }
+      items.push({ path: rel, name: logicalName, size })
+    }
+    // 非视频素材：逐个列。
+    for (const file of files) {
+      if (!file.isFile()) continue
+      if (file.name.toLowerCase().endsWith(WEB_VARIANT_SUFFIX)) continue
+      const ext = path.extname(file.name).toLowerCase()
+      if (!Object.hasOwn(ASSET_KINDS, ext)) continue
+      if (ext === '.mp4') continue
+      const rel = `${BUILTIN_DIR_NAME}/${dir.name}/${file.name}`
+      if (hidden.has(rel)) continue
+      let size = 0
+      try {
+        size = fs.statSync(path.join(catDir, file.name)).size
+      } catch {
+        continue
+      }
+      items.push({ path: rel, name: file.name, size })
+    }
+    items.sort(byName)
+    if (items.length > 0) categories.push({ id: dir.name, files: items })
+  }
+
+  // ── 用户上传的素材：单目录存放，按扩展名自动分入 MP4 / 图片（壁纸）两个分类 ──
+  if (typeof homeDir === 'string' && homeDir !== '') {
+    const uploadDir = path.join(homeDir, MEDIA_DIR_NAME)
+    /** @type {import('node:fs').Dirent[]} */
+    let uploads = []
+    try {
+      uploads = fs.readdirSync(uploadDir, { withFileTypes: true })
+    } catch {
+      uploads = []
+    }
+    for (const file of uploads) {
+      if (!file.isFile() || file.name.startsWith('.')) continue
+      const ext = path.extname(file.name).toLowerCase()
+      const kind = ASSET_KINDS[ext]
+      if (kind === undefined) continue
+      const abs = path.join(uploadDir, file.name)
+      if (hidden.has(abs)) continue
+      let size = 0
+      try {
+        size = fs.statSync(abs).size
+      } catch {
+        continue
+      }
+      if (size <= 0) continue
+      const catId = kind === 'audio' ? '音频' : kind === 'video' ? 'MP4' : '图片'
+      let cat = categories.find((entry) => entry.id === catId)
+      if (cat === undefined) {
+        cat = { id: catId, files: [] }
+        categories.push(cat)
+      }
+      cat.files.push({ path: abs, name: file.name, size, uploaded: true })
+    }
+  }
+
+  for (const cat of categories) cat.files.sort(byName)
+  categories.sort((a, b) => a.id.localeCompare(b.id))
+  return categories
+}
+
+/**
+ * 校验一个"使用内置素材"的请求：路径必须落在包内 `builtin/` 下、
+ * 类型在白名单内、没有被用户移除。不合法直接抛出（信息原样回给客户端）。
+ *
+ * @param {string} packageRoot 包根。
+ * @param {unknown} rel 客户端给的相对路径。
+ * @param {string[]} [deleted] tombstone 列表。
+ * @returns {string} 规范化后的相对路径（正斜杠，可直接写进配置）。
+ * @throws {Error} 校验失败。
+ */
+export function assertBuiltinFile(packageRoot, rel, deleted = []) {
+  if (typeof rel !== 'string' || rel === '') throw new Error('素材路径无效')
+  const normalized = rel.replace(/\\/g, '/')
+  if (!normalized.startsWith(`${BUILTIN_DIR_NAME}/`)) throw new Error('素材路径无效')
+  if (normalized.split('/').includes('..')) throw new Error('素材路径无效')
+  const ext = path.extname(normalized).toLowerCase()
+  if (!Object.hasOwn(ASSET_KINDS, ext)) throw new Error('不支持的素材类型')
+  if (deleted.includes(normalized)) throw new Error('该内置素材已被移除')
+  const abs = resolveInsidePackage(packageRoot, normalized)
+  const root = path.join(packageRoot, BUILTIN_DIR_NAME)
+  if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('素材路径无效')
+  // 视频的原片可能在发布包里不存在（只发 .web.mp4 变体）：按"实际分发文件"存在性判断。
+  const effective = preferredAssetPath(abs, packageRoot)
+  let stat
+  try {
+    stat = fs.statSync(effective)
+  } catch {
+    throw new Error(`内置素材不存在：${normalized}`)
+  }
+  if (!stat.isFile() || stat.size <= 0) throw new Error(`内置素材不存在：${normalized}`)
+  return normalized
+}
+
+/**
+ * 校验一个"上传素材"的引用：必须是落在 `$DSH_HOME/startup-animation-media/` 内的
+ * 绝对路径、类型在白名单内、文件真实存在。不合法直接抛出（信息原样回给客户端）。
+ *
+ * @param {string | undefined} homeDir DSH_HOME。
+ * @param {unknown} value 客户端给的绝对路径。
+ * @returns {string} 规范化后的绝对路径。
+ * @throws {Error} 校验失败。
+ */
+export function assertUploadedFile(homeDir, value) {
+  if (typeof homeDir !== 'string' || homeDir === '') throw new Error('DSH_HOME 不可用')
+  if (typeof value !== 'string' || value === '' || !path.isAbsolute(value)) throw new Error('素材路径无效')
+  const root = path.join(homeDir, MEDIA_DIR_NAME)
+  const abs = path.normalize(value)
+  if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('素材路径无效')
+  const ext = path.extname(abs).toLowerCase()
+  if (!Object.hasOwn(ASSET_KINDS, ext)) throw new Error('不支持的素材类型')
+  let stat
+  try {
+    stat = fs.statSync(abs)
+  } catch {
+    throw new Error(`上传素材不存在：${path.basename(abs)}`)
+  }
+  if (!stat.isFile() || stat.size <= 0) throw new Error(`上传素材不存在：${path.basename(abs)}`)
+  return abs
+}
+
+/**
+ * 删除一个用户上传的素材文件（真删 —— 上传素材是用户自己的数据，不是宣传素材）。
+ * 校验同 {@link assertUploadedFile}，删不存在的文件不报错（幂等）。
+ *
+ * @param {string | undefined} homeDir DSH_HOME。
+ * @param {unknown} value 客户端给的绝对路径。
+ * @returns {string} 被删除文件的规范化绝对路径。
+ */
+export function removeUploadedFile(homeDir, value) {
+  const abs = assertUploadedFile(homeDir, value)
+  fs.rmSync(abs, { force: true })
+  return abs
+}
+
+/**
+ * 当前管理状态（界面上"上传/开关/恢复/素材库"的回显）。
+ * @param {{ packageRoot: string, homeDir?: string, route: string }} options 位置。
+ * @returns {Record<string, unknown>} 状态对象。
+ */
+export function manageStatus(options) {
+  const { client, assetPath, warnings } = loadConfig(options)
+  const { raw } = loadRawBoot(options)
+  const fileRaw = typeof raw.file === 'string' ? raw.file : ''
+  const audioFileRaw = typeof raw.audioFile === 'string' ? raw.audioFile : ''
+  const deleted = Array.isArray(raw.deleted)
+    ? raw.deleted.filter((value) => typeof value === 'string' && value !== '')
+    : []
+  return {
+    ok: true,
+    enabled: client.enabled === true,
+    sound: client.sound === true,
+    mode: client.mode,
+    /** 展示时长（秒，3–15）：MP4 与壁纸共用的主配置。 */
+    durationSec: client.durationSec,
+    custom: assetPath !== undefined,
+    // 界面上显示的名字用"逻辑名"：内置视频分发的是 *.web.mp4 变体，但对用户来说
+    // 素材就叫《多重影像.mp4》——内部变体名不该漏到 UI 上。
+    name:
+      assetPath === undefined
+        ? ''
+        : path.basename(assetPath).replace(new RegExp(`${WEB_VARIANT_SUFFIX.replace('.', '\\.')}$`, 'i'), '.mp4'),
+    /** 配置里原始的素材引用：包内相对路径（内置）或绝对路径（上传）。 */
+    file: fileRaw,
+    builtin: fileRaw.startsWith(`${BUILTIN_DIR_NAME}/`),
+    // ── 开机音频域 ──
+    audioEnabled: client.audioEnabled === true,
+    audioFile: audioFileRaw,
+    audioName: client.audioSrc === '' ? '' : path.basename(audioFileRaw.replace(/\\/g, '/')),
+    audioBuiltin: audioFileRaw.replace(/\\/g, '/').startsWith(`${BUILTIN_DIR_NAME}/`),
+    audioVolume: client.audioVolume,
+    /** 用户从列表移除的内置素材（tombstone）。 */
+    deleted,
+    /** 素材库：内置 + 上传合并，上传按扩展名自动归入 MP4/图片/音频分类；已排除 tombstone。 */
+    library: scanLibrary(options.packageRoot, deleted, options.homeDir),
+    limitBytes: MEDIA_LIMIT_BYTES,
+    /**
+     * 开机动画运行时的完整配置（boot.js 每次页面加载实时读取它 —— 桌面注入表是宿主
+     * 启动时的一次性快照，配置改动必须走实时通道才能"刷新即生效"）。
+     */
+    cfg: client,
+    warnings,
+  }
+}
+
+/**
+ * 插件主体。
+ * @param {import('@deepseek-ai/cordis').Context} ctx 插件上下文。
+ */
+export function apply(ctx) {
+  const packageRoot = fileURLToPath(new URL('.', import.meta.url))
+  const homeDir = resolveDshHome(process.env, os.homedir)
+  const readRuntime = makeRuntimeReader(packageRoot)
+
+  /**
+   * 每次都重新解析配置：注入行在收集时解析，素材路由在每次请求时解析。
+   * @returns {ReturnType<typeof loadConfig>} 解析结果。
+   */
+  const current = () => loadConfig({ packageRoot, homeDir, route: ASSET_ROUTE })
+
+  const warn = (message) => {
+    try {
+      ctx.logger?.warn?.(`[${name}] ${message}`)
+    } catch {
+      /* 日志都不该成为失败原因 */
+    }
+  }
+  const info = (message) => {
+    try {
+      ctx.logger?.info?.(`[${name}] ${message}`)
+    } catch {
+      /* 同上 */
+    }
+  }
+
+  // ── ① 注入行：必须**同步**注册，且不能等到任何服务就绪 ──
+  //
+  // v1.5.0 关键事实（决定注入策略）：桌面壳把注入表在宿主启动时**收集一次**并缓存
+  // （Electron main：`injections = ready.injections` 单次赋值，页面每次加载的 IPC boot
+  // 返回同一份缓存），页面刷新不会重新收集。所以这里**无条件注入**三行；
+  // "显示不显示 / 用什么素材 / 多久"由运行时（boot.js）**每次页面加载实时读取** manage 接口的
+  // cfg 决定 —— 开关、素材、时长等配置改动**刷新页面即生效**，无需重启。
+  // global 行仅作为实时读取失败（宿主忙/超时）时的兜底快照。
+  ctx.on('webserver/index-inject', (table) => {
+    if (!Array.isArray(table)) return
+    try {
+      const { client, warnings } = current()
+      for (const warning of warnings) warn(warning)
+      // 先把两份运行时文本都读出来，读不到就整体放弃（绝不推半截行）。
+      const cssText = readRuntime('boot.css')
+      const jsText = readRuntime('boot.js')
+      table.push(
+        // global 行在 head，脚本在 body：读它的脚本一定在其后执行。
+        { kind: 'global', name: BOOT_GLOBAL, value: client },
+        { kind: 'style', text: cssText },
+        { kind: 'script', placement: 'body', text: jsText },
+      )
+    } catch (error) {
+      // 注入行生成失败只是"没有开机动画"，绝不能让索引渲染失败。
+      warn(`注入行生成失败，页面回落到内核原生启动页：${describe(error)}`)
+    }
+  })
+
+  // ── ② 素材路由 + 管理路由：webServer 是可选能力，晚到就晚接，不阻塞 apply ──
+  ctx.inject(['webServer'], (child) => {
+    child.effect(() => {
+      /** @type {Array<() => void>} */
+      const disposers = []
+
+      /** JSON 应答的小工具。 */
+      const reply = (res, status, body) => {
+        const text = JSON.stringify(body)
+        res.writeHead(status, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'Content-Length': Buffer.byteLength(text),
+          'Cache-Control': 'no-store',
+        })
+        res.end(text)
+      }
+
+      // 素材本体：每次请求都重新解析配置。无参数 = 当前选用的素材（开机动画自身）；
+      // `?path=` = 列表预览用的任意受校验素材（内置 rel 或 media 目录内绝对路径）。
+      disposers.push(
+        child.webServer.register({
+          kind: 'exact',
+          path: ASSET_ROUTE,
+          handler: (req, res) => {
+            let filePath
+            try {
+              const url = new URL(String(req.url ?? '/'), 'http://localhost')
+              const wanted = url.searchParams.get('path')
+              if (wanted !== null && wanted !== '') {
+                if (path.isAbsolute(wanted)) {
+                  filePath = assertUploadedFile(homeDir, wanted)
+                } else {
+                  const { raw } = loadRawBoot({ packageRoot, homeDir })
+                  const deleted = Array.isArray(raw.deleted)
+                    ? raw.deleted.filter((value) => typeof value === 'string' && value !== '')
+                    : []
+                  const rel = assertBuiltinFile(packageRoot, wanted, deleted)
+                  filePath = preferredAssetPath(resolveInsidePackage(packageRoot, rel), packageRoot)
+                }
+              } else {
+                const { client, assetPath } = current()
+                if (client.mode !== 'css' && assetPath !== undefined) filePath = assetPath
+              }
+            } catch (error) {
+              warn(`素材解析失败：${describe(error)}`)
+            }
+            if (filePath === undefined) {
+              res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+              res.end('startup animation asset is unavailable')
+              return
+            }
+            // `?thumb=1`：卡片/小预览要的是 480px 的小图，不是 8000px 的原图。
+            // 有预生成缩略图（内置素材）就用它；没有（用户上传）就照常发原图。
+            let thumb = false
+            try {
+              thumb = new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get('thumb') === '1'
+            } catch {
+              thumb = false
+            }
+            if (thumb) {
+              const small = thumbnailFor(filePath)
+              if (small !== undefined) filePath = small
+            }
+            serveAsset(req, res, filePath)
+          },
+        }),
+      )
+
+      // 管理面：GET 状态 / POST(JSON) 开关 / POST(二进制) 上传 / DELETE 恢复默认。
+      disposers.push(
+        child.webServer.register({
+          kind: 'exact',
+          path: MANAGE_ROUTE,
+          // async 只因为上传分支要 await 临时文件真正打开；cookies 路由那边
+          // （webServer）会 await handler，所以这里返回 Promise 是安全的。
+          handler: async (req, res) => {
+            const options = () => ({ packageRoot, homeDir, route: ASSET_ROUTE })
+            // 一个请求里 status() 可能被调用多次（成功分支 + 兜底分支），而每次 manageStatus
+            // 都要重扫素材库（stat 每个内置文件）。同一次写操作之后状态只变一次，缓存一份即可；
+            // 任何写操作都会 invalidate，不会读到旧值。
+            /** @type {{ value: Record<string, unknown> } | null} */
+            let statusCache = null
+            const invalidate = () => {
+              statusCache = null
+            }
+            const status = () => {
+              if (statusCache !== null) return statusCache.value
+              let value
+              try {
+                value = manageStatus(options())
+              } catch (error) {
+                value = { ok: false, error: describe(error) }
+              }
+              statusCache = { value }
+              return value
+            }
+            const method = String(req.method ?? 'GET').toUpperCase()
+
+            if (method === 'GET') {
+              // 开机动画每加载一次页面都会打这个接口（boot.js 的实时配置通道），而
+              // 完整 manageStatus 要重扫素材库、stat 每个内置文件 —— 对一个只想要
+              // `cfg` 的调用方是白花的 IO。`?cfg=1` 给全屏动画用的精简回包。
+              let cfgOnly = false
+              try {
+                cfgOnly = new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get('cfg') === '1'
+              } catch {
+                cfgOnly = false
+              }
+              if (cfgOnly) {
+                try {
+                  const { client } = loadConfig(options())
+                  reply(res, 200, { ok: true, cfg: client })
+                } catch (error) {
+                  reply(res, 500, { ok: false, error: describe(error) })
+                }
+                return
+              }
+              const payload = status()
+              reply(res, payload.ok === false ? 500 : 200, payload)
+              return
+            }
+
+            if (method === 'DELETE') {
+              // 恢复默认 = 删掉配置里的 file；已上传的文件留在磁盘上，不替用户销毁数据。
+              try {
+                writeHomeBootPatch(homeDir, {}, ['file'])
+                invalidate()
+                reply(res, 200, status())
+              } catch (error) {
+                reply(res, 500, { ok: false, error: `恢复默认失败：${describe(error)}` })
+              }
+              return
+            }
+
+            if (method !== 'POST') {
+              reply(res, 405, { ok: false, error: 'use GET, POST or DELETE' })
+              return
+            }
+
+            const type = String(req.headers['content-type'] ?? '').toLowerCase()
+
+            // ① JSON 体：布尔开关（enabled / sound）或素材库操作（use / forget）。
+            if (type.startsWith('application/json')) {
+              /** @type {Buffer[]} */
+              const chunks = []
+              let size = 0
+              let aborted = false
+              req.on('error', () => {
+                if (!aborted) reply(res, 400, { ok: false, error: 'request stream failed' })
+              })
+              req.on('data', (chunk) => {
+                if (aborted) return
+                size += chunk.length
+                if (size > 4096) {
+                  aborted = true
+                  reply(res, 413, { ok: false, error: 'body too large' })
+                  req.destroy()
+                  return
+                }
+                chunks.push(chunk)
+              })
+              req.on('end', () => {
+                if (aborted) return
+                void (async () => {
+                  /** @type {Record<string, unknown>} */
+                  const body = {}
+                  try {
+                    const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+                    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) Object.assign(body, parsed)
+                  } catch (error) {
+                    reply(res, 400, { ok: false, error: 'invalid JSON' })
+                    return
+                  }
+
+                  // 素材库操作：use / useAudio = 从列表选用（内置或上传）；forget = 从列表移除。
+                  if (body.use !== undefined || body.useAudio !== undefined || body.forget !== undefined) {
+                    try {
+                      const { raw } = loadRawBoot({ packageRoot, homeDir })
+                      const deleted = Array.isArray(raw.deleted)
+                        ? raw.deleted.filter((value) => typeof value === 'string' && value !== '')
+                        : []
+                      const rawFile = typeof raw.file === 'string' ? raw.file : ''
+                      const rawAudio = typeof raw.audioFile === 'string' ? raw.audioFile : ''
+                      if (body.use !== undefined || body.useAudio !== undefined) {
+                        const isAudio = body.use !== undefined ? false : true
+                        const given = body.use !== undefined ? body.use : body.useAudio
+                        // 绝对路径 = 上传素材；相对路径 = 内置素材（两者校验口径不同）。
+                        const target =
+                          typeof given === 'string' && path.isAbsolute(given)
+                            ? assertUploadedFile(homeDir, given)
+                            : assertBuiltinFile(packageRoot, given, deleted)
+                        // 音频槽只收音频类型（视频/图片误点会被拒；反之 boot.file 忽略 audio kind）。
+                        const kind = ASSET_KINDS[path.extname(target).toLowerCase()]
+                        if (isAudio && kind !== 'audio') throw new Error('这不是音频素材')
+                        if (!isAudio && kind === 'audio') throw new Error('音频请在"开机音频"里选择')
+                        // 同一请求里也可能带着开关/音量（前端可以一次写完）：与选用合并成一次写入。
+                        /** @type {Record<string, unknown>} */
+                        const libraryPatch = isAudio ? { audioFile: target } : { file: target }
+                        if (isAudio) {
+                          // 选中音频即视为要用它；显式 false 仍尊重调用方。
+                          if (typeof body.audioEnabled === 'boolean') libraryPatch.audioEnabled = body.audioEnabled
+                          else libraryPatch.audioEnabled = true
+                        }
+                        writeHomeBootPatch(homeDir, libraryPatch)
+                      } else if (typeof body.forget === 'string' && path.isAbsolute(body.forget)) {
+                        // ── 上传素材删除（Windows 上文件句柄/权限会导致 EPERM）──
+                        // ① 先释放本进程对该文件的全部发送流；② 真删并重试 6 次
+                        //    （每次让出事件循环，等流的 fd 异步关闭）；③ 仍失败 → 从列表
+                        //    隐藏（写 tombstone，磁盘文件保留），界面提示"仅隐藏"，绝不裸抛错误。
+                        const norm = path.normalize(String(body.forget))
+                        releaseStreams(norm)
+                        let removed = false
+                        let lastErr = null
+                        for (let attempt = 0; attempt < 6 && !removed; attempt += 1) {
+                          try {
+                            removeUploadedFile(homeDir, norm)
+                            removed = true
+                          } catch (error) {
+                            lastErr = error
+                            if (attempt < 5) await sleepMs(250)
+                          }
+                        }
+                        if (removed) {
+                          /** @type {Record<string, undefined>} */
+                          const cleared = {}
+                          if (rawFile === norm) cleared.file = undefined
+                          if (rawAudio === norm) cleared.audioFile = undefined
+                          if (Object.keys(cleared).length > 0) writeHomeBootPatch(homeDir, cleared)
+                        } else {
+                          const next = deleted.includes(norm) ? deleted : [...deleted, norm]
+                          /** @type {Record<string, unknown>} */
+                          const patch = { deleted: next }
+                          if (rawFile === norm) patch.file = undefined
+                          if (rawAudio === norm) patch.audioFile = undefined
+                          writeHomeBootPatch(homeDir, patch)
+                          warn(`上传素材真删失败，已从列表隐藏（磁盘保留）：${describe(lastErr)}`)
+                          reply(res, 200, { ...status(), hiddenOnly: true, deleteError: describe(lastErr) })
+                          return
+                        }
+                      } else {
+                        if (typeof body.forget !== 'string' || body.forget === '') throw new Error('素材路径无效')
+                        const norm = body.forget.replace(/\\/g, '/')
+                        if (!norm.startsWith(`${BUILTIN_DIR_NAME}/`) || norm.split('/').includes('..')) {
+                          throw new Error('素材路径无效')
+                        }
+                        // 内置素材：只写 tombstone（隐藏，不删包内文件）。
+                        const next = deleted.includes(norm) ? deleted : [...deleted, norm]
+                        /** @type {Record<string, unknown>} */
+                        const patch = { deleted: next }
+                        // 正在使用的素材被移除 → 一并退回（视频/图片→原版标配，音频→不播），不留悬空引用。
+                        if (rawFile === norm) patch.file = undefined
+                        if (rawAudio === norm) patch.audioFile = undefined
+                        writeHomeBootPatch(homeDir, patch)
+                      }
+                      invalidate()
+                      reply(res, 200, status())
+                    } catch (error) {
+                      reply(res, 400, { ok: false, error: describe(error) })
+                    }
+                    return
+                  }
+
+                  /** @type {Record<string, unknown>} */
+                  const patch = {}
+                  if (typeof body.enabled === 'boolean') patch.enabled = body.enabled
+                  if (typeof body.sound === 'boolean') patch.sound = body.sound
+                  if (typeof body.audioEnabled === 'boolean') patch.audioEnabled = body.audioEnabled
+                  if (body.audioVolume !== undefined) {
+                    if (typeof body.audioVolume !== 'number' || !Number.isFinite(body.audioVolume)) {
+                      reply(res, 400, { ok: false, error: '音量必须是 0–1 的数字' })
+                      return
+                    }
+                    patch.audioVolume = Math.min(1, Math.max(0, body.audioVolume))
+                  }
+                  // 展示时长（秒，共用主配置）：必须是数字，写入前夹到 3–15。
+                  if (body.durationSec !== undefined) {
+                    if (typeof body.durationSec !== 'number' || !Number.isFinite(body.durationSec)) {
+                      reply(res, 400, { ok: false, error: '展示时长必须是 3–15 的数字（秒）' })
+                      return
+                    }
+                    patch.durationSec = clampDurationSec(body.durationSec)
+                  }
+                  if (Object.keys(patch).length === 0) {
+                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "use", "useAudio" or "forget"' })
+                    return
+                  }
+                  try {
+                    writeHomeBootPatch(homeDir, patch)
+                    invalidate()
+                    reply(res, 200, status())
+                  } catch (error) {
+                    reply(res, 500, { ok: false, error: `保存失败：${describe(error)}` })
+                  }
+                })().catch((error) => {
+                  // 异步体的兜底：任何未捕获异常 → 400（已应答则忽略，避免二次写头）。
+                  try {
+                    reply(res, 400, { ok: false, error: describe(error) })
+                  } catch {
+                    /* 已应答 */
+                  }
+                })
+              })
+              return
+            }
+
+            // ② 二进制体：上传动画素材。
+            const rawName = String(req.headers['x-dsh-filename'] ?? '')
+            let filename = rawName
+            try {
+              filename = decodeURIComponent(rawName)
+            } catch {
+              /* 传什么用什么 */
+            }
+            const extension = pickMediaExtension(filename)
+            if (extension === undefined) {
+              reply(res, 415, {
+                ok: false,
+                error: '不支持的类型：支持 mp4/webm/ogv/ogg/m4v 视频与 gif/apng/webp/png/jpg 图片',
+                filename,
+              })
+              req.resume()
+              return
+            }
+            if (typeof homeDir !== 'string' || homeDir === '') {
+              reply(res, 500, { ok: false, error: 'DSH_HOME 不可用，无法保存素材' })
+              req.resume()
+              return
+            }
+
+            const root = path.join(homeDir, MEDIA_DIR_NAME)
+            // 临时名必须唯一到"每次请求"：原先只有 pid+Date.now()，同一毫秒内两个并发上传
+            // （同一用户开了两个设置页）会抢同一个 .part 文件，互相覆盖/互删。
+            const tempPath = path.join(
+              root,
+              `.upload-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}.part`,
+            )
+            let failed = false
+            /** @type {import('node:fs').WriteStream | null} */
+            let sink = null
+            /**
+             * 建临时文件，并**等它真的打开**再返回。
+             *
+             * `fs.createWriteStream` 是异步 open：在 open 完成前 `destroy()`，
+             * 打开动作照样会完成并把文件创建出来 —— 于是在 Windows 上就出现
+             * "撤销得比创建还早"的鬼文件：删除发生在文件存在之前，`.part`
+             * 永久留在素材目录里。所以这里显式 await 'open'，失败/撤销都排在它之后。
+             * @returns {Promise<import('node:fs').WriteStream | null>} 已打开的流。
+             */
+            const openSink = () => new Promise((resolve) => {
+              let stream
+              try {
+                stream = fs.createWriteStream(tempPath)
+              } catch {
+                resolve(null)
+                return
+              }
+              const settle = (ok) => {
+                stream.removeListener('open', onOpen)
+                stream.removeListener('error', onError)
+                resolve(ok ? stream : null)
+              }
+              const onOpen = () => settle(true)
+              const onError = () => {
+                try {
+                  stream.destroy()
+                } catch {
+                  /* ignore */
+                }
+                settle(false)
+              }
+              stream.once('open', onOpen)
+              stream.once('error', onError)
+              sink = stream
+            })
+
+            const removeTemp = () => {
+              const purge = () => {
+                try {
+                  fs.rmSync(tempPath, { force: true })
+                } catch {
+                  /* 尽力而为 */
+                }
+              }
+              purge()
+              // 句柄可能还在关：再挂一次（close 之后文件才真正可删）。
+              if (sink !== null && sink.closed === false) {
+                sink.once('close', purge)
+                setTimeout(purge, 400).unref?.()
+              }
+            }
+            const cleanup = () => {
+              try {
+                sink?.destroy()
+              } catch {
+                /* ignore */
+              }
+              removeTemp()
+            }
+            const fail = (status_, body, skipCleanup = false) => {
+              if (failed) return
+              failed = true
+              if (!skipCleanup) cleanup()
+              reply(res, status_, body)
+            }
+            try {
+              fs.mkdirSync(root, { recursive: true })
+            } catch (error) {
+              fail(500, { ok: false, error: `无法创建素材目录：${describe(error)}` })
+              return
+            }
+            sink = await openSink()
+            if (sink === null) {
+              fail(500, { ok: false, error: '无法创建临时文件' })
+              return
+            }
+
+            // 上传文件名 = 用户原始文件名（净化 + 重名去重），不用内容哈希命名。
+            let received = 0
+            sink.on('error', (error) => fail(500, { ok: false, error: `写文件失败：${describe(error)}` }))
+            req.on('aborted', () => fail(400, { ok: false, error: 'upload aborted' }))
+            req.on('error', () => fail(400, { ok: false, error: 'request stream failed' }))
+            req.on('data', (chunk) => {
+              if (failed) return
+              received += chunk.length
+              if (received > MEDIA_LIMIT_BYTES) {
+                // 超限：先停写盘、删临时文件（cleanup 会等 fd 关闭后再删），
+                // 再回应答，最后才掐连接 —— 顺序反了会在 Windows 上留下 .part。
+                fail(413, { ok: false, error: `文件太大（上限 ${Math.round(MEDIA_LIMIT_BYTES / 1024 / 1024)} MiB）` })
+                res.once('finish', () => {
+                  try {
+                    req.destroy()
+                  } catch {
+                    /* 已经断开 */
+                  }
+                })
+                return
+              }
+              if (sink !== null && !sink.write(chunk)) {
+                req.pause()
+                sink.once('drain', () => req.resume())
+              }
+            })
+            req.on('end', () => {
+              if (failed || sink === null) return
+              if (received === 0) {
+                fail(400, { ok: false, error: 'empty file' })
+                return
+              }
+              sink.end(() => {
+                if (failed) return
+                // 保留用户原始文件名（净化非法字符 + 重名加序号），列表展示即真实文件名。
+                const safeName = sanitizeUploadName(filename)
+                // 落盘要**原子且不覆盖**：`rename` 在 Windows 上会静默覆盖同名文件
+                // （POSIX 也是），所以两个并发同名上传会互相吞掉对方的文件。
+                // 先 `link(temp → target)`（目标已存在必然失败，等于"只在不存在时创建"），
+                // 成功后删掉临时名；撞名就换下一个序号重试。这条路径没有覆盖窗口。
+                let placed = false
+                let lastError = null
+                const desired = safeName === '' ? `upload${extension}` : safeName
+                const stem = path.parse(desired).name
+                const ext = path.extname(desired)
+                // 从当前空闲序号开始，每次 EEXIST 就跳到下一个序号 —— 不能重试同一个
+                // 候选名（另一路并发上传正好赢了它，重试只会一直 EEXIST）。
+                let nextIndex = 0
+                for (let attempt = 0; attempt < 200 && !placed; attempt += 1) {
+                  const candidate =
+                    nextIndex === 0 ? desired : `${stem} (${nextIndex})${ext}`
+                  nextIndex += 1
+                  const target = path.join(root, candidate)
+                  try {
+                    // link 只在目标不存在时成功，天然没有"检查后使用"的窗口。
+                    fs.linkSync(tempPath, target)
+                    placed = true
+                  } catch (error) {
+                    lastError = error
+                    if (error && error.code !== 'EEXIST') break
+                  }
+                }
+                if (!placed) {
+                  fail(500, { ok: false, error: `保存失败：${describe(lastError)}` })
+                  return
+                }
+                try {
+                  fs.rmSync(tempPath, { force: true })
+                } catch {
+                  /* 临时名删不掉不影响成品；启动清理会兜底 */
+                }
+                // 上传**只入库不选用**：文件按扩展名自动归入对应分类，用户再从列表点"使用"。
+                invalidate()
+                reply(res, 200, status())
+              })
+            })
+          },
+        }),
+      )
+
+      return () => {
+        for (const dispose of disposers) {
+          try {
+            dispose()
+          } catch {
+            /* 已经注销 */
+          }
+        }
+      }
+    })
+  })
+
+  try {
+    const { client, sources, warnings } = (() => {
+      const loaded = loadConfig({ packageRoot, homeDir, route: ASSET_ROUTE })
+      const { sources } = loadRawBoot({ packageRoot, homeDir })
+      return { ...loaded, sources }
+    })()
+    for (const warning of warnings) warn(warning)
+    // 崩溃留下的半截上传文件：启动时收一次，别让它们一直占盘。
+    try {
+      const swept = sweepUploadTempFiles(homeDir)
+      if (swept > 0) info(`清理了 ${swept} 个遗留的上传临时文件`)
+    } catch {
+      /* 清理失败不影响启动 */
+    }
+    info(
+      `已就绪：动画 ${client.enabled === false ? '关闭' : client.mode} · 素材 ${client.src === '' ? '无（原版标配）' : '自定义'}（配置来源：${sources.length === 0 ? '默认值' : sources.join(' → ')}）`,
+    )
+  } catch (error) {
+    warn(`配置读取失败，将使用默认值：${describe(error)}`)
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "name": "dsh-plugin-startup-animation",
+  "version": "1.8.0",
+  "type": "module",
+  "description": "Animated full-screen startup screen shown while DeepSeek Harness boots — click to skip. Ships a built-in MP4/wallpaper/audio library and accepts your own files. 开机动画 / 启动动画：启动 Harness 时显示全屏动画，随包内置视频、壁纸与开机音频，也可以用自己的素材。",
+  "license": "MIT",
+  "author": "dsh-plugin-startup-animation contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CHANGE_ME/dsh-plugin-startup-animation.git"
+  },
+  "homepage": "https://github.com/CHANGE_ME/dsh-plugin-startup-animation#readme",
+  "bugs": {
+    "url": "https://github.com/CHANGE_ME/dsh-plugin-startup-animation/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "startup",
+    "boot",
+    "splash",
+    "animation",
+    "theme"
+  ],
+  "engines": {
+    "node": ">=22.12.0",
+    "dsh": ">=0.2.0"
+  },
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./icon.svg": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "runtime/boot.css",
+    "runtime/boot.js",
+    "builtin/**/*",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node ../selftest.mjs && node ../tools/host-smoke.mjs",
+    "test:unit": "node ../selftest.mjs",
+    "test:host": "node ../tools/host-smoke.mjs",
+    "thumbs": "node ../tools/make-thumbs.mjs",
+    "optimize": "node ../tools/optimize-builtin.mjs",
+    "build": "node ../tools/optimize-builtin.mjs && node ../tools/make-thumbs.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

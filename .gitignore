@@ -1,0 +1,22 @@
+# 依赖与构建产物
+node_modules/
+dist/
+compile-cache/
+prof/
+*.log
+
+# 4K 母版只留在本地（不公开、不随包分发）：发布用 1080p faststart 变体
+startup-animation/builtin/MP4/*.mp4
+!startup-animation/builtin/MP4/*.web.mp4
+
+# 开发期抓包/探针产物
+boot-measurements.jsonl
+tools/_*
+tools/skill/
+
+# 上传素材是用户数据
+startup-animation/builtin/*/.thumbs/*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
