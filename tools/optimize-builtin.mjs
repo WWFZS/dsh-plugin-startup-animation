@@ -31,8 +31,18 @@ const MAX_LONG_EDGE = 1920
 const MAX_SECONDS = 8
 const force = process.argv.includes('--force')
 
-/** 用 ffmpeg 压一版网页友好的 1080p faststart mp4。 */
+/**
+ * 哪些内置视频要**保留音轨**。
+ *
+ * 默认去音轨：开机动画是装饰画面，"视频声音"本来就不是它的职责，去掉能省一大截体积。
+ * 但有的素材本身就是在说话（"欢迎回来"这类），去掉音轨等于把内容删了 ——
+ * 这类必须保留。按文件名列在这里，重跑构建时不会被无声抹掉。
+ */
+const KEEP_AUDIO = new Set(['大肥鱼-欢迎回来'])
+
+/** 用 ffmpeg 压一版网页友好的 faststart mp4（按素材决定是否保留音轨）。 */
 function transcode(source, target) {
+  const keepAudio = KEEP_AUDIO.has(path.parse(source).name)
   execFileSync(
     'ffmpeg',
     [
@@ -40,7 +50,7 @@ function transcode(source, target) {
       '-loglevel', 'error',
       '-y',
       '-i', source,
-      '-an',
+      ...(keepAudio ? ['-c:a', 'aac', '-b:a', '96k'] : ['-an']),
       '-t', String(MAX_SECONDS),
       '-vf', `scale='if(gt(iw,ih),min(${MAX_LONG_EDGE},iw),-2)':'if(gt(iw,ih),-2,min(${MAX_LONG_EDGE},ih))'`,
       '-c:v', 'libx264',

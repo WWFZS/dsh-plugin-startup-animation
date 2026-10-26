@@ -18,7 +18,10 @@ takes over — you never wait on the animation itself.
   screen immediately; nothing to set up.
 - **Two ways to start**: pick a frame from the built-in library (3 videos, 7 wallpapers,
   9 voice clips), or upload your own MP4 / WebM / GIF / PNG / JPG / MP3.
-- **Startup audio** can play during the animation, independently of the video, with its own
+- **Audio is three independent choices**, and you decide each one: a video that *has* a
+  sound track, a video that *has none*, and a standalone startup audio file. Turn on either,
+  both, or neither — the plugin never silences one to make room for the other.
+- **Startup audio** plays during the animation with its own
   volume and a fade-out synced to the animation's exit.
 - **Never traps you**: click, press `Esc` / `Enter` / `Space`, or just wait — every path exits.
   If the animation itself fails in any way, the stock boot screen shows and nothing else
@@ -59,8 +62,8 @@ Open **Settings → Startup Animation** (the entry sits in the sidebar settings 
 | Control | What it does |
 |---|---|
 | Show startup animation | Master switch. Off = the stock Harness boot screen. |
-| Play video with sound | Let the *video* play its own audio track (separate from startup audio). |
-| Startup audio | Play a voice clip during the animation. The video is muted while this is on. |
+| Play video with sound | Let the *video* play its own audio track, if the file has one. |
+| Startup audio | Play a separate audio clip during the animation. |
 | Display duration | 3–15 seconds, shared by videos and wallpapers. Skipping is never delayed by it. |
 | Startup visual | Current media preview, plus **Restore default**. |
 | MP4 / Wallpaper / Audio tabs | Click any card to use it. Upload adds to the library. |
@@ -127,7 +130,9 @@ Upload path: `$DSH_HOME/startup-animation-media/`. Uploads are capped at **128 M
 
 Everything below ships inside the package and appears in the picker:
 
-- **MP4** — 3 clips, transcoded from 4K masters to 1080p H.264 faststart (1.6–6.6 MB each)
+- **MP4** — 4 clips, all H.264 faststart so they start streaming immediately (1.4–6.6 MB each).
+  `大肥鱼-欢迎回来` has a spoken sound track (turn on **Play video with sound** to hear it);
+the other three are silent by design
 - **壁纸 / Wallpaper** — 7 stills, with pre-generated 480 px thumbnails for the picker
 - **音频 / Audio** — 9 voice clips
 

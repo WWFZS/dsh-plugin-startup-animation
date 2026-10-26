@@ -149,19 +149,23 @@ try {
   })
 
   console.log('== 内置素材库 ==')
-  await check('库扫描：MP4=3、图片=7', () => {
+  await check('库扫描：MP4 与图片分类齐全', () => {
     const lib = scanLibrary(packageRoot)
     const mp4 = lib.find((c) => c.id === 'MP4')
     const img = lib.find((c) => c.id === '图片')
     assert.ok(mp4, '缺少 MP4 分类')
     assert.ok(img, '缺少 图片 分类')
-    assert.equal(mp4.files.length, 3)
+    assert.ok(mp4.files.length >= 4, `MP4 条目偏少：${mp4.files.length}`)
     assert.equal(img.files.length, 7)
     assert.ok(mp4.files.every((f) => f.path.startsWith('builtin/MP4/') && f.size > 0))
   })
   await check('tombstone 从列表隐藏', () => {
+    // 相对断言：隐藏一个就少一个，不写死总数（内置素材会随版本增减）。
+    const before = scanLibrary(packageRoot).find((c) => c.id === 'MP4').files.length
     const lib = scanLibrary(packageRoot, ['builtin/MP4/多重影像.mp4'])
-    assert.equal(lib.find((c) => c.id === 'MP4').files.length, 2)
+    const after = lib.find((c) => c.id === 'MP4').files.length
+    assert.equal(after, before - 1)
+    assert.ok(!lib.find((c) => c.id === 'MP4').files.some((f) => f.path === 'builtin/MP4/多重影像.mp4'))
   })
   await check('assertBuiltinFile 接受合法路径', () => {
     assert.equal(
@@ -261,8 +265,9 @@ try {
     assert.ok(inImg, '上传的 jpg 未进入 图片 分类')
     assert.equal(inMp4.uploaded, true)
     assert.equal(inImg.uploaded, true)
-    // 内置素材不受上传影响（仍然 3 个）。
-    assert.equal(mp4.files.filter((f) => f.uploaded !== true).length, 3)
+    // 内置素材不受上传影响：上传只新增条目，内置数量保持不变。
+    const builtinCount = scanLibrary(packageRoot).find((c) => c.id === 'MP4').files.length
+    assert.equal(mp4.files.filter((f) => f.uploaded !== true).length, builtinCount)
   })
   await check('不传 homeDir 只扫内置', () => {
     const lib = scanLibrary(packageRoot)
@@ -413,7 +418,11 @@ try {
     const src = fs.readFileSync(new URL('./runtime/boot.js', import.meta.url), 'utf8')
     assert.ok(src.includes('playStartupAudio'), '缺少起播函数')
     assert.ok(src.includes('fadeStartupAudio(ms)'), '缺少退场淡停调用')
-    assert.ok(src.includes('if (audioOn) wantSound = false'), '缺少"音频开启→视频强制静音"')
+    // 回归（v1.9.1）：早期版本在开机音频开启时强制静音视频，这违背了"两路声音
+    // 各自由用户决定"。现在两者独立，且不得再出现这行强制静音。
+    assert.ok(!src.includes('if (audioOn) wantSound = false'), '仍存在"音频开启→视频强制静音"')
+    assert.ok(src.includes('var wantSound = cfg.sound === true'), '视频声音应直接跟随 cfg.sound')
+    assert.ok(src.includes('var audioOn = cfg.audioEnabled === true'), '音频开关应直接跟随 cfg.audioEnabled')
     assert.ok(src.includes('cfg.audioEnabled === true'), '缺少音频开关判定')
     // 揭幕门控：音频与标题栏按住都发生在"第一帧就位"，不是挂载瞬间。
     const mark = src.slice(src.indexOf('function markMediaOk'), src.indexOf('function whenFramePresents'))
@@ -603,6 +612,28 @@ await check('files 白名单不会带上 4K 母版（GitHub 安装少下 57 MB�
   // 图片/音频分类允许通配（它们没有母版/变体之分）。
   assert.ok(files.includes('builtin/图片/**/*'), '缺少 图片 分类')
   assert.ok(files.includes('builtin/音频/**/*'), '缺少 音频 分类')
+})
+await check('内置视频必须是 H.264（HEVC 在 Chromium 里解不了 → 黑屏）', () => {
+  // 回归：新增内置视频时曾拿到 HEVC/H.265 源文件，那段素材放进包里
+  // 只会表现为"启动时黑屏/一帧都不出"，而代码层面一切正常，很难查。
+  // 这里直接读 MP4 的 stsd 四字符码，钉死必须是 Chromium 能解的编码。
+  const MP4_CODECS_OK = new Set(['avc1', 'avc3', 'hvc1', 'hev1'])
+  const dir = new URL('./builtin/MP4/', import.meta.url)
+  const variants = fs.readdirSync(dir).filter((n) => n.endsWith('.web.mp4'))
+  assert.ok(variants.length > 0, '内置视频目录为空')
+  for (const name of variants) {
+    const buf = fs.readFileSync(new URL(name, dir))
+    // 'stsd' 之后：4 字节 version/flags + 4 字节 entry count + 4 字节 entry size
+    // + 4 字节 fourcc（+16 处），与 QuickTime/ISO-BMFF 的 sample entry 布局一致。
+    const at = buf.indexOf('stsd')
+    assert.ok(at > 0, `${name}: 找不到 stsd box`)
+    const codec = buf.toString('latin1', at + 16, at + 20)
+    assert.ok(codec === 'avc1' || codec === 'avc3', `${name} 的编码是 ${codec}，必须是 H.264（avc1/avc3）`)
+    // faststart：moov 必须在第一个 mdat 之前，否则浏览器要读完整个文件才能起播。
+    const moovAt = buf.indexOf('moov')
+    const mdatAt = buf.indexOf('mdat')
+    assert.ok(moovAt > 0 && moovAt < mdatAt, `${name}: moov 不在 mdat 之前（不是 faststart）`)
+  }
 })
 await check('REPO_URL 指向真实仓库（不是占位符）', () => {
   assert.ok(!REPO_URL.includes('CHANGE_ME'), '仓库地址仍是占位符')

@@ -177,13 +177,15 @@
     var holdGraceMs = num(cfg.holdGraceMs, 4000, 0, 30000)
     var noFrameMs = num(cfg.noFrameMs, 10000, 1500, 30000)
     var endlessMs = num(cfg.endlessMs, 20000, 3000, 60000)
+    // ── 两路声音彼此独立，各自由用户决定 ──
+    //   ① 视频自带的音轨 → cfg.sound（"视频尝试带声播放"）
+    //   ② 独立的开机音频文件 → cfg.audioEnabled
+    // 两者可以同时开：视频有音轨就放它，音频文件同时播 —— 都由用户自己勾选，
+    // 插件不替用户做"开一个就关另一个"的决定（早期版本会强制静音视频，那是错的）。
     var wantSound = cfg.sound === true
     var volume = num(cfg.volume, 1, 0, 1)
-    // ── 开机音频域：动画期间放一段声音；开启时视频强制静音（要听视频声就关掉本开关）；
-    // 跳过/退场动画时音频同步淡出停止。音频被浏览器自动播放策略拦下时静默放弃，不扣住用户。
     var audioOn = cfg.audioEnabled === true && typeof cfg.audioSrc === 'string' && cfg.audioSrc !== ''
     var audioVolume = num(cfg.audioVolume, 1, 0, 1)
-    if (audioOn) wantSound = false
     var showProgress = cfg.progress !== false
     var mode = cfg.mode === 'video' || cfg.mode === 'image' ? cfg.mode : 'css'
     var src = typeof cfg.src === 'string' ? cfg.src : ''
