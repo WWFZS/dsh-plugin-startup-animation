@@ -1,17 +1,17 @@
 {
   "name": "dsh-plugin-startup-animation",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "type": "module",
   "description": "Animated full-screen startup screen shown while DeepSeek Harness boots — click to skip. Ships a built-in MP4/wallpaper/audio library and accepts your own files. 开机动画 / 启动动画：启动 Harness 时显示全屏动画，随包内置视频、壁纸与开机音频，也可以用自己的素材。",
   "license": "MIT",
   "author": "dsh-plugin-startup-animation contributors",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CHANGE_ME/dsh-plugin-startup-animation.git"
+    "url": "git+https://github.com/WWFZS/dsh-plugin-startup-animation.git"
   },
-  "homepage": "https://github.com/CHANGE_ME/dsh-plugin-startup-animation#readme",
+  "homepage": "https://github.com/WWFZS/dsh-plugin-startup-animation#readme",
   "bugs": {
-    "url": "https://github.com/CHANGE_ME/dsh-plugin-startup-animation/issues"
+    "url": "https://github.com/WWFZS/dsh-plugin-startup-animation/issues"
   },
   "keywords": [
     "dsh",
@@ -52,19 +52,28 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node ../selftest.mjs && node ../tools/host-smoke.mjs",
-    "test:unit": "node ../selftest.mjs",
-    "test:host": "node ../tools/host-smoke.mjs",
-    "thumbs": "node ../tools/make-thumbs.mjs",
-    "optimize": "node ../tools/optimize-builtin.mjs",
-    "build": "node ../tools/optimize-builtin.mjs && node ../tools/make-thumbs.mjs"
+    "test": "node selftest.mjs && node tools/host-smoke.mjs",
+    "test:unit": "node selftest.mjs",
+    "test:host": "node tools/host-smoke.mjs",
+    "thumbs": "node tools/make-thumbs.mjs",
+    "optimize": "node tools/optimize-builtin.mjs",
+    "build": "node tools/optimize-builtin.mjs && node tools/make-thumbs.mjs",
+    "check": "node tools/preflight.mjs",
+    "release": "node tools/make-release.mjs"
   },
   "dsh": {
+    "engines": {
+      "dsh": ">=0.2.0"
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
     "client": {
-      "platform": "web"
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
   },
   "publishConfig": {

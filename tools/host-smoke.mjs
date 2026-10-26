@@ -11,12 +11,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const packageRoot = fileURLToPath(new URL('../startup-animation/', import.meta.url))
+const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-host-smoke-'))
 process.env.DSH_HOME = path.join(tmp, 'home')
 
-const { apply, MANAGE_ROUTE, ASSET_ROUTE } = await import(
-  new URL('../startup-animation/index.js', import.meta.url)
+const { apply, MANAGE_ROUTE, ASSET_ROUTE, UPDATE_ROUTE, VERSION } = await import(
+  new URL('../index.js', import.meta.url)
 )
 
 /** 收集 apply 注册的路由。 */
@@ -61,6 +61,7 @@ assert.ok(injectHandler, 'apply 没有注册 webServer 注入')
 injectHandler(child)
 assert.ok(routes.has(MANAGE_ROUTE), '缺少管理路由')
 assert.ok(routes.has(ASSET_ROUTE), '缺少素材路由')
+assert.ok(routes.has(UPDATE_ROUTE), '缺少更新检查路由')
 
 // ── 注入行结构 ──
 assert.equal(injectTable.length, 3, `注入行数量 ${injectTable.length}`)
@@ -340,6 +341,31 @@ console.log('  ok   GET ?cfg=1 只回配置、不扫素材库')
     .filter((n) => n.endsWith('.part'))
   assert.deepEqual(leftovers, [], `留下了 .part 临时文件：${leftovers.join(',')}（状态 ${results.map((r) => r.status).join(',')}）`)
   console.log('  ok   并发同名上传：3 份都落地、内容完整、无残留 .part')
+}
+
+// ── 17. 更新检查路由 ──
+{
+  const r = await call(UPDATE_ROUTE)
+  assert.equal(r.status, 200, `更新检查失败 ${r.status}`)
+  const body = r.json()
+  assert.equal(body.ok, true)
+  assert.equal(body.version, VERSION)
+  // 本机可能离线、仓库可能还没建：两种情况都必须是 200 + 明确原因，
+  // 而不是 5xx —— 更新检查失败绝不能让设置页看起来像坏了。
+  assert.equal(typeof body.reachable, 'boolean')
+  assert.equal(typeof body.updateAvailable, 'boolean')
+  if (body.reachable !== true) assert.ok(typeof body.reason === 'string' && body.reason !== '', '未给出不可达原因')
+  const put = await call(UPDATE_ROUTE, { method: 'PUT' })
+  assert.equal(put.status, 405)
+  console.log('  ok   更新检查路由：200 + 明确状态，非 GET 拒绝')
+}
+
+// ── 18. manage 状态携带版本（设置页小字的数据源）──
+{
+  const s = (await call(MANAGE_ROUTE)).json()
+  assert.equal(s.version, VERSION, '状态里缺少版本号')
+  assert.ok(String(s.repo).startsWith('https://github.com/'), '缺少仓库地址')
+  console.log('  ok   manage 状态携带 version / repo')
 }
 
 await new Promise((resolve) => server.close(resolve))

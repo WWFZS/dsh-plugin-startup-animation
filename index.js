@@ -29,14 +29,157 @@ export const name = 'startup-animation'
 /** 没有必需服务：`webServer` 用 `ctx.inject` 迟到接入，不阻塞 apply。 */
 export const inject = []
 
-/** 与 package.json 的 version 保持一致。 */
-export const VERSION = '1.7.1'
+/**
+ * 版本号**只从 package.json 读**，不在这里手写第二份。
+ *
+ * 之前这里是常量 `'1.7.1'`，而 package.json 已经到 1.8.0 —— 设置页显示版本号时
+ * 就会报错一个根本不存在的版本，更新检查也会永远判定"有新版本"。
+ * 包内相对路径读自己的清单在 ESM 里是安全的（同包文件，不走模块解析）。
+ */
+export const VERSION = (() => {
+  try {
+    const raw = fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8')
+    const parsed = JSON.parse(raw)
+    return typeof parsed.version === 'string' && parsed.version !== '' ? parsed.version : '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+})()
 
 /** 素材路由（页面侧用根相对路径引用，与参考实现一致，桌面壳同样可达）。 */
 export const ASSET_ROUTE = '/dsh-startup-animation/asset'
 
 /** 管理路由：GET 状态 / POST 上传或开关 / DELETE 恢复默认。 */
 export const MANAGE_ROUTE = '/dsh-startup-animation/manage'
+
+/** 更新检查路由：GET 当前版本 vs GitHub 最新 Release。 */
+export const UPDATE_ROUTE = '/dsh-startup-animation/update'
+
+/**
+ * 版本比较：只比较 `MAJOR.MINOR.PATCH` 的数字段，忽略预发布后缀。
+ *
+ * 为什么不用现成的 semver 库：插件零依赖是硬约束（宿主半边只用 node: 内建）。
+ * "有没有新版本"只需要大小关系，不需要满足 range —— 真正需要 range 的兼容性
+ * 判断交给插件管理器和市场（它们读 engines.dsh），这里不重复实现。
+ *
+ * @param {string} a 版本 a。
+ * @param {string} b 版本 b。
+ * @returns {number} a>b 返回 1，a<b 返回 -1，相等返回 0。
+ */
+export function compareVersions(a, b) {
+  const parse = (value) => {
+    // GitHub 的 tag 习惯带 v 前缀（v1.10.0），必须剥掉再比，否则永远判"无更新"。
+    const text = String(value ?? '').trim().replace(/^v/i, '')
+    const match = /^(\d+)\.(\d+)\.(\d+)/.exec(text)
+    return match === null ? null : [Number(match[1]), Number(match[2]), Number(match[3])]
+  }
+  const left = parse(a)
+  const right = parse(b)
+  if (left === null || right === null) return 0
+  for (let i = 0; i < 3; i += 1) {
+    if (left[i] > right[i]) return 1
+    if (left[i] < right[i]) return -1
+  }
+  return 0
+}
+
+/**
+ * 更新检查结果缓存（进程内）：GitHub 匿名 API 每小时只给 60 次，
+ * 而设置页可能被反复打开。成功结果缓存 6 小时，失败只缓存 5 分钟
+ * （网络抖动不该让用户等一整天才能重试）。
+ */
+const updateCache = { at: 0, ttlMs: 0, value: null }
+
+/**
+ * 问 GitHub 要最新 Release，和当前版本比较。
+ *
+ * **网络失败不是错误**：插件在离线环境里也必须能正常用，所以这里任何异常都
+ * 归一成 `{ ok: true, reachable: false }` —— 界面显示"检查不到"而不是报错。
+ *
+ * @param {{ currentVersion: string, repoUrl: string, fetchImpl?: typeof fetch, force?: boolean }} options
+ * @returns {Promise<Record<string, unknown>>} 检查结果。
+ */
+export async function checkForUpdate(options) {
+  const now = Date.now()
+  if (options.force !== true && updateCache.value !== null && now - updateCache.at < updateCache.ttlMs) {
+    return updateCache.value
+  }
+
+  const current = options.currentVersion
+  /** @type {Record<string, unknown>} */
+  let result
+  // 显式传 null/false 时**不要**回落到全局 fetch：调用方是在声明"没有网络能力"。
+  const doFetch = options.fetchImpl === undefined ? globalThis.fetch : options.fetchImpl
+  if (typeof doFetch !== 'function') {
+    result = { ok: true, reachable: false, reason: 'no-fetch', current, latest: null, updateAvailable: false }
+  } else {
+    const slug = options.repoUrl.replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '')
+    const headers = {
+      // GitHub 要求带 UA；Accept 限定版本，避免拿到 HTML 错误页。
+      'User-Agent': `dsh-plugin-startup-animation/${current}`,
+      Accept: 'application/vnd.github+json',
+    }
+    try {
+      // 先问 Release（有版本号可读）；没有 Release 就退回 tags。
+      const releaseRes = await doFetch(`https://api.github.com/repos/${slug}/releases/latest`, {
+        headers,
+        signal: AbortSignal.timeout(6000),
+      })
+      let tag = null
+      if (releaseRes.ok) {
+        const body = await releaseRes.json()
+        tag = typeof body?.tag_name === 'string' ? body.tag_name : null
+      } else {
+        const tagsRes = await doFetch(`https://api.github.com/repos/${slug}/tags?per_page=1`, {
+          headers,
+          signal: AbortSignal.timeout(6000),
+        })
+        if (tagsRes.ok) {
+          const tags = await tagsRes.json()
+          if (Array.isArray(tags) && tags.length > 0 && typeof tags[0]?.name === 'string') tag = tags[0].name
+        }
+      }
+      if (tag === null) {
+        result = { ok: true, reachable: false, reason: 'no-release', current, latest: null, updateAvailable: false }
+      } else {
+        const latest = String(tag).replace(/^v/i, '')
+        const cmp = compareVersions(latest, current)
+        result = {
+          ok: true,
+          reachable: true,
+          current,
+          latest,
+          // 只有"比当前新"才算有更新：本地版本更高（开发中）不该被降级提示。
+          updateAvailable: cmp > 0,
+          releasesUrl: `${options.repoUrl}/releases`,
+        }
+      }
+    } catch (error) {
+      const aborted = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+      result = {
+        ok: true,
+        reachable: false,
+        reason: aborted ? 'timeout' : 'network',
+        current,
+        latest: null,
+        updateAvailable: false,
+      }
+    }
+  }
+
+  const reachable = result.reachable === true
+  updateCache.at = now
+  updateCache.ttlMs = reachable ? 6 * 60 * 60 * 1000 : 5 * 60 * 1000
+  updateCache.value = result
+  return result
+}
+
+/** 仅供测试：清掉更新检查缓存。 */
+export function resetUpdateCache() {
+  updateCache.at = 0
+  updateCache.ttlMs = 0
+  updateCache.value = null
+}
 
 /** 上传上限 128 MiB。 */
 export const MEDIA_LIMIT_BYTES = 128 * 1024 * 1024
@@ -46,6 +189,9 @@ export const MEDIA_DIR_NAME = 'startup-animation-media'
 
 /** 内置素材库目录名（包内，随插件分发，见 builtin/README 一节的分类结构）。 */
 export const BUILTIN_DIR_NAME = 'builtin'
+
+/** 仓库主页（更新提示与"查看更新"链接的唯一来源）。 */
+export const REPO_URL = 'https://github.com/WWFZS/dsh-plugin-startup-animation'
 
 /** 注入到页面的配置全局名。 */
 export const BOOT_GLOBAL = '__DSA_BOOT__'
@@ -1020,6 +1166,11 @@ export function manageStatus(options) {
     : []
   return {
     ok: true,
+    /** 当前安装的版本（唯一来源：package.json）。设置页标题旁的小字用它。 */
+    version: VERSION,
+    /** 更新检查所需的仓库信息；前端只用它拼 GitHub 链接，不做任何写操作。 */
+    repo: REPO_URL,
+    releasesUrl: `${REPO_URL}/releases`,
     enabled: client.enabled === true,
     sound: client.sound === true,
     mode: client.mode,
@@ -1085,6 +1236,40 @@ export function apply(ctx) {
     }
   }
 
+  // ── ⓪ 运行环境自述（只写日志，不参与任何功能判断）──
+  //
+  // 这个插件横跨两个内核扩展点：`webserver/index-inject`（注入行）与 `webServer.register`
+  // （路由）。它们都不是公开稳定 API，DSH 小版本间可能改名/换签名。策略是**探测式降级**
+  // 而不是版本号判断：
+  //   - 注入点没了 → 页面只是没有动画，内核启动页照常（注册本身包在 try 里）；
+  //   - webServer 服务没了 → `ctx.inject(['webServer'])` 根本不回调，插件安静地不提供设置页；
+  //   - 任何一处签名变了 → 都走"只 warn、不抛"的路径，绝不让内核起不来。
+  // 把宿主版本打进日志，是为了用户报"升级 DSH 后动画没了"时能一眼对上是哪一版。
+  try {
+    const hostVersion = (() => {
+      try {
+        // 从内核自己的 package.json 读版本；读不到就算了，不是启动依赖。
+        for (const candidate of [
+          new URL('./node_modules/@deepseek-ai/dsh/package.json', import.meta.url),
+          new URL('./node_modules/@deepseek-ai/dsh-desktop-runtime/package.json', import.meta.url),
+        ]) {
+          try {
+            const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8'))
+            if (typeof parsed.version === 'string' && parsed.version !== '') return parsed.version
+          } catch {
+            /* 换下一个候选 */
+          }
+        }
+      } catch {
+        /* 读不到就不报版本 */
+      }
+      return ''
+    })()
+    info(`v${VERSION} 已加载${hostVersion === '' ? '' : `（宿主内核 ${hostVersion}）`}`)
+  } catch {
+    /* 自述失败不影响任何功能 */
+  }
+
   // ── ① 注入行：必须**同步**注册，且不能等到任何服务就绪 ──
   //
   // v1.5.0 关键事实（决定注入策略）：桌面壳把注入表在宿主启动时**收集一次**并缓存
@@ -1093,25 +1278,31 @@ export function apply(ctx) {
   // "显示不显示 / 用什么素材 / 多久"由运行时（boot.js）**每次页面加载实时读取** manage 接口的
   // cfg 决定 —— 开关、素材、时长等配置改动**刷新页面即生效**，无需重启。
   // global 行仅作为实时读取失败（宿主忙/超时）时的兜底快照。
-  ctx.on('webserver/index-inject', (table) => {
-    if (!Array.isArray(table)) return
-    try {
-      const { client, warnings } = current()
-      for (const warning of warnings) warn(warning)
-      // 先把两份运行时文本都读出来，读不到就整体放弃（绝不推半截行）。
-      const cssText = readRuntime('boot.css')
-      const jsText = readRuntime('boot.js')
-      table.push(
-        // global 行在 head，脚本在 body：读它的脚本一定在其后执行。
-        { kind: 'global', name: BOOT_GLOBAL, value: client },
-        { kind: 'style', text: cssText },
-        { kind: 'script', placement: 'body', text: jsText },
-      )
-    } catch (error) {
-      // 注入行生成失败只是"没有开机动画"，绝不能让索引渲染失败。
-      warn(`注入行生成失败，页面回落到内核原生启动页：${describe(error)}`)
-    }
-  })
+  try {
+    ctx.on('webserver/index-inject', (table) => {
+      if (!Array.isArray(table)) return
+      try {
+        const { client, warnings } = current()
+        for (const warning of warnings) warn(warning)
+        // 先把两份运行时文本都读出来，读不到就整体放弃（绝不推半截行）。
+        const cssText = readRuntime('boot.css')
+        const jsText = readRuntime('boot.js')
+        table.push(
+          // global 行在 head，脚本在 body：读它的脚本一定在其后执行。
+          { kind: 'global', name: BOOT_GLOBAL, value: client },
+          { kind: 'style', text: cssText },
+          { kind: 'script', placement: 'body', text: jsText },
+        )
+      } catch (error) {
+        // 注入行生成失败只是"没有开机动画"，绝不能让索引渲染失败。
+        warn(`注入行生成失败，页面回落到内核原生启动页：${describe(error)}`)
+      }
+    })
+  } catch (error) {
+    // 注入事件本身注册失败（未来内核改了事件名/签名）：只是没有开机动画，
+    // 内核页面完全正常。绝不能在这里抛 —— apply 抛异常会让整个插件被判 failed。
+    warn(`注入事件注册失败，本次启动没有开机动画：${describe(error)}`)
+  }
 
   // ── ② 素材路由 + 管理路由：webServer 是可选能力，晚到就晚接，不阻塞 apply ──
   ctx.inject(['webServer'], (child) => {
@@ -1605,6 +1796,44 @@ export function apply(ctx) {
                 reply(res, 200, status())
               })
             })
+          },
+        }),
+      )
+
+      // 更新检查：只读，不写任何文件。界面用它显示标题旁的小字与「有新版本」提示。
+      disposers.push(
+        child.webServer.register({
+          kind: 'exact',
+          path: UPDATE_ROUTE,
+          handler: (req, res) => {
+            const method = String(req.method ?? 'GET').toUpperCase()
+            if (method !== 'GET' && method !== 'HEAD') {
+              reply(res, 405, { ok: false, error: 'use GET' })
+              return
+            }
+            let force = false
+            try {
+              force = new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get('force') === '1'
+            } catch {
+              force = false
+            }
+            // 网络失败不抛：checkForUpdate 已经把任何异常归一成 reachable:false。
+            void checkForUpdate({ currentVersion: VERSION, repoUrl: REPO_URL, force })
+              .then((result) => {
+                reply(res, 200, { ok: true, version: VERSION, repo: REPO_URL, ...result })
+              })
+              .catch((error) => {
+                reply(res, 200, {
+                  ok: true,
+                  version: VERSION,
+                  repo: REPO_URL,
+                  reachable: false,
+                  reason: describe(error),
+                  current: VERSION,
+                  latest: null,
+                  updateAvailable: false,
+                })
+              })
           },
         }),
       )

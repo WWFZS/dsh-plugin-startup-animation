@@ -17,7 +17,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
-const sourceDir = path.join(repoRoot, 'startup-animation')
+// 包就在仓库根目录：这样用户能直接 `github:user/repo` 安装，不带 #path: 后缀。
+const sourceDir = repoRoot
 const outFlag = process.argv.indexOf('--out')
 const outRoot =
   outFlag >= 0 && process.argv[outFlag + 1] !== undefined
@@ -76,30 +77,64 @@ const target = path.join(outRoot, manifest.name)
 fs.rmSync(target, { recursive: true, force: true })
 fs.mkdirSync(target, { recursive: true })
 
-/** 递归复制，跳过源母版与开发期目录。 */
-const SKIP_DIRS = new Set(['node_modules', '.git', '.thumbs.bak'])
-const copyTree = (from, to) => {
-  fs.mkdirSync(to, { recursive: true })
-  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-    if (SKIP_DIRS.has(entry.name)) continue
-    const src = path.join(from, entry.name)
-    const dst = path.join(to, entry.name)
+/**
+ * 按 package.json 的 `files` 白名单复制。
+ *
+ * 包搬到仓库根目录后不能再"整目录递归复制" —— 那样会把 tools/、selftest.mjs、
+ * dist/、.git/ 全打进发布包。白名单是唯一的事实来源：它决定 npm 发什么，
+ * 也决定这里复制什么，两边同名规则。
+ */
+const matches = (relPosix, pattern) => {
+  if (pattern.startsWith('!')) return false
+  if (pattern === relPosix) return true
+  if (pattern.endsWith('/**/*')) {
+    const base = pattern.slice(0, -5)
+    return relPosix === base || relPosix.startsWith(`${base}/`)
+  }
+  if (pattern.endsWith('/*')) {
+    const base = pattern.slice(0, -2)
+    return relPosix.startsWith(`${base}/`) && !relPosix.slice(base.length + 1).includes('/')
+  }
+  return false
+}
+
+const files = manifest.files ?? []
+const copied = []
+const copyFile = (rel) => {
+  const src = path.join(sourceDir, rel)
+  const dst = path.join(target, rel)
+  // 4K 母版不进发布包：对应的 *.web.mp4 已在白名单里单独命中。
+  if (/[\\/]\.upload-|\.tmp$/.test(rel)) return
+  if (/\.mp4$/i.test(rel) && !rel.toLowerCase().endsWith('.web.mp4')) return
+  fs.mkdirSync(path.dirname(dst), { recursive: true })
+  fs.copyFileSync(src, dst)
+  copied.push(rel)
+}
+
+const walkSource = (dir, prefix) => {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (['node_modules', '.git', 'dist'].includes(entry.name)) continue
+    const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
+    const abs = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      copyTree(src, dst)
-    } else if (entry.name.endsWith('.web.mp4')) {
-      fs.copyFileSync(src, dst)
-    } else if (/\.mp4$/i.test(entry.name)) {
-      // 4K 母版不进发布包（对应的 .web.mp4 已经复制过）。
-      continue
-    } else if (entry.name.startsWith('.upload-') || entry.name.endsWith('.tmp')) {
-      continue
-    } else {
-      fs.copyFileSync(src, dst)
+      // 只在某个白名单模式可能命中该子树时才递归。
+      const hitsDir = files.some((pattern) => {
+        const base = pattern.replace(/\/\*\*\/\*$/, '').replace(/\/\*$/, '')
+        return rel === base || rel.startsWith(`${base}/`) || base.startsWith(`${rel}/`)
+      })
+      if (hitsDir) walkSource(abs, rel)
+    } else if (files.some((pattern) => matches(rel, pattern))) {
+      copyFile(rel)
     }
   }
 }
+walkSource(sourceDir, '')
 
-copyTree(sourceDir, target)
+// 白名单里点名的单个文件（不含通配）必然要复制过来。
+for (const pattern of files) {
+  if (pattern.includes('*')) continue
+  if (!copied.includes(pattern) && fs.existsSync(path.join(sourceDir, pattern))) copyFile(pattern)
+}
 
 // ── 统计 ──
 const walk = (dir) => {

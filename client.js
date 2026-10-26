@@ -25,6 +25,7 @@ window.__ModuleLoader__.load({
     const h = React.createElement
 
     const MANAGE = '/dsh-startup-animation/manage'
+    const UPDATE = '/dsh-startup-animation/update'
     const ASSET = '/dsh-startup-animation/asset'
     const NS = 'startup-animation'
 
@@ -77,6 +78,13 @@ window.__ModuleLoader__.load({
       loadFail: '读取状态失败',
       netFail: '无法连接宿主',
       fail: '操作失败',
+      versionLabel: '版本',
+      updateChecking: '检查更新中…',
+      updateAvailable: '有新版本 {latest}',
+      updateLatest: '已是最新',
+      updateUnknown: '检查不到更新',
+      updateFailed: '更新检查失败',
+      viewRelease: '查看更新',
     }
 
     const DICT_EN = {
@@ -128,6 +136,13 @@ window.__ModuleLoader__.load({
       loadFail: 'Failed to read status',
       netFail: 'Cannot reach the host',
       fail: 'Action failed',
+      versionLabel: 'v',
+      updateChecking: 'Checking for updates…',
+      updateAvailable: 'Version {latest} available',
+      updateLatest: 'Up to date',
+      updateUnknown: 'Update check unavailable',
+      updateFailed: 'Update check failed',
+      viewRelease: 'View release',
     }
 
     /** 三个分类的 accept：MP4 只收视频，壁纸只收图片，音频只收音频（后端仍按扩展名归类兜底）。 */
@@ -143,6 +158,13 @@ window.__ModuleLoader__.load({
 .dsa-set-wrap { display: flex; flex-direction: column; gap: 4px; }
 .dsa-set-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 2px; }
 .dsa-set-title { font-size: 15px; font-weight: 600; color: var(--dsw-alias-label-primary); margin: 0; }
+.dsa-set-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+/* 版本小字：贴着标题，不抢视觉重量；可点击时打开 Release 页。 */
+.dsa-set-ver { font-size: 11.5px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dsa-set-ver[data-update="1"] { color: var(--dsw-alias-brand-primary); font-weight: 600; }
+.dsa-set-ver-btn { font: inherit; font-size: 11.5px; padding: 0; border: none; background: none; color: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.dsa-set-ver-btn:hover { color: var(--dsw-alias-brand-primary); }
+.dsa-set-ver-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
 .dsa-set-tabs { display: flex; gap: 4px; padding: 3px; margin: 14px 0 8px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; align-self: flex-start; }
 .dsa-set-tab { font: inherit; font-size: 13px; padding: 6px 18px; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; transition: background 120ms ease, color 120ms ease; }
 .dsa-set-tab:hover { color: var(--dsw-alias-label-primary); }
@@ -258,6 +280,47 @@ window.__ModuleLoader__.load({
       return { state, busy, message, setMessage, send }
     }
 
+    /**
+     * 版本 + 更新检查状态。
+     *
+     * 设计取舍：
+     *   - **不阻塞页面**：先渲染"版本 x.y.z"，更新检查在后台跑，回来再补提示；
+     *   - **失败不报错**：离线/墙内/GitHub 挂了都只显示"检查不到更新"，
+     *     因为这只是个提示，不该让设置页看起来像坏了；
+     *   - 检查结果由宿主的 `/update` 端点给出（宿主有缓存，不会每次开页面都打 GitHub）。
+     *
+     * @param {(key: string) => string} t 翻译。
+     * @returns {{ version: string, update: object | null, checking: boolean }} 版本状态。
+     */
+    function useVersionInfo(t) {
+      const [version, setVersion] = React.useState('')
+      const [update, setUpdate] = React.useState(null)
+      const [checking, setChecking] = React.useState(true)
+
+      React.useEffect(() => {
+        let alive = true
+        fetch(`${UPDATE}?check=1`, { cache: 'no-store' })
+          .then((res) => res.json())
+          .then((payload) => {
+            if (!alive) return
+            setChecking(false)
+            if (payload && typeof payload === 'object') {
+              if (typeof payload.version === 'string' && payload.version !== '') setVersion(payload.version)
+              if (typeof payload.current === 'string' && payload.current !== '') setVersion(payload.current)
+              setUpdate(payload)
+            }
+          })
+          .catch(() => {
+            if (alive) setChecking(false)
+          })
+        return () => {
+          alive = false
+        }
+      }, [])
+
+      return { version, update, checking }
+    }
+
     /** POST 一个 JSON 载荷（开关/时长/素材库操作共用）。 */
     function postJson(send, body, okText) {
       send(
@@ -336,6 +399,7 @@ window.__ModuleLoader__.load({
     function makeStartupAnimationPage(t) {
       return function StartupAnimationPage() {
         const { state, busy, message, setMessage, send } = useStatus(t)
+        const { version: localVersion, update, checking: updateChecking } = useVersionInfo(t)
         const [category, setCategory] = React.useState('mp4')
         // 删除上传素材前先本地撤掉预览（中断浏览器对该文件的请求，给服务端释放句柄的窗口）。
         const [previewHidden, setPreviewHidden] = React.useState([])
@@ -531,6 +595,51 @@ window.__ModuleLoader__.load({
         const categoryLabel = category === 'mp4' ? t('catMp4') : category === 'wall' ? t('catWall') : t('catAudio')
         const isAudioCat = category === 'audio'
 
+        /**
+         * 标题旁的版本小字。
+         *
+         * 三种状态：
+         *   - 有新版本 → 可点击，打开 GitHub Release 页（**不自动下载**：更新由用户决定）；
+         *   - 已是最新 → 灰字"已是最新"；
+         *   - 检查不到（离线/GitHub 不可达）→ 灰字，不给红色错误（这不是插件故障）。
+         * 版本号本身永远显示，即便更新检查失败 —— 它是用户确认"装的是哪一版"的唯一依据。
+         */
+        const versionBadge = () => {
+          const text = localVersion === '' ? '' : `${t('versionLabel')} ${localVersion}`
+          if (text === '') return null
+          const hasUpdate = update !== null && update.updateAvailable === true
+          const reachable = update !== null && update.reachable === true
+          /** 副标签：仅在拿到结果后显示，避免加载中闪一下又变。 */
+          // t() 不做变量插值（生态通行做法是 .replace）：直接给它第二参数只会
+          // 原样显示 "{latest}"，所以这里必须自己替换。
+          const note = updateChecking
+            ? t('updateChecking')
+            : hasUpdate && typeof update.latest === 'string'
+              ? t('updateAvailable').replace('{latest}', update.latest)
+              : reachable
+                ? t('updateLatest')
+                : t('updateUnknown')
+          const releaseUrl =
+            hasUpdate && typeof update?.releasesUrl === 'string' && update.releasesUrl !== ''
+              ? update.releasesUrl
+              : ''
+          return h(
+            'span',
+            { className: 'dsa-set-ver', 'data-update': hasUpdate ? '1' : '0', title: note },
+            releaseUrl === ''
+              ? text
+              : h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dsa-set-ver-btn',
+                    onClick: () => window.open(releaseUrl, '_blank', 'noopener'),
+                  },
+                  `${text} · ${note}`,
+                ),
+          )
+        }
+
         const categoryPanel = h(
           'div',
           { className: 'dsa-set-panel', role: 'tabpanel', 'aria-label': categoryLabel },
@@ -677,11 +786,16 @@ window.__ModuleLoader__.load({
           'div',
           { className: 'dsa-set-wrap', 'data-busy': busy ? '1' : '0' },
           h('style', null, STYLE),
-          // ── 标题栏：标题 + 立即刷新（页面重载 → 运行时读到实时配置 → 配置改动即生效）──
+          // ── 标题栏：标题 + 版本小字 + 立即刷新（页面重载 → 运行时读到实时配置）──
           h(
             'div',
             { className: 'dsa-set-titlebar' },
-            h('div', { className: 'dsa-set-title' }, t('title')),
+            h(
+              'div',
+              { className: 'dsa-set-heading' },
+              h('div', { className: 'dsa-set-title' }, t('title')),
+              versionBadge(),
+            ),
             h(
               'button',
               {

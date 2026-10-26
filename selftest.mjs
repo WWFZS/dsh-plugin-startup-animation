@@ -28,9 +28,15 @@ import {
   uniqueUploadTarget,
   writeHomeBootPatch,
   ASSET_ROUTE,
-} from './startup-animation/index.js'
+  REPO_URL,
+  UPDATE_ROUTE,
+  VERSION,
+  checkForUpdate,
+  compareVersions,
+  resetUpdateCache,
+} from './index.js'
 
-const packageRoot = fileURLToPath(new URL('./startup-animation/', import.meta.url))
+const packageRoot = fileURLToPath(new URL('./', import.meta.url))
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-selftest-'))
 let failures = 0
 
@@ -229,6 +235,12 @@ try {
     assert.equal(manageStatus(opts).durationSec, 15)
     writeHomeBootPatch(home, {}, ['durationSec'])
   })
+  await check('status 携带 version / repo / releasesUrl', () => {
+    const st = manageStatus(opts)
+    assert.equal(st.version, VERSION)
+    assert.equal(st.repo, REPO_URL)
+    assert.equal(st.releasesUrl, `${REPO_URL}/releases`)
+  })
 
   console.log('== 上传素材：自动归类进列表 ==')
   const uploadDir = path.join(home, 'startup-animation-media')
@@ -293,7 +305,7 @@ try {
     writeHomeBootPatch(home, { enabled: true })
   })
   await check('boot.js 运行时：实时读取 + 关闭/无素材不挂载（静态锚点）', () => {
-    const src = fs.readFileSync(new URL('./startup-animation/runtime/boot.js', import.meta.url), 'utf8')
+    const src = fs.readFileSync(new URL('./runtime/boot.js', import.meta.url), 'utf8')
     // 精简回包：开机动画只要 cfg，不该顺带让宿主重扫一遍素材库。
     assert.ok(src.includes('/dsh-startup-animation/manage?cfg=1'), '缺少实时配置端点（精简回包）')
     assert.ok(src.includes('function beginWithConfig(cfg)'), '缺少配置包装')
@@ -350,7 +362,7 @@ try {
     assert.ok(img.files.some((f) => f.path === upJpg), '另一上传素材不应被误隐藏')
   })
   await check('真删失败兜底与流释放（静态锚点）', () => {
-    const src = fs.readFileSync(new URL('./startup-animation/index.js', import.meta.url), 'utf8')
+    const src = fs.readFileSync(new URL('./index.js', import.meta.url), 'utf8')
     assert.ok(src.includes('releaseStreams(norm)'), '删除前未释放发送流')
     assert.ok(src.includes('hiddenOnly: true'), '缺少"仅隐藏"回包')
     assert.ok(src.includes('if (!res.writableEnded) stream.destroy()'), '缺少断开即销毁源流')
@@ -398,7 +410,7 @@ try {
     writeHomeBootPatch(home, {}, ['audioEnabled', 'audioFile'])
   })
   await check('boot.js 音频运行时（静态锚点）', () => {
-    const src = fs.readFileSync(new URL('./startup-animation/runtime/boot.js', import.meta.url), 'utf8')
+    const src = fs.readFileSync(new URL('./runtime/boot.js', import.meta.url), 'utf8')
     assert.ok(src.includes('playStartupAudio'), '缺少起播函数')
     assert.ok(src.includes('fadeStartupAudio(ms)'), '缺少退场淡停调用')
     assert.ok(src.includes('if (audioOn) wantSound = false'), '缺少"音频开启→视频强制静音"')
@@ -412,12 +424,12 @@ try {
     assert.ok(src.includes('state.revealedAt !== null ? state.revealedAt : state.startAt'), 'minMs 未从出画起算')
   })
   await check('boot.css 未出画=完全透明且不拦截点击（静态锚点）', () => {
-    const css = fs.readFileSync(new URL('./startup-animation/runtime/boot.css', import.meta.url), 'utf8')
+    const css = fs.readFileSync(new URL('./runtime/boot.css', import.meta.url), 'utf8')
     assert.ok(/data-media="loading"[\s\S]{0,120}opacity: 0/.test(css), 'loading 态未透明')
     assert.ok(css.includes('pointer-events: none'), '透明期未关闭点击拦截')
   })
   await check('client.js 音频设置（静态锚点）', () => {
-    const src = fs.readFileSync(new URL('./startup-animation/client.js', import.meta.url), 'utf8')
+    const src = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
     assert.ok(src.includes('useAudio:'), '缺少 useAudio 选用')
     assert.ok(src.includes("id: 'audio'"), '缺少音频页签')
     assert.ok(src.includes('audioVolume'), '缺少音量滑杆')
@@ -428,7 +440,7 @@ try {
   await check('enable→enabled 映射存在、未再用 state[key] 直取', () => {
     // 回归（v1.4.0 的"开机动画关不掉"）：toggle('enable') 曾读 state['enable']（undefined），
     // !undefined 恒为 true → 永远写回 enabled:true。React 组件无法离线执行，用源码断言钉死。
-    const src = fs.readFileSync(new URL('./startup-animation/client.js', import.meta.url), 'utf8')
+    const src = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
     assert.ok(src.includes("key === 'enable' ? 'enabled' : key"), '未找到 enable→enabled 映射')
     assert.ok(!src.includes('{ [key]: !state[key] }'), '仍在用 state[key] 直接取值（enable 键会读到 undefined）')
     assert.ok(!src.includes('{ [key]: !state[field] }') || src.includes('const field'), '字段映射缺失')
@@ -485,6 +497,92 @@ try {
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true })
 }
+
+console.log('== 版本号与更新检查 ==')
+await check('VERSION 与 package.json 一致（唯一来源）', () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+  assert.equal(VERSION, pkg.version)
+  assert.match(VERSION, /^\d+\.\d+\.\d+/, `版本号格式异常：${VERSION}`)
+})
+await check('compareVersions 比较数字段、剥离 v 前缀', () => {
+  assert.equal(compareVersions('1.9.0', '1.9.0'), 0)
+  assert.equal(compareVersions('1.10.0', '1.9.0'), 1)
+  assert.equal(compareVersions('v2.0.0', '1.9.0'), 1)
+  assert.equal(compareVersions('1.9.0', '2.0.0'), -1)
+  assert.equal(compareVersions('1.9', '1.9.0'), 0)
+  // 无法解析的版本不制造假"有更新"。
+  assert.equal(compareVersions('garbage', '1.0.0'), 0)
+})
+await check('更新检查：有新版本 → updateAvailable', async () => {
+  resetUpdateCache()
+  const fake = async () => ({ ok: true, json: async () => ({ tag_name: 'v9.9.9' }) })
+  const r = await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake, force: true })
+  assert.equal(r.reachable, true)
+  assert.equal(r.latest, '9.9.9')
+  assert.equal(r.updateAvailable, true)
+})
+await check('更新检查：本地已最新 → 不提示', async () => {
+  resetUpdateCache()
+  const fake = async () => ({ ok: true, json: async () => ({ tag_name: 'v1.9.0' }) })
+  const r = await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake, force: true })
+  assert.equal(r.updateAvailable, false)
+})
+await check('更新检查：本地版本更高 → 不提示降级', async () => {
+  resetUpdateCache()
+  const fake = async () => ({ ok: true, json: async () => ({ tag_name: 'v1.0.0' }) })
+  const r = await checkForUpdate({ currentVersion: '2.0.0', repoUrl: REPO_URL, fetchImpl: fake, force: true })
+  assert.equal(r.updateAvailable, false)
+})
+await check('更新检查：网络失败不报错、只是 reachable=false', async () => {
+  resetUpdateCache()
+  const boom = async () => { throw new Error('offline') }
+  const r = await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: boom, force: true })
+  assert.equal(r.ok, true, '网络失败不该让 ok=false')
+  assert.equal(r.reachable, false)
+  assert.equal(r.updateAvailable, false)
+  assert.equal(r.reason, 'network')
+})
+await check('更新检查：无 fetch 能力 → no-fetch（不触及全局 fetch）', async () => {
+  resetUpdateCache()
+  const r = await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: null, force: true })
+  assert.equal(r.reachable, false)
+  assert.equal(r.reason, 'no-fetch')
+})
+await check('更新检查：Release 缺失 → 回退 tags', async () => {
+  resetUpdateCache()
+  const fake = async (url) => {
+    if (String(url).includes('/releases/latest')) return { ok: false, json: async () => ({}) }
+    return { ok: true, json: async () => [{ name: 'v3.0.0' }] }
+  }
+  const r = await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake, force: true })
+  assert.equal(r.latest, '3.0.0')
+  assert.equal(r.updateAvailable, true)
+})
+await check('更新检查缓存：命中期内不再请求', async () => {
+  resetUpdateCache()
+  let calls = 0
+  const fake = async () => { calls += 1; return { ok: true, json: async () => ({ tag_name: 'v1.9.0' }) } }
+  await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake, force: true })
+  await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake })
+  assert.equal(calls, 1, `缓存未生效，请求了 ${calls} 次`)
+})
+await check('REPO_URL 指向真实仓库（不是占位符）', () => {
+  assert.ok(!REPO_URL.includes('CHANGE_ME'), '仓库地址仍是占位符')
+  assert.match(REPO_URL, /^https:\/\/github\.com\/[^/]+\/[^/]+$/)
+})
+await check('UPDATE_ROUTE 已注册到路由清单（静态锚点）', () => {
+  const src = fs.readFileSync(new URL('./index.js', import.meta.url), 'utf8')
+  assert.ok(src.includes("export const UPDATE_ROUTE = '/dsh-startup-animation/update'"))
+  assert.ok(src.includes('path: UPDATE_ROUTE'), '更新路由未注册')
+})
+await check('client.js 版本小字（静态锚点）', () => {
+  const src = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
+  assert.ok(src.includes('useVersionInfo'), '缺少版本 hook')
+  assert.ok(src.includes('dsa-set-ver'), '缺少版本小字样式')
+  // 回归：t() 不做插值，必须用 .replace
+  assert.ok(src.includes("t('updateAvailable').replace('{latest}'"), '更新提示未做变量替换')
+  assert.ok(!src.includes("t('updateAvailable', {"), '仍在给 t() 传插值参数')
+})
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)
 process.exit(failures === 0 ? 0 : 1)

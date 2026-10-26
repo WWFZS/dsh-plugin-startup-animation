@@ -23,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const packageRoot = fileURLToPath(new URL('../startup-animation/', import.meta.url))
+const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const mp4Dir = path.join(packageRoot, 'builtin', 'MP4')
 const SUFFIX = '.web.mp4'
 const MAX_LONG_EDGE = 1920

@@ -23,7 +23,7 @@ const run = (args) => {
 const step = (title) => console.log(`\n── ${title} ──`)
 
 step('语法检查')
-for (const file of ['startup-animation/index.js', 'startup-animation/client.js', 'startup-animation/runtime/boot.js']) {
+for (const file of ['index.js', 'client.js', 'runtime/boot.js']) {
   execFileSync(process.execPath, ['--check', file], { cwd: repoRoot, stdio: 'inherit' })
   console.log(`  ok  ${file}`)
 }
