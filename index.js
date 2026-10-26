@@ -820,6 +820,38 @@ export const THUMB_DIR_NAME = '.thumbs'
 /** 图片类素材才做缩略图（视频走浏览器自己的封面帧）。 */
 const THUMBABLE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.apng'])
 
+/** 视频手工封面目录名（与图片缩略图并列放在素材分类下）。 */
+export const POSTER_DIR_NAME = '.posters'
+
+/**
+ * 找一段视频的**手工封面**（`builtin/<分类>/.posters/<素材名>.jpg`）。
+ *
+ * 为什么手工封面和自动挑帧都要有：
+ *   自动挑帧（客户端）解决的是"开头是黑场"这类通用问题；但它只会选最亮的那帧，
+ *   而有的素材最亮的那段恰恰是特效/转场（《dsh-大肥鱼》先走线稿发光，再变正片），
+ *   亮 ≠ 好看。这种"人眼才知道哪帧好看"的情况，就固定一张事先挑好的封面。
+ *
+ * 优先级：手工封面 > 客户端自动挑帧 > 浏览器首帧。三者都拿不到也照样能显示。
+ *
+ * @param {string} filePath 视频的绝对路径。
+ * @returns {string | undefined} 封面图绝对路径。
+ */
+export function posterFor(filePath) {
+  const dir = path.join(path.dirname(filePath), POSTER_DIR_NAME)
+  const stem = path.parse(filePath).name
+  // `.web.mp4` 的分发名要回溯到逻辑名，才能对上 `.posters/<逻辑名>.jpg`。
+  const logicalStem = stem.endsWith('.web') ? stem.slice(0, -4) : stem
+  for (const candidate of [`${stem}.jpg`, `${logicalStem}.jpg`, `${stem}.png`, `${logicalStem}.png`]) {
+    const abs = path.join(dir, candidate)
+    try {
+      if (fs.statSync(abs).isFile()) return abs
+    } catch {
+      continue
+    }
+  }
+  return undefined
+}
+
 /**
  * 找一张图片素材的缩略图（构建期由 tools/make-thumbs.mjs 生成，随包分发）。
  *
@@ -1396,6 +1428,19 @@ export function apply(ctx) {
             if (thumb) {
               const small = thumbnailFor(filePath)
               if (small !== undefined) filePath = small
+            }
+            // `?poster=1`：视频要一张手工封面（人挑好的那一帧），
+            // 因为自动挑帧只会选最亮的，而最亮的不一定是最好看的。
+            // 没有手工封面就照常回视频本身，客户端会自己挑帧兜底。
+            let poster = false
+            try {
+              poster = new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get('poster') === '1'
+            } catch {
+              poster = false
+            }
+            if (poster) {
+              const still = posterFor(filePath)
+              if (still !== undefined) filePath = still
             }
             serveAsset(req, res, filePath)
           },

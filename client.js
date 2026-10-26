@@ -365,6 +365,18 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 素材 URL 追加一个查询参数（`?` 还是 `&` 取决于已有的 query）。
+     *
+     * 卡片传进来的 `src` 已经带 `?path=...`，直接再拼 `?poster=1` 会得到
+     * 两个 `?`、参数被吞掉 —— 手工封面就永远探测不到。
+     * @param {string} src 已有 URL。 @param {string} param 形如 `poster=1`。
+     * @returns {string} 追加后的 URL。
+     */
+    function withParam(src, param) {
+      return `${src}${src.includes('?') ? '&' : '?'}${param}`
+    }
+
+    /**
     /**
      * 视频封面取帧点：在 25% / 50% / 75% 三个候选位置里，选**画面最亮**的那一帧。
      *
@@ -468,9 +480,13 @@ window.__ModuleLoader__.load({
     function VideoCover(props) {
       const ref = React.useRef(null)
       const [poster, setPoster] = React.useState('')
+      // 有手工封面（人挑好的那一帧）就直接用，不再跑自动挑帧：
+      // 自动挑帧只会选"最亮"，而有的素材最亮的那段是特效/转场，不好看。
+      const manualPoster = withParam(props.src, 'poster=1')
+      const [hasManual, setHasManual] = React.useState(true)
       React.useEffect(() => {
         const video = ref.current
-        if (!video) return undefined
+        if (!video || hasManual) return undefined
         let alive = true
         const onMeta = () => {
           void (async () => {
@@ -503,7 +519,36 @@ window.__ModuleLoader__.load({
           alive = false
           video.removeEventListener('loadedmetadata', onMeta)
         }
-      }, [props.src])
+      }, [props.src, hasManual])
+
+      // 先探测一次手工封面是否存在（HEAD），不存在再退回自动挑帧。
+      React.useEffect(() => {
+        let alive = true
+        fetch(manualPoster, { method: 'HEAD', cache: 'no-store' })
+          .then((res) => {
+            if (alive && res.ok) setHasManual(true)
+            else if (alive) setHasManual(false)
+          })
+          .catch(() => {
+            if (alive) setHasManual(false)
+          })
+        return () => {
+          alive = false
+        }
+      }, [manualPoster])
+
+      // 手工封面模式下用 <img> 显示封面；否则用 <video> 让浏览器/自动挑帧出画面。
+      if (hasManual) {
+        return h('img', {
+          className: props.className,
+          src: manualPoster,
+          loading: 'lazy',
+          decoding: 'async',
+          alt: '',
+          'aria-hidden': true,
+          onError: () => setHasManual(false),
+        })
+      }
 
       return h('video', {
         ref,

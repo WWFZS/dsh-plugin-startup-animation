@@ -1,36 +1,59 @@
-# Startup Animation · 开机动画
+<div align="center">
 
-> A full-screen animated startup screen for **DeepSeek Harness** — shown while Harness boots,
-> click anywhere to skip. Ships a built-in video / wallpaper / audio library out of the box,
-> and accepts your own media.
+<img src="docs/screenshot-startup.jpg" width="720" alt="Startup animation preview">
 
-[中文说明](README.zh.md) | English
+# Startup Animation
+
+English | [简体中文](README.zh.md)
+
+A full-screen startup animation, for your DeepSeek Harness.
+
+Plays on boot · Click to skip · Zero dependencies · Built-in library
+
+<img src="https://img.shields.io/badge/VERSION-1.9.0-4d6bfe?style=flat-square" alt="Version">
+<img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
+<img src="https://img.shields.io/badge/dependencies-0-2ea44f?style=flat-square" alt="No deps">
+<img src="https://img.shields.io/badge/size-26%20MB-6e7681?style=flat-square" alt="Size">
+<img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="License">
+<img src="https://img.shields.io/badge/Author-WWFZS-8957e5?style=flat-square" alt="Author">
+
+[Install](#install) · [Screenshots](#screenshots) · [Usage](#usage) · [Compatibility](#compatibility-with-future-dsh-releases) · [Releases](https://github.com/WWFZS/dsh-plugin-startup-animation/releases) · [Build](#development)
+
+</div>
 
 ---
 
-## What it does
+## Overview
 
-While DeepSeek Harness starts up, this plugin puts a full-screen animation in front of the
-loading screen. It **listens for the app being ready** and fades out exactly when the real UI
-takes over — you never wait on the animation itself.
+**Startup Animation** is a full-screen boot screen plugin for DeepSeek Harness. While Harness
+starts up it covers the loading page, and it **listens for the app actually being ready** —
+the overlay fades out the moment the real UI takes over, so you are always waiting on the
+application, never on the animation.
 
-- **Works with zero configuration.** Install it and you get the built-in animated startup
-  screen immediately; nothing to set up.
-- **Two ways to start**: pick a frame from the built-in library (3 videos, 7 wallpapers,
-  9 voice clips), or upload your own MP4 / WebM / GIF / PNG / JPG / MP3.
-- **Audio is three independent choices**, and you decide each one: a video that *has* a
-  sound track, a video that *has none*, and a standalone startup audio file. Turn on either,
-  both, or neither — the plugin never silences one to make room for the other.
-- **Startup audio** plays during the animation with its own
-  volume and a fade-out synced to the animation's exit.
-- **Never traps you**: click, press `Esc` / `Enter` / `Space`, or just wait — every path exits.
-  If the animation itself fails in any way, the stock boot screen shows and nothing else
-  changes.
-- **Real progress bar** when the kernel exposes its boot progress arc; a shimmer otherwise.
+The plugin attaches through two kernel extension points: `webserver/index-inject` for the
+overlay and styles, and `webServer.register` for the media and management routes. It has
+**zero npm dependencies**, and its browser half only `require`s `react` from the host's module
+table — install and use, no build step.
 
-### Screenshots
+Out of the box it ships **4 videos / 7 wallpapers / 9 voice clips**, and accepts your own
+MP4 / WebM / GIF / PNG / JPG / MP3. Audio is split into three independent switches that you
+decide yourself.
 
-> Add your own screenshots to `docs/screenshot-*.png` and reference them here.
+## Highlights
+
+- **Works with zero configuration** — install it and the built-in animation plays immediately
+- **Two ways to start** — pick from the built-in library, or upload your own files
+- **Three independent audio switches** — video with a sound track, silent video, standalone clip
+- **Never traps you** — click, `Esc` / `Enter` / `Space`, or just wait; every path exits
+- **Fails silently** — any failure falls back to the stock boot screen, never blocking startup
+- **Real progress bar** when the kernel exposes its boot progress arc, a shimmer otherwise
+- **No self-update** — it only reports a newer release and links to it; you decide
+
+## Screenshots
+
+**Media library** — three category tabs, click a card to apply it, built-in vs uploaded labelled:
+
+![Media library](docs/screenshot-library.png)
 
 ## Install
 
@@ -55,7 +78,7 @@ git clone https://github.com/WWFZS/dsh-plugin-startup-animation.git
 dsh plugin --profile <your-profile> add /absolute/path/to/dsh-plugin-startup-animation
 ```
 
-## Using it
+## Usage
 
 Open **Settings → Startup Animation** (the entry sits in the sidebar settings list).
 
@@ -120,7 +143,7 @@ Everything else has a sane default; see [`index.js`](index.js) `DEFAULT_CONFIG`.
 
 | Kind | Formats | Notes |
 |---|---|---|
-| Video | `mp4` `m4v` `webm` `ogv` `ogg` | Looped while waiting. Built-ins ship as 1080p/8s faststart files. |
+| Video | `mp4` `m4v` `webm` `ogv` `ogg` | Looped while waiting. Built-ins ship as 1080p / 8s / faststart files. |
 | Image | `gif` `apng` `webp` `png` `jpg` `jpeg` | `gif`/`apng`/`webp` animate; stills get a slow "breathing" zoom. |
 | Audio | `mp3` `wav` `m4a` `aac` `flac` `opus` | Startup audio only. |
 
@@ -131,10 +154,10 @@ Upload path: `$DSH_HOME/startup-animation-media/`. Uploads are capped at **128 M
 Everything below ships inside the package and appears in the picker:
 
 - **MP4** — 4 clips, all H.264 faststart so they start streaming immediately (1.6–6.6 MB each).
-  `大肥鱼-欢迎回来` has a spoken sound track (turn on **Play video with sound** to hear it);
-the other three are silent by design
-- **壁纸 / Wallpaper** — 7 stills, with pre-generated 480 px thumbnails for the picker
-- **音频 / Audio** — 9 voice clips
+  `dsh-大肥鱼` has a spoken sound track (turn on **Play video with sound** to hear it);
+  the other three are silent by design
+- **Wallpaper** — 7 stills, with pre-generated 480 px thumbnails for the picker
+- **Audio** — 9 voice clips
 
 ## How it stays out of your way
 
@@ -191,15 +214,16 @@ for you.
 ## Development
 
 ```sh
-node ../selftest.mjs        # pure-function + HTTP semantics suite
-node ../tools/host-smoke.mjs  # drives the real route handlers over HTTP
-node ../tools/make-thumbs.mjs # regenerate picker thumbnails (needs ffmpeg)
-node ../tools/optimize-builtin.mjs # regenerate 1080p faststart variants (needs ffmpeg)
+node tools/preflight.mjs            # full check + release directory
+node selftest.mjs                   # pure-function + HTTP semantics suite
+node tools/host-smoke.mjs           # drives the real route handlers over HTTP
+node tools/make-thumbs.mjs          # regenerate picker thumbnails (needs ffmpeg)
+node tools/optimize-builtin.mjs     # regenerate faststart variants (needs ffmpeg)
 ```
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
-Built-in media is distributed for demonstration purposes; check the repository's
-`ASSETS.md` for per-file provenance before redistributing it commercially.
+Built-in media is distributed for demonstration purposes; check [ASSETS.md](ASSETS.md) for
+per-file provenance before redistributing it commercially.

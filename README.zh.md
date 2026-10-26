@@ -1,30 +1,56 @@
+<div align="center">
+
+<img src="docs/screenshot-startup.jpg" width="720" alt="开机动画预览">
+
 # 开机动画 · Startup Animation
 
-> 给 **DeepSeek Harness** 加一个全屏开机动画：启动 Harness 时盖在加载页前面播放，
-> 点画面任意处即可跳过。开箱自带视频 / 壁纸 / 音频素材库，也能用你自己的文件。
+简体中文 | [English](README.md)
 
-[English](README.md) | 中文
+把全屏开机动画，装进你的 DeepSeek Harness。
+
+开机即播 · 点击跳过 · 零依赖 · 内置素材库
+
+<img src="https://img.shields.io/badge/VERSION-1.9.0-4d6bfe?style=flat-square" alt="Version">
+<img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
+<img src="https://img.shields.io/badge/依赖-0%20npm%20包-2ea44f?style=flat-square" alt="No deps">
+<img src="https://img.shields.io/badge/体积-26%20MB-6e7681?style=flat-square" alt="Size">
+<img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="License">
+<img src="https://img.shields.io/badge/Author-WWFZS-8957e5?style=flat-square" alt="Author">
+
+[安装](#安装) · [界面预览](#界面预览) · [使用指南](#怎么用) · [兼容性](#对未来-dsh-版本的兼容性) · [更新记录](https://github.com/WWFZS/dsh-plugin-startup-animation/releases) · [源码构建](#开发)
+
+</div>
 
 ---
 
-## 它做什么
+## 项目简介
 
-Harness 启动时，这个插件在加载页前面盖一层全屏动画，并**监听应用真正就绪的时刻**——
-界面一接管就淡出，你等的永远是应用本身，不是动画。
+**开机动画（Startup Animation）** 是面向 DeepSeek Harness 的全屏启动画面插件。Harness
+启动时，它在加载页前面盖一层动画，并**监听应用真正就绪的时刻**——界面一接管就淡出，
+你等的永远是应用本身，不是动画。
 
-- **装上就有**：不需要任何配置，内置动画立刻生效。
-- **两种玩法**：从内置素材库挑一个（3 个视频、7 张壁纸、9 段语音），
-  或者上传播放你自己的 MP4 / WebM / GIF / PNG / JPG / MP3。
-- **声音是三个彼此独立的选择**，各由你自己决定：带音轨的视频、没音轨的视频、以及单独的开机音频文件。
-  开一个、开两个、或者都不开都可以——插件不会为了让某一路响起来去静音另一路。
-- **开机音频**：动画期间播放选定的音频，音量和视频独立，退场时一起淡出。
-- **绝不扣住你**：点一下、按 `Esc` / `Enter` / `空格`、或者干脆等——每条路都能出去。
-  动画自身任何一步失败，都会安静地退回 Harness 原生启动页。
-- **真实进度条**：内核暴露启动进度弧时用真实进度，否则走流光。
+插件通过内核的两个扩展点接入：`webserver/index-inject` 注入覆盖层与样式，
+`webServer.register` 提供素材与管理路由。**没有任何 npm 依赖**，浏览器半边只从宿主的
+模块表 `require('react')`，装好即用、无需构建。
 
-### 截图
+开箱自带 **4 段视频 / 7 张壁纸 / 9 段语音**，也支持上传你自己的 MP4 / WebM / GIF /
+PNG / JPG / MP3。声音分成三个彼此独立的开关，各由你自己决定。
 
-> 把截图放进 `docs/screenshot-*.png` 后在这里引用。
+## 核心特性
+
+- **装上就有** —— 不需要任何配置，内置动画立刻生效
+- **两种玩法** —— 从内置素材库挑一个，或上传你自己的文件
+- **声音三个独立开关** —— 带音轨的视频、无音轨的视频、独立音频文件，可以任意组合
+- **绝不扣住你** —— 点击、`Esc` / `Enter` / `空格`、或者干等，每条路都能出去
+- **失败即静默降级** —— 任何一步出错都退回 Harness 原生启动页，不阻塞启动
+- **真实进度条** —— 内核暴露启动进度弧时用真实进度，否则走流光
+- **不自动更新** —— 只提示有新版本并给出 Release 链接，装不装你决定
+
+## 界面预览
+
+**素材库** —— 三个分类页签、卡片点选即用、内置/上传来源标记：
+
+![素材库](docs/screenshot-library.png)
 
 ## 安装
 
@@ -121,7 +147,7 @@ dsh plugin --profile <你的 profile> add github:WWFZS/dsh-plugin-startup-animat
 以下全部随包分发，在列表里直接可选：
 
 - **MP4** —— 4 段，全部为 H.264 faststart（可直接流式播放，每段 1.6–6.6 MB）。
-  `大肥鱼-欢迎回来` 带语音音轨（打开「视频带声播放」即可听到），另外三段是无音轨的
+  `dsh-大肥鱼` 带语音音轨（打开「视频带声播放」即可听到），另外三段无音轨
 - **壁纸** —— 7 张，附带预生成的 480px 缩略图供列表使用
 - **音频** —— 9 段语音
 
@@ -171,14 +197,15 @@ dsh plugin --profile <你的 profile> remove dsh-plugin-startup-animation
 ## 开发
 
 ```sh
-node ../selftest.mjs          # 纯函数 + HTTP 语义测试
-node ../tools/host-smoke.mjs  # 用真实路由处理器跑一遍 HTTP
-node ../tools/make-thumbs.mjs # 重新生成列表缩略图（需要 ffmpeg）
-node ../tools/optimize-builtin.mjs # 重新生成 1080p faststart 变体（需要 ffmpeg）
+node tools/preflight.mjs             # 全套检查 + 出发布目录
+node selftest.mjs                    # 纯函数 + HTTP 语义测试
+node tools/host-smoke.mjs            # 用真实路由处理器跑一遍 HTTP
+node tools/make-thumbs.mjs           # 重新生成列表缩略图（需要 ffmpeg）
+node tools/optimize-builtin.mjs      # 重新生成 faststart 变体（需要 ffmpeg）
 ```
 
 ## 许可证
 
 MIT —— 见 [LICENSE](LICENSE)。
 
-内置素材仅用于演示；商业再分发前请先看仓库里的 `ASSETS.md` 确认每个文件的来源。
+内置素材仅用于演示；商业再分发前请先看仓库里的 [ASSETS.md](ASSETS.md) 确认每个文件的来源。

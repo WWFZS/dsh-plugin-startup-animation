@@ -604,11 +604,17 @@ await check('files 白名单不会带上 4K 母版（GitHub 安装少下 57 MB�
   const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
   const files = pkg.files
   assert.ok(!files.some((f) => f === 'builtin/**/*' || f === 'builtin/**'), 'files 仍用 builtin/**/* 通配')
-  const mp4Patterns = files.filter((f) => f.includes('builtin/MP4'))
-  assert.ok(mp4Patterns.length > 0, 'files 未声明任何 MP4')
-  for (const pattern of mp4Patterns) {
+  // 只检查**视频**条目：`.posters/*`（手工封面图）与视频同目录，但它不是视频。
+  const videoPatterns = files.filter((f) => f.includes('builtin/MP4') && f.endsWith('.mp4'))
+  assert.ok(videoPatterns.length > 0, 'files 未声明任何 MP4')
+  for (const pattern of videoPatterns) {
     assert.ok(pattern.endsWith('.web.mp4'), `MP4 白名单应只含 .web.mp4，实际：${pattern}`)
   }
+  // 手工封面目录要随包分发，否则视频卡片没有封面可显示。
+  assert.ok(
+    files.some((f) => f.includes('builtin/MP4/.posters')),
+    'files 缺少 builtin/MP4/.posters（视频手工封面）',
+  )
   // 图片/音频分类允许通配（它们没有母版/变体之分）。
   assert.ok(files.includes('builtin/图片/**/*'), '缺少 图片 分类')
   assert.ok(files.includes('builtin/音频/**/*'), '缺少 音频 分类')

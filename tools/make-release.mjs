@@ -87,15 +87,16 @@ fs.mkdirSync(target, { recursive: true })
 const matches = (relPosix, pattern) => {
   if (pattern.startsWith('!')) return false
   if (pattern === relPosix) return true
+  // `dir/**/*`：整棵子树（含 dir 本身）。
   if (pattern.endsWith('/**/*')) {
     const base = pattern.slice(0, -5)
     return relPosix === base || relPosix.startsWith(`${base}/`)
   }
-  if (pattern.endsWith('/*')) {
-    const base = pattern.slice(0, -2)
-    return relPosix.startsWith(`${base}/`) && !relPosix.slice(base.length + 1).includes('/')
-  }
-  return false
+  // 其余情况按 glob 处理（`dir/*`、`dir/*.jpg`、`*` 等）。
+  // 之前只认结尾正好是 `/*` 的图案，于是 `docs/*.jpg` 被当成
+  // "目录名 docs/*.j" 去比对，永远匹配不上 —— 截图因此没进发布包。
+  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
+  return new RegExp(`^${escaped}$`).test(relPosix)
 }
 
 const files = manifest.files ?? []
@@ -117,10 +118,12 @@ const walkSource = (dir, prefix) => {
     const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`
     const abs = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      // 只在某个白名单模式可能命中该子树时才递归。
+      // 只在某个白名单图案可能命中该子树时才递归：图案的第一段必须与这层目录对齐。
       const hitsDir = files.some((pattern) => {
-        const base = pattern.replace(/\/\*\*\/\*$/, '').replace(/\/\*$/, '')
-        return rel === base || rel.startsWith(`${base}/`) || base.startsWith(`${rel}/`)
+        if (pattern.startsWith('!')) return false
+        const head = pattern.split('/')[0]
+        if (head === '**' || head.includes('*')) return true
+        return head === rel.split('/')[0]
       })
       if (hitsDir) walkSource(abs, rel)
     } else if (files.some((pattern) => matches(rel, pattern))) {
