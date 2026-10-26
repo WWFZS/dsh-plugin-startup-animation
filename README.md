@@ -73,8 +73,8 @@ No restart of `dsh` is needed for any setting.
 The settings title bar carries a small version label — the version you actually
 installed, read from the package's own manifest.
 
-- **Up to date**: just `v1.9.0`, nothing else. No nagging.
-- **Newer release exists**: it turns into `v1.9.0 · Version 2.0.0 available`,
+- **Up to date**: just `v1.2.3` (your installed version), nothing else. No nagging.
+- **Newer release exists**: it turns into `v1.2.3 · Version 1.2.4 available`,
   and clicking it opens the GitHub release page so you can read the changes.
 - **Check unavailable**: offline, behind a firewall, or GitHub being unreachable
   leaves the label as a plain version number. It never turns into an error state —
