@@ -54,7 +54,6 @@
     "icon.svg",
     "README.md",
     "docs/*.jpg",
-    "docs/*.png",
     "README.zh.md",
     "LICENSE",
     "builtin/图片/**/*",

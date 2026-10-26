@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/screenshot-startup.jpg" width="720" alt="Startup animation preview">
+<img src="docs/startup.jpg" width="700" alt="Startup animation preview">
 
 # Startup Animation
 
@@ -53,30 +53,44 @@ decide yourself.
 
 **Media library** — three category tabs, click a card to apply it, built-in vs uploaded labelled:
 
-![Media library](docs/screenshot-library.png)
+<img src="docs/library.jpg" width="700" alt="Media library">
 
 ## Install
 
-### From the Plugin Market (recommended)
+### 1. Add it in the DSH plugin manager (recommended)
 
-DSH 0.2.1+ ships a plugin manager. Open **Settings → Plugins**, search for
-**Startup Animation**, install, then refresh the page.
+DSH 0.2.1+ ships a plugin manager — no command line needed.
 
-### From this repository
+1. Open **Settings → Plugins** and click **Add plugin**
+2. Enter the package name `dsh-plugin-startup-animation`
+3. Set **Install source** to *Custom address* and enter `https://github.com/`
+4. Click **Install**, then refresh the page
+
+<img src="docs/install.jpg" width="520" alt="Add plugin dialog">
+
+> Expand the dialog's guide panel and confirm the install source really reads
+> *Custom address* before installing.
+>
+> If GitHub is slow from your network, you can switch the source to the mainland-China
+> npm mirror, but this plugin is published on GitHub only — the mirror may not have it.
+
+### 2. Command line
 
 ```sh
 dsh plugin --profile <your-profile> add github:WWFZS/dsh-plugin-startup-animation
 ```
 
-Then restart `dsh`. On the official DSH Desktop app, install from the app's own
-**Settings → Plugins** instead — that profile belongs to the app's plugin manager.
+Then restart `dsh`.
 
-### Manual
+### 3. Local directory
 
 ```sh
 git clone https://github.com/WWFZS/dsh-plugin-startup-animation.git
 dsh plugin --profile <your-profile> add /absolute/path/to/dsh-plugin-startup-animation
 ```
+
+> **Official DSH Desktop app**: install through the app's own **Settings → Plugins**
+> (method 1). That profile belongs to the app's plugin manager; CLI changes are ignored.
 
 ## Usage
 

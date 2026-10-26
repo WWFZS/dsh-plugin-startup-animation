@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/screenshot-startup.jpg" width="720" alt="开机动画预览">
+<img src="docs/startup.jpg" width="700" alt="开机动画预览">
 
 # 开机动画 · Startup Animation
 
@@ -50,30 +50,43 @@ PNG / JPG / MP3。声音分成三个彼此独立的开关，各由你自己决�
 
 **素材库** —— 三个分类页签、卡片点选即用、内置/上传来源标记：
 
-![素材库](docs/screenshot-library.png)
+<img src="docs/library.jpg" width="700" alt="素材库">
 
 ## 安装
 
-### 从插件市场（推荐）
+### 方式一：在 DSH 插件管理器里添加（推荐）
 
-DSH 0.2.1+ 自带插件管理器。打开 **设置 → 插件**，搜索 **开机动画 / Startup Animation**，
-安装后刷新页面。
+DSH 0.2.1+ 自带插件管理器，不用命令行。
 
-### 从本仓库安装
+1. 打开 **设置 → 插件**，点 **添加插件**
+2. **插件名**填 `dsh-plugin-startup-animation`
+3. **安装源**选「自定义地址」，填 `https://github.com/`
+4. 点 **安装**，完成后刷新页面
+
+<img src="docs/install.jpg" width="520" alt="添加插件">
+
+> 建议先展开界面里的「收起引导」，确认安装源确实是「自定义地址」再点安装。
+>
+> 如果你的网络访问 GitHub 较慢，可以把安装源换成「中国大陆镜像源」（`registry.npmjs.org` 的国内镜像），
+> 但本插件目前只发布在 GitHub 上，镜像源里未必有。
+
+### 方式二：命令行
 
 ```sh
 dsh plugin --profile <你的 profile> add github:WWFZS/dsh-plugin-startup-animation
 ```
 
-然后重启 `dsh`。如果你用的是官方 DSH 桌面版，请从应用内的 **设置 → 插件** 安装——
-那个 profile 归应用的插件管理器管。
+然后重启 `dsh`。
 
-### 手动安装
+### 方式三：本地目录
 
 ```sh
 git clone https://github.com/WWFZS/dsh-plugin-startup-animation.git
 dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 ```
+
+> **官方 DSH 桌面版**：请从应用内的 **设置 → 插件** 安装（即方式一）。那个 profile
+> 归应用的插件管理器管，命令行改动无效。
 
 ## 怎么用
 
