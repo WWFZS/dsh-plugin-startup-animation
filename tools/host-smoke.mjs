@@ -343,6 +343,24 @@ console.log('  ok   GET ?cfg=1 只回配置、不扫素材库')
   console.log('  ok   并发同名上传：3 份都落地、内容完整、无残留 .part')
 }
 
+// ── 16b. 选用素材 + 同请求里的开关必须都生效 ──
+{
+  // 回归：`use` 分支曾经只写 file，同请求里的 sound/audioEnabled 被静默丢弃，
+  // 于是"选视频并开声音"这类组合要分两次请求才能生效。
+  const combined = await postJson({
+    use: 'builtin/MP4/大肥鱼-欢迎回来.mp4',
+    sound: true,
+    audioEnabled: true,
+    durationSec: 6,
+  })
+  assert.equal(combined.status, 200, combined.body.toString())
+  const j = combined.json()
+  assert.equal(j.file, 'builtin/MP4/大肥鱼-欢迎回来.mp4')
+  assert.equal(j.sound, true, '同请求里的 sound 未生效')
+  assert.equal(j.durationSec, 6, '同请求里的 durationSec 未生效')
+  console.log('  ok   选用素材 + 同请求开关：一起生效')
+}
+
 // ── 17. 更新检查路由 ──
 {
   const r = await call(UPDATE_ROUTE)

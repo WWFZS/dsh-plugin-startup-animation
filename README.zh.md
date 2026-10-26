@@ -120,7 +120,7 @@ dsh plugin --profile <你的 profile> add github:WWFZS/dsh-plugin-startup-animat
 
 以下全部随包分发，在列表里直接可选：
 
-- **MP4** —— 4 段，全部为 H.264 faststart（可直接流式播放，每段 1.4–6.6 MB）。
+- **MP4** —— 4 段，全部为 H.264 faststart（可直接流式播放，每段 1.6–6.6 MB）。
   `大肥鱼-欢迎回来` 带语音音轨（打开「视频带声播放」即可听到），另外三段是无音轨的
 - **壁纸** —— 7 张，附带预生成的 480px 缩略图供列表使用
 - **音频** —— 9 段语音

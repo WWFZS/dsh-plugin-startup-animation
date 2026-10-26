@@ -130,7 +130,7 @@ Upload path: `$DSH_HOME/startup-animation-media/`. Uploads are capped at **128 M
 
 Everything below ships inside the package and appears in the picker:
 
-- **MP4** — 4 clips, all H.264 faststart so they start streaming immediately (1.4–6.6 MB each).
+- **MP4** — 4 clips, all H.264 faststart so they start streaming immediately (1.6–6.6 MB each).
   `大肥鱼-欢迎回来` has a spoken sound track (turn on **Play video with sound** to hear it);
 the other three are silent by design
 - **壁纸 / Wallpaper** — 7 stills, with pre-generated 480 px thumbnails for the picker

@@ -635,6 +635,17 @@ await check('内置视频必须是 H.264（HEVC 在 Chromium 里解不了 → �
     assert.ok(moovAt > 0 && moovAt < mdatAt, `${name}: moov 不在 mdat 之前（不是 faststart）`)
   }
 })
+await check('视频卡片的封面不能固定取首帧（淡入素材会全黑）', () => {
+  // 回归：《大肥鱼-欢迎回来》从黑场淡入，t=0.1 平均亮度只有 16（约等于纯黑），
+  // 卡片看起来像"素材坏了"。修法是逐帧采样挑最亮的一帧，而不是钉死一个时间点。
+  const src = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
+  assert.ok(src.includes('pickCoverTime'), '缺少封面挑帧函数')
+  assert.ok(src.includes('duration * 0.25') && src.includes('duration * 0.75'), '挑帧候选点不足（应覆盖 25/50/75%）')
+  assert.ok(src.includes('getImageData'), '未做亮度采样，无法判断哪一帧更亮')
+  assert.ok(src.includes('VideoCover'), '缺少视频封面组件')
+  // 图片仍然直接显示，不该被拖进挑帧流程。
+  assert.ok(src.includes("if (!isVideo)"), '图片分支缺失')
+})
 await check('REPO_URL 指向真实仓库（不是占位符）', () => {
   assert.ok(!REPO_URL.includes('CHANGE_ME'), '仓库地址仍是占位符')
   assert.match(REPO_URL, /^https:\/\/github\.com\/[^/]+\/[^/]+$/)

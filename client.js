@@ -360,7 +360,79 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 缩略图预览元素：视频取首帧（#t=0.1 触发定位），图片直接显示。
+    /**
+     * 视频封面取帧点：在 25% / 50% / 75% 三个候选位置里，选**画面最亮**的那一帧。
+     *
+     * 为什么不能固定取首帧：素材常从黑场淡入（《大肥鱼-欢迎回来》前几秒几乎全黑），
+     * 固定取 0.1s 会得到一张纯黑卡片，看起来像素材坏了。也不能只取中点 ——
+     * 中间恰好是转场/黑场的视频同样会黑。
+     *
+     * 做法：把三帧各画到一张 32×18 的小画布上，算平均亮度，选亮的那个。
+     * 纯前端、无额外请求（复用同一个 <video> 资源），失败就退回原来的首帧行为。
+     *
+     * @param {HTMLVideoElement} video 已加载元数据的视频元素。
+     * @returns {Promise<number | null>} 选中的秒数；无法判断时 null。
+     */
+    async function pickCoverTime(video) {
+      const duration = video.duration
+      if (!Number.isFinite(duration) || duration <= 0.4) return null
+      const canvas = document.createElement('canvas')
+      canvas.width = 32
+      canvas.height = 18
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      if (ctx === null) return null
+
+      /** 等到 seek 落定。每次 seek 只触发一次 seeked。 */
+      const seekTo = (time) =>
+        new Promise((resolve) => {
+          let done = false
+          let timer = null
+          const finish = () => {
+            if (done) return
+            done = true
+            if (timer !== null) clearTimeout(timer)
+            video.removeEventListener('seeked', finish)
+            resolve()
+          }
+          video.addEventListener('seeked', finish)
+          // 兜底：某些编码 seek 卡住时别把整页吊死。
+          timer = setTimeout(finish, 1200)
+          try {
+            video.currentTime = time
+          } catch {
+            finish()
+          }
+        })
+
+      // 候选：避开最开头（常是黑场）和最末尾（可能是淡出/留白）。
+      const candidates = [duration * 0.25, duration * 0.5, duration * 0.75]
+      let best = null
+      let bestScore = -1
+      for (const time of candidates) {
+        await seekTo(time)
+        try {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+          const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          let sum = 0
+          for (let i = 0; i < data.length; i += 4) {
+            sum += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
+          }
+          const score = sum / (data.length / 4)
+          if (score > bestScore) {
+            bestScore = score
+            best = time
+          }
+        } catch {
+          /* 跨域/解码失败：当作这一帧不可用 */
+        }
+      }
+      // 三帧都太暗（整段就是暗色调素材）时也不要瞎选，交给调用方保底。
+      if (best === null || bestScore < 8) return null
+      return best
+    }
+
+    /**
+     * 缩略图预览元素。图片直接显示；视频用「亮度采样」自动挑一帧当封面。
      * 加载失败回调 onBroken（卡片隐藏媒体块占位，当前预览退回文字行）。
      * @param {string} path 素材引用。
      * @param {boolean} isVideo 按扩展名判定。
@@ -370,25 +442,75 @@ window.__ModuleLoader__.load({
      */
     function thumbEl(path, isVideo, cls, onBroken) {
       const src = thumbSrc(path)
-      return isVideo
-        ? h('video', {
-            className: cls,
-            src: `${src}#t=0.1`,
-            preload: 'metadata',
-            muted: true,
-            playsInline: true,
-            'aria-hidden': true,
-            onError: onBroken,
-          })
-        : h('img', {
-            className: cls,
-            src,
-            loading: 'lazy',
-            decoding: 'async',
-            alt: '',
-            'aria-hidden': true,
-            onError: onBroken,
-          })
+      if (!isVideo) {
+        return h('img', {
+          className: cls,
+          src,
+          loading: 'lazy',
+          decoding: 'async',
+          alt: '',
+          'aria-hidden': true,
+          onError: onBroken,
+        })
+      }
+      return h(VideoCover, { className: cls, src, onBroken })
+    }
+
+    /**
+     * 视频封面：先按原来的方式挂上去（首帧可见），元数据到了之后再挑更好的帧。
+     * 这样即便挑帧失败，卡片也还是"有画面"的，不会白屏。
+     */
+    function VideoCover(props) {
+      const ref = React.useRef(null)
+      const [poster, setPoster] = React.useState('')
+      React.useEffect(() => {
+        const video = ref.current
+        if (!video) return undefined
+        let alive = true
+        const onMeta = () => {
+          void (async () => {
+            const time = await pickCoverTime(video)
+            if (!alive || time === null) return
+            try {
+              video.currentTime = time
+            } catch {
+              /* 保持原位 */
+            }
+            // 把当前帧冻成 poster，之后再把画面收回第一帧也不影响展示，
+            // 同时避免卡片在列表里持续解码视频。
+            try {
+              const canvas = document.createElement('canvas')
+              canvas.width = video.videoWidth || 320
+              canvas.height = video.videoHeight || 180
+              const ctx = canvas.getContext('2d')
+              if (ctx !== null && canvas.width > 0 && canvas.height > 0) {
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+                if (alive) setPoster(canvas.toDataURL('image/jpeg', 0.8))
+              }
+            } catch {
+              /* 出不来 poster 也无所谓，视频本身就停在好那帧上 */
+            }
+          })()
+        }
+        video.addEventListener('loadedmetadata', onMeta)
+        if (video.readyState >= 1) onMeta()
+        return () => {
+          alive = false
+          video.removeEventListener('loadedmetadata', onMeta)
+        }
+      }, [props.src])
+
+      return h('video', {
+        ref,
+        className: props.className,
+        src: `${props.src}#t=0.1`,
+        poster: poster || undefined,
+        preload: 'metadata',
+        muted: true,
+        playsInline: true,
+        'aria-hidden': true,
+        onError: props.onBroken,
+      })
     }
 
     /**

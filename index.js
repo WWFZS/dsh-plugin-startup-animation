@@ -1532,10 +1532,26 @@ export function apply(ctx) {
                         // 同一请求里也可能带着开关/音量（前端可以一次写完）：与选用合并成一次写入。
                         /** @type {Record<string, unknown>} */
                         const libraryPatch = isAudio ? { audioFile: target } : { file: target }
+                        // 选中音频即视为要用它；显式 false 仍尊重调用方。
                         if (isAudio) {
-                          // 选中音频即视为要用它；显式 false 仍尊重调用方。
                           if (typeof body.audioEnabled === 'boolean') libraryPatch.audioEnabled = body.audioEnabled
                           else libraryPatch.audioEnabled = true
+                        }
+                        // 视频分支也要认这些开关：以前它们只在选音频时生效，
+                        // 于是 `{use: 视频, sound: true}` 里的 sound 被静默丢弃。
+                        if (typeof body.sound === 'boolean') libraryPatch.sound = body.sound
+                        if (typeof body.enabled === 'boolean') libraryPatch.enabled = body.enabled
+                        if (typeof body.audioEnabled === 'boolean' && !isAudio) {
+                          libraryPatch.audioEnabled = body.audioEnabled
+                        }
+                        if (
+                          typeof body.audioVolume === 'number' &&
+                          Number.isFinite(body.audioVolume)
+                        ) {
+                          libraryPatch.audioVolume = Math.min(1, Math.max(0, body.audioVolume))
+                        }
+                        if (typeof body.durationSec === 'number' && Number.isFinite(body.durationSec)) {
+                          libraryPatch.durationSec = clampDurationSec(body.durationSec)
                         }
                         writeHomeBootPatch(homeDir, libraryPatch)
                       } else if (typeof body.forget === 'string' && path.isAbsolute(body.forget)) {
