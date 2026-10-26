@@ -589,6 +589,21 @@ await check('发布包必须自带 package.json（否则版本会变成 0.0.0）
   // VERSION 依赖能读到自己的清单：这里直接验证读取路径成立。
   assert.equal(VERSION, pkg.version)
 })
+await check('files 白名单不会带上 4K 母版（GitHub 安装少下 57 MB）', () => {
+  // 回归：`builtin/**/*` 会把 4K 母版一起分发 —— 从 git 安装是按 files 剪裁的，
+  // 所以用户会白下 57 MB 永远不会播的文件。
+  const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+  const files = pkg.files
+  assert.ok(!files.some((f) => f === 'builtin/**/*' || f === 'builtin/**'), 'files 仍用 builtin/**/* 通配')
+  const mp4Patterns = files.filter((f) => f.includes('builtin/MP4'))
+  assert.ok(mp4Patterns.length > 0, 'files 未声明任何 MP4')
+  for (const pattern of mp4Patterns) {
+    assert.ok(pattern.endsWith('.web.mp4'), `MP4 白名单应只含 .web.mp4，实际：${pattern}`)
+  }
+  // 图片/音频分类允许通配（它们没有母版/变体之分）。
+  assert.ok(files.includes('builtin/图片/**/*'), '缺少 图片 分类')
+  assert.ok(files.includes('builtin/音频/**/*'), '缺少 音频 分类')
+})
 await check('REPO_URL 指向真实仓库（不是占位符）', () => {
   assert.ok(!REPO_URL.includes('CHANGE_ME'), '仓库地址仍是占位符')
   assert.match(REPO_URL, /^https:\/\/github\.com\/[^/]+\/[^/]+$/)

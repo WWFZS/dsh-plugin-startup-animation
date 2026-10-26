@@ -45,12 +45,16 @@
     "cordis.patch.yml",
     "runtime/boot.css",
     "runtime/boot.js",
-    "builtin/**/*",
     "locale/*.json",
     "icon.svg",
     "README.md",
     "README.zh.md",
-    "LICENSE"
+    "LICENSE",
+    "builtin/MP4/傍晚海风-海边.web.mp4",
+    "builtin/MP4/光影-动漫美女-彩色.web.mp4",
+    "builtin/MP4/多重影像.web.mp4",
+    "builtin/图片/**/*",
+    "builtin/音频/**/*"
   ],
   "scripts": {
     "test": "node selftest.mjs && node tools/host-smoke.mjs",
