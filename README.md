@@ -10,7 +10,7 @@ A full-screen startup animation, for your DeepSeek Harness.
 
 Plays on boot · Click to skip · Zero dependencies · Built-in library
 
-<img src="https://img.shields.io/badge/VERSION-1.9.0-4d6bfe?style=flat-square" alt="Version">
+<a href="https://github.com/WWFZS/dsh-plugin-startup-animation/releases"><img src="https://img.shields.io/github/v/release/WWFZS/dsh-plugin-startup-animation?style=flat-square&label=VERSION&color=4d6bfe" alt="Version"></a>
 <img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
 <img src="https://img.shields.io/badge/dependencies-0-2ea44f?style=flat-square" alt="No deps">
 <img src="https://img.shields.io/badge/size-26%20MB-6e7681?style=flat-square" alt="Size">

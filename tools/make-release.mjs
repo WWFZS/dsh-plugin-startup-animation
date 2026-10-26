@@ -163,4 +163,23 @@ const walk = (dir) => {
 const total = walk(target)
 console.log(`发布目录：${path.relative(repoRoot, target)}`)
 console.log(`文件数：${total.files}，总大小：${(total.bytes / 1048576).toFixed(1)} MB`)
+
+// 体积徽章是硬编码在 README 里的，改素材后容易忘记更新 —— 这里顺手核对，
+// 对不上只警告（不阻断），因为几 MB 的偏差不影响发布。
+{
+  const sizeMb = Math.round(total.bytes / 1048576)
+  for (const readme of ['README.md', 'README.zh.md']) {
+    const abs = path.join(repoRoot, readme)
+    if (!fs.existsSync(abs)) continue
+    const text = fs.readFileSync(abs, 'utf8')
+    const found = /shields\.io\/badge\/(?:size|体积)-([0-9]+)%20MB/.exec(text)
+    if (found === null) continue
+    const declared = Number(found[1])
+    if (declared !== sizeMb) {
+      console.warn(
+        `  ! ${readme} 的体积徽章写的是 ${declared} MB，实际 ${sizeMb} MB —— 记得同步`,
+      )
+    }
+  }
+}
 console.log(`\n检查通过：包名 "${manifest.name}"、patch、client id 一致；files/exports/engines 齐全。`)
