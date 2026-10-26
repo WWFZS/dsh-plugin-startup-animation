@@ -65,6 +65,8 @@ window.__ModuleLoader__.load({
       audioEmpty: '还没有音频 · 在下方"开机音频"分类里上传',
       catAudio: '音频',
       audioType: '音频',
+      badgeUploaded: '上传',
+      badgeBuiltin: '内置',
       audioUploaded: '已上传 · 点卡片生效',
       uploadAudio: '上传音频',
       upload: '选择文件…',
@@ -123,6 +125,8 @@ window.__ModuleLoader__.load({
       audioEmpty: 'No audio yet — upload one in the Startup audio category below',
       catAudio: 'Audio',
       audioType: 'Audio',
+      badgeUploaded: 'Uploaded',
+      badgeBuiltin: 'Built-in',
       audioUploaded: 'Uploaded — click the card to apply',
       uploadAudio: 'Upload audio',
       upload: 'Choose file…',
@@ -209,6 +213,7 @@ window.__ModuleLoader__.load({
 .dsa-set-card-hit:focus-visible { outline: none; }
 .dsa-set-card-media { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--dsw-alias-bg-layer-2); }
 .dsa-set-card-ph { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 16 / 9; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.dsa-set-card-src { margin-left: 6px; font-size: 10.5px; color: var(--dsw-alias-label-tertiary); }
 .dsa-set-card-name { display: block; padding: 7px 9px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsa-set-card-type { position: absolute; top: 7px; left: 7px; font-size: 11px; color: var(--dsw-alias-label-primary); background: rgba(0, 0, 0, 0.55); border-radius: 6px; padding: 2px 7px; pointer-events: none; }
 .dsa-set-card-using { position: absolute; top: 7px; left: 7px; font-size: 11px; color: #fff; background: var(--dsw-alias-brand-primary); border-radius: 6px; padding: 2px 7px; pointer-events: none; }
@@ -893,8 +898,23 @@ window.__ModuleLoader__.load({
                             : thumbEl(file.path, isVideo, 'dsa-set-card-media', (event) => {
                                 event.currentTarget.style.display = 'none'
                               }),
-                          h('span', { className: active ? 'dsa-set-card-using' : 'dsa-set-card-type' }, active ? t('using') : isVideo ? t('video') : t('image')),
-                          h('span', { className: 'dsa-set-card-name', title: displayName(file.name) }, displayName(file.name)),
+                          h(
+                            'span',
+                            { className: active ? 'dsa-set-card-using' : 'dsa-set-card-type' },
+                            active ? t('using') : isVideo ? t('video') : t('image'),
+                          ),
+                          // 来源标记：内置与上传可能同名（用户上传过同一段素材时），
+                          // 只显示素材名会让人分不清选的是哪一个 —— 内置随包走、上传在 DSH_HOME。
+                          h(
+                            'span',
+                            { className: 'dsa-set-card-name', title: displayName(file.name) },
+                            displayName(file.name),
+                            h(
+                              'span',
+                              { className: 'dsa-set-card-src' },
+                              file.uploaded === true ? t('badgeUploaded') : t('badgeBuiltin'),
+                            ),
+                          ),
                         ),
                         h(
                           'button',

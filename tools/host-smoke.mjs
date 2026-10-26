@@ -347,15 +347,22 @@ console.log('  ok   GET ?cfg=1 只回配置、不扫素材库')
 {
   // 回归：`use` 分支曾经只写 file，同请求里的 sound/audioEnabled 被静默丢弃，
   // 于是"选视频并开声音"这类组合要分两次请求才能生效。
+  // 用磁盘上真实存在的第一个内置视频，而不是写死文件名 ——
+  // 内置素材会随版本增删改名，写死会让这条测试变成"素材一改就红"。
+  const anyBuiltinVideo = (await call(MANAGE_ROUTE)).json().library
+    .find((c) => c.id === 'MP4')
+    .files.filter((f) => f.uploaded !== true)
+    .map((f) => f.path)[0]
+  assert.ok(anyBuiltinVideo, '内置视频为空，无法测试')
   const combined = await postJson({
-    use: 'builtin/MP4/大肥鱼-欢迎回来.mp4',
+    use: anyBuiltinVideo,
     sound: true,
     audioEnabled: true,
     durationSec: 6,
   })
   assert.equal(combined.status, 200, combined.body.toString())
   const j = combined.json()
-  assert.equal(j.file, 'builtin/MP4/大肥鱼-欢迎回来.mp4')
+  assert.equal(j.file, anyBuiltinVideo)
   assert.equal(j.sound, true, '同请求里的 sound 未生效')
   assert.equal(j.durationSec, 6, '同请求里的 durationSec 未生效')
   console.log('  ok   选用素材 + 同请求开关：一起生效')
