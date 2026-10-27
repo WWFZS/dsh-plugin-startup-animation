@@ -13,7 +13,7 @@
 <a href="https://github.com/WWFZS/dsh-plugin-startup-animation/releases"><img src="https://img.shields.io/github/v/release/WWFZS/dsh-plugin-startup-animation?style=flat-square&label=VERSION&color=4d6bfe" alt="Version"></a>
 <img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
 <img src="https://img.shields.io/badge/依赖-0%20npm%20包-2ea44f?style=flat-square" alt="No deps">
-<img src="https://img.shields.io/badge/体积-25%20MB-6e7681?style=flat-square" alt="Size">
+<img src="https://img.shields.io/badge/体积-26%20MB-6e7681?style=flat-square" alt="Size">
 <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="License">
 <img src="https://img.shields.io/badge/Author-WWFZS-8957e5?style=flat-square" alt="Author">
 
@@ -58,16 +58,15 @@ PNG / JPG / MP3。声音分成三个彼此独立的开关，各由你自己决�
 DSH 0.2.1+ 自带插件管理器，不用命令行。
 
 1. 打开 **设置 → 插件**，点 **添加插件**
-2. **插件名**填 `dsh-plugin-startup-animation`
-3. **安装源**选「自定义地址」，填 `https://github.com/`
+2. **插件名**填 GitHub 地址 `https://github.com/WWFZS/dsh-plugin-startup-animation`
+3. **安装源**保持默认，别动
 4. 点 **安装**，完成后刷新页面
 
-<img src="docs/install.jpg" width="520" height="400" alt="添加插件">
-
-> 建议先展开界面里的「收起引导」，确认安装源确实是「自定义地址」再点安装。
+> **安装源不要改成 `https://github.com/`**。安装源是 npm 源（pnpm 的 `--registry`），
+> 填成 GitHub 会让 pnpm 拿 profile 里每个依赖去 github.com 查，全部 404，安装直接失败。
+> 本插件没发布到 npm，所以只填包名也查不到——必须填上面那个 GitHub 地址。
 >
-> 如果你的网络访问 GitHub 较慢，可以把安装源换成「中国大陆镜像源」（`registry.npmjs.org` 的国内镜像），
-> 但本插件目前只发布在 GitHub 上，镜像源里未必有。
+> 网络慢或者走中转的话，直接把**本地仓库路径**填进「插件名」更快，完全不联网（见方式三）。
 
 ### 方式二：命令行
 
@@ -99,6 +98,7 @@ dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 | 展示时长 | 3–15 秒，视频与壁纸共用。**跳过不受它限制**。 |
 | 启动画面素材 | 当前素材预览，以及「恢复默认」（回到内置动画）。 |
 | MP4 / 壁纸 / 音频 三个页签 | 点卡片即选用；上传即入库。 |
+| 卸载 / 更新 | 装在当前 profile 里时显示。**卸载插件**会把它移除（设置与上传素材保留在磁盘）；有新版时出现**更新到 x.y.z**。两者都要重启 DSH 才生效。 |
 
 没选素材时，插件会播放**自己的内置动画**（配色随应用深浅色走的旋转徽标）。
 选了素材就用素材；「恢复默认」把它换回内置动画。把总开关关掉，才是 Harness

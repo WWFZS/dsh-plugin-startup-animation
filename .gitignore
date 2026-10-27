@@ -1,0 +1,31 @@
+# 依赖与构建产物
+node_modules/
+dist/
+compile-cache/
+prof/
+*.log
+
+# 4K 母版只留在本地（不公开、不随包分发）：发布用 1080p faststart 变体
+builtin/MP4/*.mp4
+!builtin/MP4/*.web.mp4
+
+# 开发期抓包/探针产物
+boot-measurements.jsonl
+tools/_*
+tools/skill/
+
+# 上传素材是用户数据
+builtin/*/.thumbs/*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# 发布辅助工具：读取管理员令牌（GH_TOKEN），永不进公开仓库
+tools/push-via-api.mjs
+tools/push-commit.mjs
+# 任何本地凭证/令牌文件
+.env
+.env.*
+*.token
+*.secret

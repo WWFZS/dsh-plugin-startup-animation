@@ -15,6 +15,7 @@ import {
   assertBuiltinFile,
   assertUploadedFile,
   clampDurationSec,
+  cleanupLinkedInstall,
   loadConfig,
   manageStatus,
   parseRange,
@@ -650,6 +651,35 @@ await check('files 白名单不会带上 4K 母版（GitHub 安装少下 57 MB�
   assert.ok(files.includes('builtin/图片/**/*'), '缺少 图片 分类')
   assert.ok(files.includes('builtin/音频/**/*'), '缺少 音频 分类')
 })
+await check('运行期 import 的文件都在发布白名单里（否则装完就崩）', () => {
+  // 回归（v1.11.0）：index.js 新增了 `import ... from './lib/self-manage.mjs'`，
+  // 但 files 白名单里没有 lib/ —— 发布包少了这个文件，装完插件直接起不来。
+  // 这类问题**只有**在发布目录里才看得出来，所以这里直接按白名单校验：
+  // 每个相对 import 的目标都必须被某个 files 图案覆盖。
+  const pkg = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+  const files = pkg.files
+
+  /** 白名单是否覆盖某个包内相对路径。 */
+  const covered = (rel) =>
+    files.some((pattern) => {
+      if (pattern === rel) return true
+      if (pattern.endsWith('/**/*')) return rel.startsWith(`${pattern.slice(0, -5)}/`)
+      if (pattern.endsWith('/*')) return rel.slice(0, rel.lastIndexOf('/')) === pattern.slice(0, -2)
+      const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')
+      return new RegExp(`^${escaped}$`).test(rel)
+    })
+
+  for (const file of ['index.js', 'client.js', 'lib/self-manage.mjs']) {
+    const source = fs.readFileSync(new URL(`./${file}`, import.meta.url), 'utf8')
+    const imports = [...source.matchAll(/from\s+['"](\.[^'"]+)['"]/g)].map((match) => match[1])
+    for (const spec of imports) {
+      const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec))
+      assert.ok(covered(resolved), `${file} 导入了 ${spec}，但发布白名单没带上它（装完会崩）`)
+    }
+  }
+  // lib/ 下的运行期模块必须在白名单里。
+  assert.ok(files.includes('lib/self-manage.mjs'), 'files 缺少 lib/self-manage.mjs')
+})
 await check('内置视频必须是 H.264（HEVC 在 Chromium 里解不了 → 黑屏）', () => {
   // 回归：新增内置视频时曾拿到 HEVC/H.265 源文件，那段素材放进包里
   // 只会表现为"启动时黑屏/一帧都不出"，而代码层面一切正常，很难查。
@@ -699,6 +729,34 @@ await check('client.js 版本小字（静态锚点）', () => {
   // 回归：t() 不做插值，必须用 .replace
   assert.ok(src.includes("t('updateAvailable').replace('{latest}'"), '更新提示未做变量替换')
   assert.ok(!src.includes("t('updateAvailable', {"), '仍在给 t() 传插值参数')
+})
+
+await check('cleanupLinkedInstall：只删链接，绝不动真实目录与目标', async () => {
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-profile-'))
+  const nodeModules = path.join(profile, 'node_modules')
+  fs.mkdirSync(nodeModules, { recursive: true })
+  const linkPath = path.join(nodeModules, 'dsh-plugin-startup-animation')
+  const source = path.join(profile, 'source-repo')
+  fs.mkdirSync(source, { recursive: true })
+  fs.writeFileSync(path.join(source, 'index.js'), '// source\n')
+
+  // 1) 本来就不存在 → 什么都不做，也不算 blocked
+  assert.deepEqual(await cleanupLinkedInstall(profile), { removed: false, blocked: false })
+
+  // 2) 真实目录（装好的包）→ 不碰
+  fs.mkdirSync(linkPath, { recursive: true })
+  fs.writeFileSync(path.join(linkPath, 'index.js'), '// real package\n')
+  assert.deepEqual(await cleanupLinkedInstall(profile), { removed: false, blocked: false })
+  assert.ok(fs.existsSync(path.join(linkPath, 'index.js')), '真实目录被误删')
+  fs.rmSync(linkPath, { recursive: true, force: true })
+
+  // 3) 目录联接 → 删掉链接本身，目标目录原样保留（这次踩的坑）
+  fs.symlinkSync(source, linkPath, 'junction')
+  assert.deepEqual(await cleanupLinkedInstall(profile), { removed: true, blocked: false })
+  assert.ok(!fs.existsSync(linkPath), '联接没删掉')
+  assert.ok(fs.existsSync(path.join(source, 'index.js')), '删联接时连带删了目标目录')
+
+  fs.rmSync(profile, { recursive: true, force: true })
 })
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)

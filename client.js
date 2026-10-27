@@ -26,6 +26,7 @@ window.__ModuleLoader__.load({
 
     const MANAGE = '/dsh-startup-animation/manage'
     const UPDATE = '/dsh-startup-animation/update'
+    const SELF = '/dsh-startup-animation/self'
     const ASSET = '/dsh-startup-animation/asset'
     const NS = 'startup-animation'
 
@@ -84,6 +85,19 @@ window.__ModuleLoader__.load({
       updateAvailable: '有新版本 {latest}',
       updateLatest: '已是最新',
       updateUnknown: '检查不到更新',
+      // ── 卸载 / 更新（v1.11.0）──
+      uninstall: '卸载插件',
+      uninstallConfirm: '确认卸载？插件会从 DSH 里移除，需要重启 DSH 才完全生效。你的设置与上传素材会保留在磁盘上。',
+      uninstalling: '卸载中…',
+      uninstalled: '已卸载 · 重启 DSH 后生效',
+      uninstallFailed: '卸载失败',
+      updateNow: '更新到 {version}',
+      updating: '更新中…',
+      updated: '已更新 · 重启 DSH 后生效',
+      updateFailed: '更新失败',
+      keepData: '设置与素材仍保留在 {path}',
+      manageTitle: '卸载 / 更新',
+      manageNote: '卸载会移除插件本身；设置与上传素材留在磁盘上，重装后还在。',
     }
 
     const DICT_EN = {
@@ -141,6 +155,20 @@ window.__ModuleLoader__.load({
       updateAvailable: 'Version {latest} available',
       updateLatest: 'Up to date',
       updateUnknown: 'Update check unavailable',
+      // ── Uninstall / update (v1.11.0) ──
+      uninstall: 'Uninstall plugin',
+      uninstallConfirm:
+        'Uninstall? The plugin is removed from DSH; restart DSH for it to fully take effect. Your settings and uploaded media stay on disk.',
+      uninstalling: 'Uninstalling…',
+      uninstalled: 'Uninstalled · restart DSH to apply',
+      uninstallFailed: 'Uninstall failed',
+      updateNow: 'Update to {version}',
+      updating: 'Updating…',
+      updated: 'Updated · restart DSH to apply',
+      updateFailed: 'Update failed',
+      keepData: 'Settings and media stay in {path}',
+      manageTitle: 'Uninstall / update',
+      manageNote: 'Uninstalling removes the plugin itself; settings and uploads stay on disk.',
     }
 
     /** 三个分类的 accept：MP4 只收视频，壁纸只收图片，音频只收音频（后端仍按扩展名归类兜底）。 */
@@ -184,6 +212,12 @@ window.__ModuleLoader__.load({
 .dsa-set-btn:hover { background: var(--dsw-alias-bg-layer-2); }
 .dsa-set-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dsa-set-btn:disabled, .dsa-set-wrap[data-busy="1"] .dsa-set-btn { opacity: 0.55; cursor: default; pointer-events: none; }
+/* 卸载是破坏性动作：和普通按钮区分开，但不用刺眼的红底（整行变红太吵）。 */
+.dsa-set-btn-danger { color: var(--dsw-alias-state-error-primary); border-color: var(--dsw-alias-state-error-primary); }
+.dsa-set-btn-danger:hover { background: var(--dsw-alias-state-error-primary); color: var(--dsw-alias-bg-base); }
+/* ── 卸载 / 更新 区（v1.11.0）── */
+.dsa-set-self { margin: 14px 0 4px; padding-top: 12px; border-top: 1px solid var(--dsw-alias-border-l1); }
+.dsa-set-self-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .dsa-set-status { min-height: 18px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); margin-top: 10px; }
 .dsa-set-status[data-kind="error"] { color: var(--dsw-alias-state-error-primary); }
 .dsa-set-status[data-kind="ok"] { color: var(--dsw-alias-state-success-primary); }
@@ -578,6 +612,10 @@ window.__ModuleLoader__.load({
         const avolRef = React.useRef(null)
         const [playingPath, setPlayingPath] = React.useState('')
         const audioElRef = React.useRef(null)
+        // ── 卸载 / 更新（v1.11.0）──
+        // 自管状态：宿主在 profile 里有没有装我们、有没有选中、装的是什么形态。
+        const [selfState, setSelfState] = React.useState(null)
+        const [selfBusy, setSelfBusy] = React.useState('')
 
         // 状态到达后同步滑杆位置（共用主配置 durationSec / audioVolume）。
         React.useEffect(() => {
@@ -597,6 +635,23 @@ window.__ModuleLoader__.load({
           if (state.mode === 'image') setCategory('wall')
           else if (state.mode === 'video') setCategory('mp4')
         }, [state])
+
+        // 卸载 / 更新要知道自己有没有被装在当前 profile 里。
+        // 读不到不算错 —— 只是没有那两个按钮，不影响别的功能。
+        React.useEffect(() => {
+          let alive = true
+          fetch(SELF, { cache: 'no-store' })
+            .then((res) => res.json())
+            .then((payload) => {
+              if (alive && payload && payload.ok) setSelfState(payload)
+            })
+            .catch(() => {
+              /* 没有这个接口就当没有自管能力 */
+            })
+          return () => {
+            alive = false
+          }
+        }, [])
 
         // 卸载时清掉未触发的防抖提交与试听播放。
         React.useEffect(
@@ -723,6 +778,73 @@ window.__ModuleLoader__.load({
           }, 250)
         }
 
+        /**
+         * 卸载本插件。
+         *
+         * 走宿主自己的 `self` 端点（不是插件管理器的卸载按钮 —— 那条路在没有
+         * HMR 的桌面 profile 上必然被拒）。
+         * 卸载会改磁盘上的 profile 清单，所以要重启 DSH 才完全生效。
+         */
+        const doUninstall = () => {
+          if (!globalThis.confirm(t('uninstallConfirm'))) return
+          setSelfBusy('uninstall')
+          setMessage({ text: '', kind: '' })
+          fetch(`${SELF}?action=uninstall`, { method: 'POST' })
+            .then((res) => res.json().catch(() => null))
+            .then((payload) => {
+              setSelfBusy('')
+              if (payload && payload.ok) {
+                const where = payload.userData ? t('keepData').replace('{path}', payload.userData.config) : ''
+                setMessage({
+                  text: where === '' ? t('uninstalled') : `${t('uninstalled')} · ${where}`,
+                  kind: 'ok',
+                })
+                setSelfState({ installed: false, selected: false })
+              } else {
+                const detail = payload && payload.details ? `\n${String(payload.details).slice(-400)}` : ''
+                setMessage({
+                  text: `${t('uninstallFailed')}${payload && payload.message ? `：${payload.message}` : ''}${detail}`,
+                  kind: 'error',
+                })
+              }
+            })
+            .catch(() => {
+              setSelfBusy('')
+              setMessage({ text: t('netFail'), kind: 'error' })
+            })
+        }
+
+        /**
+         * 更新本插件到 GitHub 上的最新版。
+         *
+         * 同样走 `self` 端点：它在 profile 目录跑 pnpm 把依赖换成新的。
+         * 磁盘改动要重启 DSH 才生效。
+         */
+        const doUpdate = (version) => {
+          setSelfBusy('update')
+          setMessage({ text: '', kind: '' })
+          fetch(`${SELF}?action=update&spec=${encodeURIComponent(`github:WWFZS/dsh-plugin-startup-animation`)}`, {
+            method: 'POST',
+          })
+            .then((res) => res.json().catch(() => null))
+            .then((payload) => {
+              setSelfBusy('')
+              if (payload && payload.ok) {
+                setMessage({ text: t('updated'), kind: 'ok' })
+              } else {
+                const detail = payload && payload.details ? `\n${String(payload.details).slice(-400)}` : ''
+                setMessage({
+                  text: `${t('updateFailed')}${payload && payload.message ? `：${payload.message}` : ''}${detail}`,
+                  kind: 'error',
+                })
+              }
+            })
+            .catch(() => {
+              setSelfBusy('')
+              setMessage({ text: t('netFail'), kind: 'error' })
+            })
+        }
+
         const switch_ = (key, checked) =>
           h(
             'button',
@@ -815,6 +937,57 @@ window.__ModuleLoader__.load({
                   },
                   `${text} · ${note}`,
                 ),
+          )
+        }
+
+        /**
+         * 卸载 / 更新 这一块。
+         *
+         * 只在插件**确实装在当前 profile 里**时才出现（selfState.installed）——
+         * 读不到状态就不显示，不给用户一个按了没用的按钮。
+         *
+         * 「更新」按钮只在真的有新版本时出现；「卸载」一直在（用户不需要插件时
+         * 最需要的就是它）。
+         */
+        const selfPanel = () => {
+          if (!selfState || selfState.installed !== true) return null
+          const hasUpdate = update !== null && update.updateAvailable === true
+          const latest = hasUpdate && typeof update.latest === 'string' ? update.latest : ''
+          return h(
+            'div',
+            { className: 'dsa-set-self' },
+            h(
+              'div',
+              { className: 'dsa-set-self-head' },
+              h('div', { className: 'dsa-set-label' }, t('manageTitle')),
+              h(
+                'div',
+                { className: 'dsa-set-right' },
+                hasUpdate && latest !== ''
+                  ? h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dsa-set-btn',
+                        disabled: selfBusy !== '' || busy,
+                        onClick: () => doUpdate(latest),
+                      },
+                      selfBusy === 'update' ? t('updating') : t('updateNow').replace('{version}', latest),
+                    )
+                  : null,
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dsa-set-btn dsa-set-btn-danger',
+                    disabled: selfBusy !== '' || busy,
+                    onClick: doUninstall,
+                  },
+                  selfBusy === 'uninstall' ? t('uninstalling') : t('uninstall'),
+                ),
+              ),
+            ),
+            h('div', { className: 'dsa-set-note' }, t('manageNote')),
           )
         }
 
@@ -1002,6 +1175,8 @@ window.__ModuleLoader__.load({
               t('refresh'),
             ),
           ),
+          // ── 卸载 / 更新（装在 profile 里才有）──
+          selfPanel(),
           // ── 设置区（常驻）──
           h('div', { className: 'dsa-set-desc' }, t('desc')),
           h(

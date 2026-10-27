@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-startup-animation",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "type": "module",
   "description": "Animated full-screen startup screen shown while DeepSeek Harness boots — click to skip. Ships a built-in MP4/wallpaper/audio library and accepts your own files. 开机动画 / 启动动画：启动 Harness 时显示全屏动画，随包内置视频、壁纸与开机音频，也可以用自己的素材。",
   "license": "MIT",
@@ -43,6 +43,7 @@
     "index.js",
     "client.js",
     "cordis.patch.yml",
+    "lib/self-manage.mjs",
     "runtime/boot.css",
     "runtime/boot.js",
     "builtin/MP4/dsh-大肥鱼.web.mp4",
@@ -60,10 +61,12 @@
     "builtin/音频/**/*"
   ],
   "scripts": {
-    "test": "node selftest.mjs && node tools/boot-runtime.mjs && node tools/client-test.mjs && node tools/boot-css-test.mjs && node tools/host-smoke.mjs",
+    "test": "node selftest.mjs && node tools/boot-runtime.mjs && node tools/client-test.mjs && node lib/self-manage-test.mjs && node lib/e2e-uninstall.mjs && node tools/boot-css-test.mjs && node tools/host-smoke.mjs",
     "test:unit": "node selftest.mjs",
     "test:boot": "node tools/boot-runtime.mjs",
     "test:client": "node tools/client-test.mjs",
+    "test:self": "node lib/self-manage-test.mjs",
+    "test:e2e": "node lib/e2e-uninstall.mjs",
     "test:css": "node tools/boot-css-test.mjs",
     "test:host": "node tools/host-smoke.mjs",
     "thumbs": "node tools/make-thumbs.mjs",

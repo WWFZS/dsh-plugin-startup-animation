@@ -21,7 +21,22 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+
+import {
+  PACKAGE_NAME,
+  describeSelfInstall,
+  dropSelfDependency,
+  findPnpm,
+  readBundleSelection,
+  readProfileManifest,
+  userDataPaths,
+  withSelf,
+  withoutSelf,
+  writeBundleSelection,
+  writeProfileManifest,
+} from './lib/self-manage.mjs'
 
 /** Cordis 诊断用的插件名。 */
 export const name = 'startup-animation'
@@ -68,6 +83,25 @@ export const MANAGE_ROUTE = '/dsh-startup-animation/manage'
 
 /** 更新检查路由：GET 当前版本 vs GitHub 最新 Release。 */
 export const UPDATE_ROUTE = '/dsh-startup-animation/update'
+
+/**
+ * 自我管理路由：POST 卸载本插件 / POST 更新本插件。
+ *
+ * 为什么插件要自带这两个动作（v1.11.0）：
+ *
+ * 宿主插件管理器的 `removeBundle()` 在 **profile 没启用 HMR** 时会拒绝卸载
+ * "正在使用的包"（抛 `stop-profile`）—— 桌面 profile 默认就是没 HMR 的，
+ * 所以用户在 **设置 → 插件** 里点卸载必然失败。这不是 bug，是宿主的硬约束。
+ *
+ * 但那条约束只针对"从运行中的进程里卸载"。插件自己的宿主半边可以像
+ * `dsh plugin --profile <p> remove <pkg>` 那样，直接在 profile 目录跑 pnpm
+ * 改磁盘（依赖 + bundles 列表），改完提示用户重启 DSH。命令行那条路本来
+ * 就是通的、只是用户不一定知道 —— 把它做成设置页里的一个按钮，
+ * 用户就不用去记命令行了。
+ *
+ * 更新同理：插件可以自己在 profile 目录跑 `pnpm add` 把版本升上去。
+ */
+export const SELF_ROUTE = '/dsh-startup-animation/self'
 
 /**
  * 版本比较：只比较 `MAJOR.MINOR.PATCH` 的数字段，忽略预发布后缀。
@@ -1113,6 +1147,315 @@ export function scanLibrary(packageRoot, deleted = [], homeDir) {
 }
 
 /**
+ * 复制一份环境变量表，去掉指定键。
+ *
+ * 为什么不能直接 `env: { ...process.env, KEY: undefined }`：Node 会把 `undefined`
+ * 当成字符串 "undefined" 传给子进程，而且在某些平台上 spawn 会直接抛 EINVAL。
+ * 要删键就得真的删掉。
+ *
+ * @param {NodeJS.ProcessEnv} source 原环境变量表。
+ * @param {string} key 要去掉的键。
+ * @returns {NodeJS.ProcessEnv} 新的环境变量表。
+ */
+export function withoutEnv(source, key) {
+  const out = { ...source }
+  delete out[key]
+  return out
+}
+
+/**
+ * 在 profile 目录里跑一条 pnpm 命令，返回退出码与输出。
+ *
+ * 为什么插件要自己跑 pnpm：宿主插件管理器的 `removeBundle()` 在 profile
+ * 没启用 HMR 时会拒绝卸载"正在使用的包"（`stop-profile`）—— 桌面 profile
+ * 默认没有 HMR，所以设置页里的卸载按钮必然失败。而 `dsh plugin --profile
+ * desktop remove <pkg>` 走的正是这条路（跑 pnpm 改磁盘），实测在应用运行
+ * 时完全正常。
+ *
+ * @param {string} profileDir profile 目录（pnpm 在这里跑）。
+ * @param {string[]} args pnpm 参数。
+ * @param {number} [timeoutMs] 超时上限。
+ * @returns {Promise<{ code: number, output: string }>} 退出码与合并后的输出。
+ */
+export function runProfilePnpm(profileDir, args_, timeoutMs = 120000) {
+  return new Promise((resolve) => {
+    const pnpm = findPnpm()
+    if (pnpm === undefined) {
+      resolve({ code: 127, output: 'pnpm not found: install pnpm or use `dsh plugin` instead' })
+      return
+    }
+    let child
+    try {
+      // Windows 上 `.cmd` 必须走 shell 才能被执行（直接 spawn 会 EINVAL）。
+      //
+      // 安全：走 shell 时参数不转义就有注入面（Node 警告 DEP0190）。这里的
+      // 参数全是固定字面量（'remove' + 本插件包名，见 PACKAGE_NAME），没有
+      // 用户输入，但按"有用户输入"的规格处理：整条命令行自己拼、自己引好，
+      // 作为一个字符串交给 shell —— 这是 Node 官方对 shell:true 的用法
+      // （此时第二个参数必须是空数组）。
+      //
+      // cmd.exe 的转义规则：双引号内部用 "" 表示一个字面引号；路径含空格
+      // 必须整体加引号（"C:\Program Files\nodejs\pnpm.cmd"）。
+      const shell = pnpm.shell === true
+      const quote = (value) => `"${String(value).replace(/"/g, '""')}"`
+      const argv = [...pnpm.args, ...args_]
+      // 非 shell：command + 参数数组（Node 负责引用，无注入面）。
+      // shell：一条拼好引号的完整命令行 + 空参数数组。
+      const command = shell
+        ? [quote(pnpm.command), ...argv.map(quote)].join(' ')
+        : pnpm.command
+      child = spawn(command, shell ? [] : argv, {
+        cwd: profileDir,
+        windowsHide: true,
+        shell,
+        // 宿主自己的 pnpm 调用会带上这套环境变量；这里至少要保证
+        // ELECTRON_RUN_AS_NODE 不被继承（否则 node 会被当成 Electron 启动）。
+        //
+        // 注意：不能给 env 里放 `undefined` 的键 —— Node 会把它变成字符串
+        // "undefined"，更糟的是在某些平台上直接让 spawn 抛 EINVAL。
+        // 要删键就构造一份新对象。
+        env: withoutEnv(process.env, 'ELECTRON_RUN_AS_NODE'),
+      })
+    } catch (error) {
+      resolve({ code: 127, output: `cannot start pnpm: ${describe(error)}` })
+      return
+    }
+    let output = ''
+    const collect = (chunk) => {
+      output += String(chunk)
+      // 输出只用于回显给用户，截断避免把整屏日志塞进 JSON。
+      if (output.length > 16384) output = output.slice(-16384)
+    }
+    child.stdout?.on('data', collect)
+    child.stderr?.on('data', collect)
+    const timer = setTimeout(() => {
+      try {
+        child.kill()
+      } catch {
+        /* 已经退出 */
+      }
+    }, timeoutMs)
+    child.on('error', (error) => {
+      clearTimeout(timer)
+      resolve({ code: 127, output: `cannot run pnpm: ${describe(error)}` })
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      resolve({ code: code ?? 1, output })
+    })
+  })
+}
+
+/** 目录联接被占用时的重试间隔（毫秒）与次数。DSH 运行中会一直占着，别把它拖成几十秒。 */
+const LINK_CLEANUP_ATTEMPTS = 6
+const LINK_CLEANUP_DELAY_MS = 120
+
+/**
+ * 清掉 pnpm 没删掉的 `node_modules/<包名>` 链接。
+ *
+ * 为什么需要：用 `link:` 装进来的插件在 `node_modules` 里是一个**目录联接**。
+ * DSH 正跑着时它被当作模块根打开，Windows 下 pnpm 删除它可能失败，于是卸载后
+ * 留下一个指向源码目录的联接。下一次安装 pnpm 会把包 import 到
+ * `<包名>_tmp_<pid>_<n>` 再 `rename` 过去 —— 覆盖联接点会 EPERM，而宿主给出的
+ * 报错是「没有写入权限，无法安装」，看着像权限问题，其实是这个陈旧链接在挡路。
+ *
+ * 只删**链接**：`rmdirSync` 对联接点/符号链接只移除链接本身、绝不跟进目标；
+ * 对真实目录要么删掉空目录（无害），要么 ENOTEMPTY 直接放弃。
+ *
+ * @param {string} profileDir profile 目录。
+ * @returns {Promise<{ removed: boolean, blocked: boolean }>} removed=已清理；blocked=链接还在（多半被 DSH 占用）。
+ */
+export async function cleanupLinkedInstall(profileDir) {
+  const target = path.join(profileDir, 'node_modules', PACKAGE_NAME)
+  let stats
+  try {
+    stats = fs.lstatSync(target)
+  } catch {
+    return { removed: false, blocked: false } // 本来就不存在
+  }
+  // 真实目录 = 装好的包，不碰（删了就是破坏）。
+  if (stats.isDirectory() && !stats.isSymbolicLink()) return { removed: false, blocked: false }
+
+  for (let attempt = 0; attempt < LINK_CLEANUP_ATTEMPTS; attempt += 1) {
+    try {
+      fs.rmdirSync(target)
+      return { removed: true, blocked: false }
+    } catch (error) {
+      const code = error !== null && typeof error === 'object' ? error.code : ''
+      if (code === 'ENOENT') return { removed: true, blocked: false }
+      // ENOTEMPTY/EACCES 之外的意外错误不重试，如实报 blocked。
+      if (code !== 'EPERM' && code !== 'EBUSY') return { removed: false, blocked: true }
+    }
+    await new Promise((resolve) => setTimeout(resolve, LINK_CLEANUP_DELAY_MS))
+  }
+  return { removed: false, blocked: true }
+}
+
+/**
+ * 卸载本插件。
+ *
+ * 做的四件事，顺序有意义：
+ *   1. **先把 bundle 从 profile 的选择列表里去掉** —— 不做的话，依赖被删了
+ *      但列表里还留着它，宿主下次启动会报 "not a profile layer"，插件加载失败
+ *      （悬空条目）。宿主自己的移除路径也是"先 deselect，再跑 pnpm"。
+ *   2. 跑 `pnpm remove` 把依赖与 node_modules 里的链接清掉。
+ *   3. pnpm 失败 → 把 bundles 列表**恢复原样**（不能让用户落到半卸载状态）。
+ *   4. **不删用户数据**：配置与上传素材留在原地，路径在结果里告诉用户。
+ *
+ * 桌面没有 HMR，改动要重启 DSH 才生效 —— 结果里如实说明。
+ *
+ * @param {{ profileDir: string, homeDir?: string }} options 位置。
+ * @returns {Promise<{ ok: boolean, restartRequired: boolean, message: string, details?: string, userData?: { config: string, media: string } }>} 结果。
+ */
+export async function uninstallSelf(options) {
+  const profileDir = options.profileDir
+  const manifest = readProfileManifest(profileDir)
+  if (manifest === undefined) {
+    return { ok: false, restartRequired: false, message: '无法读取 profile 的 package.json' }
+  }
+  const state = describeSelfInstall(manifest)
+  if (!state.installed) {
+    return { ok: false, restartRequired: false, message: '本插件不在当前 profile 的依赖里' }
+  }
+
+  const previousBundles = readBundleSelection(manifest)
+  const { bundles: nextBundles, changed: bundlesChanged } = withoutSelf(previousBundles)
+  if (bundlesChanged) writeBundleSelection(manifest, nextBundles)
+  try {
+    writeProfileManifest(profileDir, manifest)
+  } catch (error) {
+    return { ok: false, restartRequired: false, message: `无法更新 profile 清单：${describe(error)}` }
+  }
+
+  // 卸载只是"改磁盘"，不需要重新下载任何东西 —— 先按离线跑（最快，也不怕
+  // 用户断网）。但离线模式要求 lockfile 的元数据都在本地缓存里，个别机器上
+  // 会因为缓存缺口报 ERR_PNPM_NO_OFFLINE_META —— 所以失败后**去掉离线再试
+  // 一次**：能走通的路都走通，不让"卸载"因为一个性能开关而失败。
+  let result = await runProfilePnpm(profileDir, ['remove', PACKAGE_NAME, '--config.offline=true'])
+  if (result.code !== 0) {
+    result = await runProfilePnpm(profileDir, ['remove', PACKAGE_NAME])
+  }
+  if (result.code !== 0) {
+    // 失败回滚：把 bundles 列表写回去，不留半卸载状态。
+    const rollback = readProfileManifest(profileDir)
+    if (rollback !== undefined) {
+      writeBundleSelection(rollback, previousBundles)
+      try {
+        writeProfileManifest(profileDir, rollback)
+      } catch {
+        /* 回滚也失败就只能如实报出去 */
+      }
+    }
+    return {
+      ok: false,
+      restartRequired: false,
+      message: '卸载失败，已恢复原有配置',
+      details: result.output.slice(-2000),
+    }
+  }
+
+  // pnpm 成功后再确认一次清单（pnpm 可能重写了 package.json）。
+  const after = readProfileManifest(profileDir)
+  if (after !== undefined) {
+    const stillSelected = readBundleSelection(after).includes(PACKAGE_NAME)
+    if (stillSelected) {
+      writeBundleSelection(after, withoutSelf(readBundleSelection(after)).bundles)
+      try {
+        writeProfileManifest(profileDir, after)
+      } catch (error) {
+        return {
+          ok: false,
+          restartRequired: true,
+          message: `已移除依赖，但未能清理 bundle 选择：${describe(error)}`,
+        }
+      }
+    }
+  }
+
+  // pnpm 有时删不掉 node_modules 里的联接（DSH 运行中它被开着）。留着它，
+  // 用户下次安装就会撞上 `rename` 覆盖联接点的 EPERM，被宿主报成「没有写入
+  // 权限」—— 一个看起来像权限、实际是残留链接的坑。这里补一刀。
+  const link = await cleanupLinkedInstall(profileDir)
+
+  return {
+    ok: true,
+    restartRequired: true,
+    message: link.blocked
+      ? '已卸载。重启 DSH 后完全生效；node_modules 里还有个链接被占用，重启后删除它再安装。'
+      : '已卸载。重启 DSH 后完全生效。',
+    userData: userDataPaths(options.homeDir),
+  }
+}
+
+/**
+ * 更新本插件：把依赖换成指定的 spec，并跑 `pnpm install` 装上。
+ *
+ * 为什么不在设置页里直接下载新版本：更新要走包管理器（校验完整性、跑
+ * prepare 脚本、处理依赖树），那是 pnpm 的活。这里只负责把"换成哪个版本"
+ * 这件事翻译成一条 pnpm 命令。
+ *
+ * @param {{ profileDir: string, spec: string }} options 位置与目标 spec。
+ * @returns {Promise<{ ok: boolean, restartRequired: boolean, message: string, details?: string }>} 结果。
+ */
+export async function updateSelf(options) {
+  const profileDir = options.profileDir
+  const spec = options.spec
+  const manifest = readProfileManifest(profileDir)
+  if (manifest === undefined) {
+    return { ok: false, restartRequired: false, message: '无法读取 profile 的 package.json' }
+  }
+
+  // 先把 bundle 放回选择列表 —— pnpm 装完还得让它在列表里才生效。
+  // 只在**真的缺**时写清单：省一次磁盘写，也避免无谓地触发宿主的文件监听。
+  const previousBundles = readBundleSelection(manifest)
+  const { bundles: nextBundles, changed: bundlesChanged } = withSelf(previousBundles)
+  if (bundlesChanged) {
+    writeBundleSelection(manifest, nextBundles)
+    try {
+      writeProfileManifest(profileDir, manifest)
+    } catch (error) {
+      return { ok: false, restartRequired: false, message: `无法更新 profile 清单：${describe(error)}` }
+    }
+  }
+
+  const result = await runProfilePnpm(profileDir, ['add', spec])
+  if (result.code !== 0) {
+    // pnpm 失败时把 bundles 列表恢复原样（只有第 15 行真的改过它才需要）。
+    if (bundlesChanged) {
+      const rollback = readProfileManifest(profileDir)
+      if (rollback !== undefined) {
+        writeBundleSelection(rollback, previousBundles)
+        try {
+          writeProfileManifest(profileDir, rollback)
+        } catch {
+          /* 回滚也失败就只能如实报出去 */
+        }
+      }
+    }
+    return {
+      ok: false,
+      restartRequired: false,
+      message: '更新失败',
+      details: result.output.slice(-2000),
+    }
+  }
+  return { ok: true, restartRequired: true, message: '已更新。重启 DSH 后生效。' }
+}
+
+/**
+ * 本插件在当前 profile 里的安装形态（供设置页显示按钮用）。
+ *
+ * @param {{ profileDir: string }} options 位置。
+ * @returns {{ installed: boolean, selected: boolean, spec: string | undefined }} 安装形态。
+ */
+export function selfInstallState(options) {
+  const manifest = readProfileManifest(options.profileDir)
+  if (manifest === undefined) return { installed: false, selected: false, spec: undefined }
+  const state = describeSelfInstall(manifest)
+  return { installed: state.installed, selected: state.selected, spec: state.spec }
+}
+
+/**
  * 校验一个"使用内置素材"的请求：路径必须落在包内 `builtin/` 下、
  * 类型在白名单内、没有被用户移除。不合法直接抛出（信息原样回给客户端）。
  *
@@ -1339,7 +1682,24 @@ export function apply(ctx) {
     warn(`注入事件注册失败，本次启动没有开机动画：${describe(error)}`)
   }
 
-  // ── ② 素材路由 + 管理路由：webServer 是可选能力，晚到就晚接，不阻塞 apply ──
+  // ── ② profile 上下文：卸载/更新要知道自己在哪个 profile 里 ──
+  //
+  // 宿主注入 profileContext（{ name, dir, startedBundles, ... }）。没有它也能活
+  // —— 只是"卸载/更新"会用 DSH_HOME/profiles/<name> 兜底推断。
+  //
+  // 注意：ctx.inject 的回调是**异步**的（依赖就绪才触发），所以这里只把
+  // fiber 留着，路由在**请求时**再读 —— 那时值早就到了。
+  /** @type {{ name?: string, dir?: string, startedBundles?: string[] } | undefined} */
+  let profileContext
+  try {
+    ctx.inject(['profileContext'], (value) => {
+      profileContext = value
+    })
+  } catch (error) {
+    warn(`profileContext 不可用，卸载/更新将按默认 profile 处理：${describe(error)}`)
+  }
+
+  // ── ③ 素材路由 + 管理路由：webServer 是可选能力，晚到就晚接，不阻塞 apply ──
   ctx.inject(['webServer'], (child) => {
     child.effect(() => {
       /** @type {Array<() => void>} */
@@ -1898,6 +2258,71 @@ export function apply(ctx) {
                   updateAvailable: false,
                 })
               })
+          },
+        }),
+      )
+
+      // 自我管理：卸载 / 更新本插件。
+      //
+      // 为什么需要它：宿主插件管理器的
+      // removeBundle() 在 profile 没启用 HMR 时会拒绝卸载"正在使用的包"
+      // （stop-profile）—— 桌面 profile 默认没 HMR，所以设置页里的卸载必然失败。
+      // 这里自己跑 pnpm 改磁盘（就是 `dsh plugin --profile <p> remove <pkg>`
+      // 走的那条路），改完提示用户重启。
+      disposers.push(
+        child.webServer.register({
+          kind: 'exact',
+          path: SELF_ROUTE,
+          handler: (req, res) => {
+            const method = String(req.method ?? 'GET').toUpperCase()
+            if (method !== 'POST' && method !== 'GET') {
+              reply(res, 405, { ok: false, error: 'use GET or POST' })
+              return
+            }
+
+            // profile 目录：宿主注入的 profileContext 给出当前 profile。
+            // 没有它（比如跑在 web 宿主上）就退回 DSH_HOME/profiles/<name>。
+            const profileName = profileContext?.name ?? 'desktop'
+            const profileDir =
+              typeof profileContext?.dir === 'string' && profileContext.dir !== ''
+                ? profileContext.dir
+                : path.join(homeDir ?? resolveDshHome(process.env, os.homedir) ?? '', 'profiles', profileName)
+
+            if (method === 'GET') {
+              reply(res, 200, { ok: true, ...selfInstallState({ profileDir }) })
+              return
+            }
+
+            let action = ''
+            let spec = ''
+            try {
+              const url = new URL(String(req.url ?? '/'), 'http://localhost')
+              action = url.searchParams.get('action') ?? ''
+              spec = url.searchParams.get('spec') ?? ''
+            } catch {
+              action = ''
+            }
+
+            if (action === 'uninstall') {
+              void uninstallSelf({ profileDir, homeDir })
+                .then((result) => reply(res, result.ok ? 200 : 400, result))
+                .catch((error) => reply(res, 500, { ok: false, message: describe(error) }))
+              return
+            }
+            if (action === 'update') {
+              // 只允许更新到本插件自己的 GitHub 仓库 —— 不接受任意 spec，
+              // 免得这个接口变成"往 profile 里塞任意包"的入口。
+              const target = spec === '' ? `github:${REPO_URL.replace('https://github.com/', '')}` : spec
+              if (!/^github:WWFZS\/dsh-plugin-startup-animation$/.test(target)) {
+                reply(res, 400, { ok: false, message: `不支持的更新目标：${target}` })
+                return
+              }
+              void updateSelf({ profileDir, spec: target })
+                .then((result) => reply(res, result.ok ? 200 : 400, result))
+                .catch((error) => reply(res, 500, { ok: false, message: describe(error) }))
+              return
+            }
+            reply(res, 400, { ok: false, error: 'expected action=uninstall or action=update' })
           },
         }),
       )

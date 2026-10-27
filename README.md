@@ -13,7 +13,7 @@ Plays on boot · Click to skip · Zero dependencies · Built-in library
 <a href="https://github.com/WWFZS/dsh-plugin-startup-animation/releases"><img src="https://img.shields.io/github/v/release/WWFZS/dsh-plugin-startup-animation?style=flat-square&label=VERSION&color=4d6bfe" alt="Version"></a>
 <img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
 <img src="https://img.shields.io/badge/dependencies-0-2ea44f?style=flat-square" alt="No deps">
-<img src="https://img.shields.io/badge/size-25%20MB-6e7681?style=flat-square" alt="Size">
+<img src="https://img.shields.io/badge/size-26%20MB-6e7681?style=flat-square" alt="Size">
 <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="License">
 <img src="https://img.shields.io/badge/Author-WWFZS-8957e5?style=flat-square" alt="Author">
 
@@ -62,17 +62,18 @@ decide yourself.
 DSH 0.2.1+ ships a plugin manager — no command line needed.
 
 1. Open **Settings → Plugins** and click **Add plugin**
-2. Enter the package name `dsh-plugin-startup-animation`
-3. Set **Install source** to *Custom address* and enter `https://github.com/`
+2. Enter the GitHub URL `https://github.com/WWFZS/dsh-plugin-startup-animation`
+3. Leave **Install source** at its default
 4. Click **Install**, then refresh the page
 
-<img src="docs/install.jpg" width="520" height="400" alt="Add plugin dialog">
-
-> Expand the dialog's guide panel and confirm the install source really reads
-> *Custom address* before installing.
+> **Don't set the install source to `https://github.com/`.** The install source is an
+> npm registry (pnpm's `--registry`); pointing it at GitHub makes pnpm look up every
+> dependency in the profile against github.com, so they all 404 and the install dies.
+> The plugin isn't published to npm either, so the bare package name won't resolve —
+> use the GitHub URL above.
 >
-> If GitHub is slow from your network, you can switch the source to the mainland-China
-> npm mirror, but this plugin is published on GitHub only — the mirror may not have it.
+> On a slow or relayed network, paste the **local repo path** into the field instead —
+> no download at all (see method 3).
 
 ### 2. Command line
 
@@ -104,6 +105,7 @@ Open **Settings → Startup Animation** (the entry sits in the sidebar settings 
 | Display duration | 3–15 seconds, shared by videos and wallpapers. Skipping is never delayed by it. |
 | Startup visual | Current media preview, plus **Restore default** (back to the built-in animation). |
 | MP4 / Wallpaper / Audio tabs | Click any card to use it. Upload adds to the library. |
+| Uninstall / update | Shown when the plugin is installed in the current profile. **Uninstall** removes it (settings and uploads stay on disk); **Update to x.y.z** appears when a newer release exists. Both need a DSH restart to take effect. |
 
 With nothing selected, the plugin plays its own **built-in animation** — a spinning
 emblem on the app's palette. Picking media replaces it; **Restore default** brings it
