@@ -80,7 +80,7 @@ window.__ModuleLoader__.load({
       loadFail: '读取状态失败',
       netFail: '无法连接宿主',
       fail: '操作失败',
-      versionLabel: '版本',
+      versionLabel: 'v',
       updateChecking: '检查更新中…',
       updateAvailable: '有新版本 {latest}',
       updateLatest: '已是最新',
@@ -893,7 +893,9 @@ window.__ModuleLoader__.load({
          * 版本号本身永远显示，即便更新检查失败 —— 它是用户确认"装的是哪一版"的唯一依据。
          */
         const versionBadge = () => {
-          const text = localVersion === '' ? '' : `${t('versionLabel')} ${localVersion}`
+          // 版本前缀两语共用「v」，和版本号之间不留空格：`v1.11.0`。
+          // 中文界面里「版本 1.11.0」多一个词，读起来并不比 `v` 更清楚。
+          const text = localVersion === '' ? '' : `${t('versionLabel')}${localVersion}`
           if (text === '') return null
           const hasUpdate = update !== null && update.updateAvailable === true
           const reachable = update !== null && update.reachable === true

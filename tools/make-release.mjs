@@ -168,7 +168,7 @@ console.log(`文件数：${total.files}，总大小：${(total.bytes / 1048576).
 // 对不上只警告（不阻断），因为几 MB 的偏差不影响发布。
 {
   const sizeMb = Math.round(total.bytes / 1048576)
-  for (const readme of ['README.md', 'README.zh.md']) {
+  for (const readme of ['README.md']) {
     const abs = path.join(repoRoot, readme)
     if (!fs.existsSync(abs)) continue
     const text = fs.readFileSync(abs, 'utf8')
@@ -183,3 +183,45 @@ console.log(`文件数：${total.files}，总大小：${(total.bytes / 1048576).
   }
 }
 console.log(`\n检查通过：包名 "${manifest.name}"、patch、client id 一致；files/exports/engines 齐全。`)
+
+// ---------------------------------------------------------------------------
+// 再打一个 npm 格式的 tarball。插件管理器把 `.tgz` 当第一类安装目标（本地绝对
+// 路径或 https 直链都行），这条路不走 npm 源、也不需要 git —— 用户只要一个 URL。
+//
+// 资产名固定成 `<包名>.tgz`：`releases/latest/download/` 只有名字不变才能一直
+// 指向最新版，用户收藏的链接也就不会随版本失效。
+// ---------------------------------------------------------------------------
+{
+  const { spawnSync } = await import('node:child_process')
+  const crypto = await import('node:crypto')
+  const packDir = path.join(outRoot, 'pack')
+  fs.mkdirSync(packDir, { recursive: true })
+
+  // shell: true 时整条命令作为第一个参数传（Node 对 args 的转义不值得赌）。
+  const npmBin = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+  const command = [npmBin, 'pack', JSON.stringify(target), '--pack-destination', JSON.stringify(packDir)].join(' ')
+  const packed = spawnSync(command, [], { shell: true, encoding: 'utf8', timeout: 240_000 })
+
+  const produced = fs.existsSync(packDir)
+    ? fs.readdirSync(packDir).filter((name) => name.endsWith('.tgz'))
+    : []
+  if (packed.status !== 0 || produced.length !== 1) {
+    const tail = `${packed.stderr ?? ''}`.trim().split('\n').slice(-2).join(' ')
+    console.warn(`  ! 没打出 tarball（npm pack 退出码 ${String(packed.status)}）—— 发布目录本身仍然可用`)
+    if (tail !== '') console.warn(`    ${tail}`)
+  } else {
+    const assetName = `${manifest.name}.tgz`
+    const assetPath = path.join(outRoot, assetName)
+    fs.copyFileSync(path.join(packDir, produced[0]), assetPath)
+    fs.rmSync(packDir, { recursive: true, force: true })
+
+    const repoUrl = manifest.repository?.url ?? ''
+    const slug = /github\.com[/:]([^/]+\/[^/.]+)/.exec(repoUrl)?.slice(1, 3).join('/') ?? 'WWFZS/dsh-plugin-startup-animation'
+    const digest = crypto.createHash('sha256').update(fs.readFileSync(assetPath)).digest('hex')
+
+    console.log(`\ntarball：dist/${assetName}  ${(fs.statSync(assetPath).size / 1048576).toFixed(2)} MB`)
+    console.log(`sha256：${digest}`)
+    console.log('发布时把这个文件传成 Release 资产，然后这条链接就能直接贴进插件管理器：')
+    console.log(`  https://github.com/${slug}/releases/latest/download/${assetName}`)
+  }
+}
