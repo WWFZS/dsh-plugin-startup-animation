@@ -9,7 +9,7 @@
 <a href="https://github.com/WWFZS/dsh-plugin-startup-animation/releases"><img src="https://img.shields.io/github/v/release/WWFZS/dsh-plugin-startup-animation?style=flat-square&label=VERSION&color=4d6bfe" alt="Version"></a>
 <img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
 <img src="https://img.shields.io/badge/依赖-0%20npm%20包-2ea44f?style=flat-square" alt="No deps">
-<img src="https://img.shields.io/badge/体积-26%20MB-6e7681?style=flat-square" alt="Size">
+<img src="https://img.shields.io/badge/体积-25%20MB-6e7681?style=flat-square" alt="Size">
 <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="License">
 <img src="https://img.shields.io/badge/Author-WWFZS-8957e5?style=flat-square" alt="Author">
 
