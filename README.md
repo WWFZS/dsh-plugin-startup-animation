@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/startup.jpg" width="700" alt="Startup animation preview">
+<img src="docs/startup.jpg" width="520" height="400" alt="Startup animation preview">
 
 # Startup Animation
 
@@ -13,7 +13,7 @@ Plays on boot · Click to skip · Zero dependencies · Built-in library
 <a href="https://github.com/WWFZS/dsh-plugin-startup-animation/releases"><img src="https://img.shields.io/github/v/release/WWFZS/dsh-plugin-startup-animation?style=flat-square&label=VERSION&color=4d6bfe" alt="Version"></a>
 <img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
 <img src="https://img.shields.io/badge/dependencies-0-2ea44f?style=flat-square" alt="No deps">
-<img src="https://img.shields.io/badge/size-26%20MB-6e7681?style=flat-square" alt="Size">
+<img src="https://img.shields.io/badge/size-25%20MB-6e7681?style=flat-square" alt="Size">
 <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="License">
 <img src="https://img.shields.io/badge/Author-WWFZS-8957e5?style=flat-square" alt="Author">
 
@@ -53,7 +53,7 @@ decide yourself.
 
 **Media library** — three category tabs, click a card to apply it, built-in vs uploaded labelled:
 
-<img src="docs/library.jpg" width="700" alt="Media library">
+<img src="docs/library.jpg" width="520" height="400" alt="Media library">
 
 ## Install
 
@@ -66,7 +66,7 @@ DSH 0.2.1+ ships a plugin manager — no command line needed.
 3. Set **Install source** to *Custom address* and enter `https://github.com/`
 4. Click **Install**, then refresh the page
 
-<img src="docs/install.jpg" width="520" alt="Add plugin dialog">
+<img src="docs/install.jpg" width="520" height="400" alt="Add plugin dialog">
 
 > Expand the dialog's guide panel and confirm the install source really reads
 > *Custom address* before installing.
@@ -102,8 +102,12 @@ Open **Settings → Startup Animation** (the entry sits in the sidebar settings 
 | Play video with sound | Let the *video* play its own audio track, if the file has one. |
 | Startup audio | Play a separate audio clip during the animation. |
 | Display duration | 3–15 seconds, shared by videos and wallpapers. Skipping is never delayed by it. |
-| Startup visual | Current media preview, plus **Restore default**. |
+| Startup visual | Current media preview, plus **Restore default** (back to the built-in animation). |
 | MP4 / Wallpaper / Audio tabs | Click any card to use it. Upload adds to the library. |
+
+With nothing selected, the plugin plays its own **built-in animation** — a spinning
+emblem on the app's palette. Picking media replaces it; **Restore default** brings it
+back. Turning the master switch off shows Harness's own boot screen instead.
 
 **Refresh now** (top right of the page) reloads the page so the new settings take effect.
 No restart of `dsh` is needed for any setting.
@@ -230,6 +234,9 @@ for you.
 ```sh
 node tools/preflight.mjs            # full check + release directory
 node selftest.mjs                   # pure-function + HTTP semantics suite
+node tools/boot-runtime.mjs         # boot.js runtime behaviour (DOM stub + fake clock)
+node tools/client-test.mjs          # settings-page behaviour (React stub)
+node tools/boot-css-test.mjs        # startup-animation CSS rules (real browser)
 node tools/host-smoke.mjs           # drives the real route handlers over HTTP
 node tools/make-thumbs.mjs          # regenerate picker thumbnails (needs ffmpeg)
 node tools/optimize-builtin.mjs     # regenerate faststart variants (needs ffmpeg)

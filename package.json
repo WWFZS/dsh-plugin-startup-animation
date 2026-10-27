@@ -60,8 +60,11 @@
     "builtin/音频/**/*"
   ],
   "scripts": {
-    "test": "node selftest.mjs && node tools/host-smoke.mjs",
+    "test": "node selftest.mjs && node tools/boot-runtime.mjs && node tools/client-test.mjs && node tools/boot-css-test.mjs && node tools/host-smoke.mjs",
     "test:unit": "node selftest.mjs",
+    "test:boot": "node tools/boot-runtime.mjs",
+    "test:client": "node tools/client-test.mjs",
+    "test:css": "node tools/boot-css-test.mjs",
     "test:host": "node tools/host-smoke.mjs",
     "thumbs": "node tools/make-thumbs.mjs",
     "optimize": "node tools/optimize-builtin.mjs",

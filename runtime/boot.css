@@ -45,6 +45,15 @@
   pointer-events: none;
 }
 
+/* 覆盖层已挂载且不透明（内置 CSS 动画从挂载起就不透明；素材模式在第一帧就位
+   data-media="ok" 起）→ 整块隐藏宿主的原生启动卡（[data-dsh-boot]：HARNESS /
+   Loading plugins…），启用动画时不再叠显原生 logo。
+   纯 :has() 驱动、零 JS 同步：素材挂掉（gone）、未出画（loading）、动画让开
+   （覆盖层移除）时选择器不再匹配，原生启动页自动恢复 —— 失败回落原则不变。 */
+html:has(.dsa-root:not([data-media="loading"]):not([data-media="gone"])) [data-dsh-boot] {
+  display: none !important;
+}
+
 /* ── 调色板 ── */
 .dsa-root {
   --dsa-bg0: #0a0e18;

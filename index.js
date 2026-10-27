@@ -532,16 +532,8 @@ export function loadConfig(options) {
   }
 
   // 共用主配置：MP4 与壁纸素材的最短展示时长 = durationSec（3–15 秒，点击跳过不受它限制）。
-  // 旧的分类键（videoSec/imageSec，未发布过的中间版本）作为回退读取；
   // 内置 CSS 动画维持短 minMs（够看出动画即可，防止一闪而过）。
-  const durationSec = clampDurationSec(
-    raw.durationSec !== undefined
-      ? raw.durationSec
-      : raw.videoSec !== undefined
-        ? raw.videoSec
-        : raw.imageSec,
-    d.durationSec,
-  )
+  const durationSec = clampDurationSec(raw.durationSec, d.durationSec)
   const minMs =
     mode === 'video' || mode === 'image'
       ? durationSec * 1000
@@ -986,25 +978,6 @@ export function sanitizeUploadName(filename) {
   const ext = path.extname(name)
   if (name.length > 110) name = name.slice(0, Math.max(1, 110 - ext.length)) + ext
   return name
-}
-
-/**
- * 在素材目录里为上传挑一个不冲突的目标路径：
- * 原名 → `name (1).ext` → `name (2).ext` → … → 时间戳兜底。
- *
- * @param {string} rootDir 素材目录（已确保存在）。
- * @param {string} filename 净化后的文件名。
- * @returns {string} 绝对目标路径。
- */
-export function uniqueUploadTarget(rootDir, filename) {
-  const ext = path.extname(filename)
-  const stem = filename.slice(0, filename.length - ext.length)
-  for (let i = 0; i < 100; i += 1) {
-    const candidate = i === 0 ? filename : `${stem} (${i})${ext}`
-    const target = path.join(rootDir, candidate)
-    if (!fs.existsSync(target)) return target
-  }
-  return path.join(rootDir, `${stem}-${Date.now().toString(36)}${ext}`)
 }
 
 /**

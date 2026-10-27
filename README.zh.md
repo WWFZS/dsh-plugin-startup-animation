@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/startup.jpg" width="700" alt="开机动画预览">
+<img src="docs/startup.jpg" width="520" height="400" alt="开机动画预览">
 
 # 开机动画 · Startup Animation
 
@@ -13,7 +13,7 @@
 <a href="https://github.com/WWFZS/dsh-plugin-startup-animation/releases"><img src="https://img.shields.io/github/v/release/WWFZS/dsh-plugin-startup-animation?style=flat-square&label=VERSION&color=4d6bfe" alt="Version"></a>
 <img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
 <img src="https://img.shields.io/badge/依赖-0%20npm%20包-2ea44f?style=flat-square" alt="No deps">
-<img src="https://img.shields.io/badge/体积-26%20MB-6e7681?style=flat-square" alt="Size">
+<img src="https://img.shields.io/badge/体积-25%20MB-6e7681?style=flat-square" alt="Size">
 <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="License">
 <img src="https://img.shields.io/badge/Author-WWFZS-8957e5?style=flat-square" alt="Author">
 
@@ -45,12 +45,11 @@ PNG / JPG / MP3。声音分成三个彼此独立的开关，各由你自己决�
 - **失败即静默降级** —— 任何一步出错都退回 Harness 原生启动页，不阻塞启动
 - **真实进度条** —— 内核暴露启动进度弧时用真实进度，否则走流光
 - **不自动更新** —— 只提示有新版本并给出 Release 链接，装不装你决定
-
 ## 界面预览
 
 **素材库** —— 三个分类页签、卡片点选即用、内置/上传来源标记：
 
-<img src="docs/library.jpg" width="700" alt="素材库">
+<img src="docs/library.jpg" width="520" height="400" alt="素材库">
 
 ## 安装
 
@@ -63,7 +62,7 @@ DSH 0.2.1+ 自带插件管理器，不用命令行。
 3. **安装源**选「自定义地址」，填 `https://github.com/`
 4. 点 **安装**，完成后刷新页面
 
-<img src="docs/install.jpg" width="520" alt="添加插件">
+<img src="docs/install.jpg" width="520" height="400" alt="添加插件">
 
 > 建议先展开界面里的「收起引导」，确认安装源确实是「自定义地址」再点安装。
 >
@@ -98,8 +97,12 @@ dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 | 视频带声播放 | 让**视频**播它自己的音轨（前提是文件里真的有音轨）。 |
 | 开机音频 | 动画期间另播一段音频文件。 |
 | 展示时长 | 3–15 秒，视频与壁纸共用。**跳过不受它限制**。 |
-| 启动画面素材 | 当前素材预览，以及「恢复默认」。 |
+| 启动画面素材 | 当前素材预览，以及「恢复默认」（回到内置动画）。 |
 | MP4 / 壁纸 / 音频 三个页签 | 点卡片即选用；上传即入库。 |
+
+没选素材时，插件会播放**自己的内置动画**（配色随应用深浅色走的旋转徽标）。
+选了素材就用素材；「恢复默认」把它换回内置动画。把总开关关掉，才是 Harness
+原生的启动页。
 
 页面右上角的 **立即刷新** 会重载页面让新配置生效。**任何设置都不需要重启 `dsh`。**
 
@@ -212,6 +215,9 @@ dsh plugin --profile <你的 profile> remove dsh-plugin-startup-animation
 ```sh
 node tools/preflight.mjs             # 全套检查 + 出发布目录
 node selftest.mjs                    # 纯函数 + HTTP 语义测试
+node tools/boot-runtime.mjs          # boot.js 运行时行为测试（DOM 垫片 + 可控时钟）
+node tools/client-test.mjs           # 设置页行为测试（React 垫片）
+node tools/boot-css-test.mjs         # 开机动画样式测试（真浏览器）
 node tools/host-smoke.mjs            # 用真实路由处理器跑一遍 HTTP
 node tools/make-thumbs.mjs           # 重新生成列表缩略图（需要 ffmpeg）
 node tools/optimize-builtin.mjs      # 重新生成 faststart 变体（需要 ffmpeg）

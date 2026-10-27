@@ -21,7 +21,8 @@
  *     **内核启动页 [data-dsh-boot] 出现过、然后被应用树替换掉**。
  *   - 配置是**实时**的：桌面壳注入表是宿主启动时的一次性快照（刷新不重新收集），
  *     所以脚本每次页面加载先 GET 管理接口拿当前配置（500ms 上限，失败退回快照）——
- *     开关/素材/时长改完点“立即刷新”即生效；关闭或无素材时不挂载（原版标配启动页）。
+ *     开关/素材/时长改完点“立即刷新”即生效；关闭开关或素材模式缺素材时不挂载
+ *     （显示内核原生启动页）。
  */
 
 ; (function (global) {
@@ -163,12 +164,20 @@
   }
 
   function beginWithConfig(cfg) {
-    // ── 运行时政策（v1.5.0）：实时配置决定一切 ──
-    // 关闭开关 / 没有选用素材（mode 非 video/image 或 src 为空）→ 不挂载 → 原版标配启动页。
+    // ── 运行时政策：实时配置决定一切 ──
+    //   关闭开关 → 不挂载（显示内核原生启动页）。
+    //   素材模式（video/image）但**没有素材** → 不挂载：没有素材的素材模式只剩
+    //   一块永远停在"加载中"的空屏，比原生启动页更差。
+    //   其余情况一律挂载：mode='css' 是**内置动画**（原创的 CSS 场景），不是"没素材"。
+    //     早先这里只放行 video/image 两种模式，css 模式直接 early-return ——
+    //     于是内置动画其实**一次都没出现过**，而 README 一直写着"装上就有"。
+    //     默认配置 file='' → mode='css' → 内置动画本来就是"零配置"承诺的那一份，
+    //     不该被一行 early-return 挡掉。
     if (cfg === null || typeof cfg !== "object") return
     if (cfg.enabled === false) return
-    if (!(cfg.mode === "video" || cfg.mode === "image")) return
-    if (typeof cfg.src !== "string" || cfg.src === "") return
+    var mode = cfg.mode === 'video' || cfg.mode === 'image' ? cfg.mode : 'css'
+    var src = typeof cfg.src === 'string' ? cfg.src : ''
+    if (mode !== 'css' && src === "") return
 
     var fadeMs = num(cfg.fadeMs, 600, 100, 6000)
     var skipFadeMs = num(cfg.skipFadeMs, 240, 60, 2000)
@@ -187,8 +196,6 @@
     var audioOn = cfg.audioEnabled === true && typeof cfg.audioSrc === 'string' && cfg.audioSrc !== ''
     var audioVolume = num(cfg.audioVolume, 1, 0, 1)
     var showProgress = cfg.progress !== false
-    var mode = cfg.mode === 'video' || cfg.mode === 'image' ? cfg.mode : 'css'
-    var src = typeof cfg.src === 'string' ? cfg.src : ''
 
     var hintIdle = pickText(cfg.hint, COPY.hint)
     var skipLabel = pickText(cfg.skipLabel, COPY.skip)
