@@ -25,7 +25,6 @@ import {
   scanLibrary,
   serveAsset,
   trackStream,
-  uniqueUploadTarget,
   writeHomeBootPatch,
   ASSET_ROUTE,
   REPO_URL,
@@ -225,13 +224,15 @@ try {
     assert.equal(r.client.minMs, 12000)
     writeHomeBootPatch(home, {}, ['file', 'durationSec'])
   })
-  await check('css 模式维持 900ms；旧分类键回退读取', () => {
+  await check('css 模式维持 900ms；未发布的旧分类键不再被读取', () => {
     let r = loadConfig(opts)
     assert.equal(r.client.minMs, 900)
     assert.equal(r.client.durationSec, 5)
+    // AGENTS.md 规则 3：不写历史数据兼容分支。videoSec/imageSec 是未发布过的
+    // 中间版本键名，读它只会让配置语义含糊（旧键值悄悄盖住新键）。
     writeHomeBootPatch(home, { videoSec: 9 })
     r = loadConfig(opts)
-    assert.equal(r.client.durationSec, 9)
+    assert.equal(r.client.durationSec, 5, '未发布的旧分类键仍在生效')
     writeHomeBootPatch(home, {}, ['videoSec'])
   })
   await check('status 回显 durationSec', () => {
@@ -315,7 +316,13 @@ try {
     assert.ok(src.includes('/dsh-startup-animation/manage?cfg=1'), '缺少实时配置端点（精简回包）')
     assert.ok(src.includes('function beginWithConfig(cfg)'), '缺少配置包装')
     assert.ok(src.includes('if (cfg.enabled === false) return'), '缺少关闭政策')
-    assert.ok(src.includes('cfg.src === ""'), '缺少无素材政策')
+    // 素材模式缺素材 → 不挂载（只剩永远"加载中"的空屏）。css 模式**要**挂载：
+    // 那是内置动画，"零配置"承诺的那一份。行为由 tools/boot-runtime.mjs 实测。
+    assert.ok(src.includes('if (mode !== \'css\' && src === "") return'), '缺少"素材模式缺素材不挂载"政策')
+    assert.ok(
+      !src.includes('if (!(cfg.mode === "video" || cfg.mode === "image")) return'),
+      '仍有"css 模式不挂载"的 early-return —— 内置动画会永远出不来',
+    )
     assert.ok(src.includes('LIVE_TIMEOUT_MS'), '缺少实时读取超时兜底')
   })
 
@@ -332,17 +339,30 @@ try {
     assert.ok(trimmed.length <= 110, `超长未截断：${trimmed.length}`)
     assert.ok(trimmed.endsWith('.mp4'), '截断丢了扩展名')
   })
-  await check('uniqueUploadTarget 重名自动加 (1)/(2) 序号', () => {
+  await check('落盘用 link 原子创建：同名不覆盖，序号递增', () => {
+    // 上传落盘走 `link(temp → target)`：目标已存在必然失败（EEXIST），
+    // 于是"只在不存在时创建"这件事没有任何检查后使用（TOCTOU）窗口。
+    // 这个性质没法靠"挑一个不冲突的名字"的辅助函数保证 —— 那正是被删掉的那个
+    // 死代码（旧函数先 existsSync 再返回，调用方并没有用它）。
     const dir = path.join(tmp, 'uniq')
     fs.mkdirSync(dir, { recursive: true })
-    const first = uniqueUploadTarget(dir, '开场.mp4')
-    assert.equal(path.basename(first), '开场.mp4')
-    fs.writeFileSync(first, '1')
-    const second = uniqueUploadTarget(dir, '开场.mp4')
-    assert.equal(path.basename(second), '开场 (1).mp4')
-    fs.writeFileSync(second, '2')
-    const third = uniqueUploadTarget(dir, '开场.mp4')
-    assert.equal(path.basename(third), '开场 (2).mp4')
+    const temp = path.join(dir, '.upload-test.part')
+    fs.writeFileSync(temp, 'payload')
+    const place = (name) => {
+      const target = path.join(dir, name)
+      try {
+        fs.linkSync(temp, target)
+        return true
+      } catch (error) {
+        if (error && error.code === 'EEXIST') return false
+        throw error
+      }
+    }
+    assert.equal(place('开场.mp4'), true)
+    assert.equal(place('开场.mp4'), false, '同名覆盖了已存在的文件')
+    assert.equal(place('开场 (1).mp4'), true)
+    assert.equal(fs.readFileSync(path.join(dir, '开场.mp4'), 'utf8'), 'payload')
+    assert.equal(fs.readFileSync(path.join(dir, '开场 (1).mp4'), 'utf8'), 'payload')
   })
 
   console.log('== 句柄释放与真删兜底（v1.5.1）==')
@@ -437,6 +457,15 @@ try {
     assert.ok(/data-media="loading"[\s\S]{0,120}opacity: 0/.test(css), 'loading 态未透明')
     assert.ok(css.includes('pointer-events: none'), '透明期未关闭点击拦截')
   })
+  await check('boot.css 动画可见时隐藏原生启动卡（静态锚点）', () => {
+    const css = fs.readFileSync(new URL('./runtime/boot.css', import.meta.url), 'utf8')
+    // 覆盖层不透明（非 loading/gone）→ [data-dsh-boot] 必须被藏起来；
+    // loading/gone 两个排除项是"素材未出画/挂掉时原生页照常"的保证，缺一不可。
+    assert.ok(
+      /html:has\(\.dsa-root:not\(\[data-media="loading"\]\):not\(\[data-media="gone"\]\)\)\s*\[data-dsh-boot\][\s\S]{0,80}display: none/.test(css),
+      '缺少"动画可见时隐藏原生启动卡"规则，或未排除 loading/gone 态',
+    )
+  })
   await check('client.js 音频设置（静态锚点）', () => {
     const src = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
     assert.ok(src.includes('useAudio:'), '缺少 useAudio 选用')
@@ -448,7 +477,9 @@ try {
   console.log('== 客户端开关字段映射（静态回归）==')
   await check('enable→enabled 映射存在、未再用 state[key] 直取', () => {
     // 回归（v1.4.0 的"开机动画关不掉"）：toggle('enable') 曾读 state['enable']（undefined），
-    // !undefined 恒为 true → 永远写回 enabled:true。React 组件无法离线执行，用源码断言钉死。
+    // !undefined 恒为 true → 永远写回 enabled:true。
+    // 注意：tools/client-test.mjs 已经用**真实渲染**覆盖了这条（点开关 → 断言
+    // 请求体是 {enabled:false}）；这里保留源码断言作为双保险，但**不是**唯一防线。
     const src = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
     assert.ok(src.includes("key === 'enable' ? 'enabled' : key"), '未找到 enable→enabled 映射')
     assert.ok(!src.includes('{ [key]: !state[key] }'), '仍在用 state[key] 直接取值（enable 键会读到 undefined）')

@@ -31,6 +31,15 @@ for (const file of ['index.js', 'client.js', 'runtime/boot.js']) {
 step('单元测试')
 run(['selftest.mjs'])
 
+step('运行时行为测试（boot.js）')
+run(['tools/boot-runtime.mjs'])
+
+step('设置页行为测试（client.js）')
+run(['tools/client-test.mjs'])
+
+step('开机动画样式测试（真浏览器）')
+run(['tools/boot-css-test.mjs'])
+
 step('宿主路由测试')
 run(['tools/host-smoke.mjs'])
 
