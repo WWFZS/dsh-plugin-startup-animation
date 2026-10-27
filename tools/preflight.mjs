@@ -37,6 +37,12 @@ run(['tools/boot-runtime.mjs'])
 step('设置页行为测试（client.js）')
 run(['tools/client-test.mjs'])
 
+step('自我管理测试（卸载 / 更新）')
+run(['lib/self-manage-test.mjs'])
+
+step('端到端卸载（profile 副本上真跑 pnpm）')
+run(['lib/e2e-uninstall.mjs'])
+
 step('开机动画样式测试（真浏览器）')
 run(['tools/boot-css-test.mjs'])
 

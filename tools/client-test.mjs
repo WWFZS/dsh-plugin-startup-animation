@@ -111,10 +111,21 @@ function texts(node) {
 }
 
 /** 按 className 找节点。 */
+/** 按 className 精确匹配。 */
 function findAll(node, className) {
   const out = []
   walk(node, (item) => {
     if (item.props && item.props.className === className) out.push(item)
+  })
+  return out
+}
+
+/** 按 className **包含**匹配（一个节点可能有多个类，如 "a b"）。 */
+function findByClass(node, className) {
+  const out = []
+  walk(node, (item) => {
+    const value = item.props?.className
+    if (typeof value === 'string' && value.split(/\s+/).includes(className)) out.push(item)
   })
   return out
 }
@@ -187,7 +198,22 @@ async function loadClient(options = {}) {
             options.update ?? { ok: true, current: '1.10.0', reachable: false, updateAvailable: false },
         })
       }
+      // 自我管理端点：GET 读安装形态，POST 做卸载/更新。
+      if (path.includes('/self')) {
+        const isPost = init?.method === 'POST'
+        if (isPost && options.selfResult !== undefined) {
+          return Promise.resolve({ ok: true, json: async () => options.selfResult })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => options.self ?? { ok: true, installed: false, selected: false },
+        })
+      }
       return Promise.resolve({ ok: true, json: async () => status })
+    },
+    confirm: (text) => {
+      calls.push({ type: 'confirm', text })
+      return options.confirmResult !== false
     },
     Audio: class {
       constructor(src) {
@@ -526,7 +552,7 @@ await check('恢复默认 → DELETE；文案说"内置动画"而不是"原版�
     },
   })
   const tree = await render()
-  const restore = findAll(tree, 'dsa-set-btn').find((btn) => btn.children.includes('恢复默认'))
+  const restore = findByClass(tree, 'dsa-set-btn').find((btn) => btn.children.includes('恢复默认'))
   assert.ok(restore, '找不到恢复默认按钮')
   restore.props.onClick()
   const del = calls.find((call) => call.type === 'fetch' && call.init?.method === 'DELETE')
@@ -593,6 +619,111 @@ await check('有新版时版本小字可点开 Release 页', async () => {
   const opened = calls.find((call) => call.type === 'open')
   assert.ok(opened, '点击没有打开 Release 页')
   assert.ok(String(opened.args[0]).endsWith('/releases'))
+})
+
+console.log('== 卸载 / 更新（v1.11.0）==')
+
+await check('没装在 profile 里 → 不显示卸载/更新区', async () => {
+  const { render } = await loadClient({ self: { ok: true, installed: false, selected: false } })
+  const tree = await render()
+  assert.equal(findAll(tree, 'dsa-set-self').length, 0, '不该显示自管区')
+})
+
+await check('装在 profile 里 → 显示卸载按钮', async () => {
+  const { render } = await loadClient({ self: { ok: true, installed: true, selected: true } })
+  const tree = await render()
+  const panel = findAll(tree, 'dsa-set-self')[0]
+  assert.ok(panel, '没显示自管区')
+  const labels = texts(panel)
+  assert.ok(labels.includes('卸载插件'), `没有卸载按钮：${labels.join(' | ')}`)
+  // 没有新版本时不该有更新按钮（不给用户一个按了没用的按钮）。
+  assert.ok(!labels.some((text) => text.startsWith('更新到')), `不该显示更新按钮：${labels.join(' | ')}`)
+})
+
+await check('有新版本 → 同时显示更新按钮', async () => {
+  const { render } = await loadClient({
+    self: { ok: true, installed: true, selected: true },
+    update: {
+      ok: true,
+      current: '1.10.0',
+      latest: '1.11.0',
+      reachable: true,
+      updateAvailable: true,
+      releasesUrl: 'https://github.com/WWFZS/dsh-plugin-startup-animation/releases',
+    },
+  })
+  const tree = await render()
+  const panel = findAll(tree, 'dsa-set-self')[0]
+  const labels = texts(panel)
+  assert.ok(labels.includes('更新到 1.11.0'), `没有更新按钮：${labels.join(' | ')}`)
+  assert.ok(labels.includes('卸载插件'), '没有卸载按钮')
+})
+
+await check('点卸载 → 先确认，再 POST action=uninstall', async () => {
+  const { render, calls } = await loadClient({
+    self: { ok: true, installed: true, selected: true },
+    selfResult: { ok: true, restartRequired: true, message: '已卸载' },
+  })
+  const tree = await render()
+  const panel = findAll(tree, 'dsa-set-self')[0]
+  // 按钮的 className 有两个类（dsa-set-btn dsa-set-btn-danger），按 class 精确匹配找不到 ——
+  // 这里按 class **包含** 找。
+  const button = findByClass(tree, 'dsa-set-btn').find((btn) => btn.children.includes('卸载插件'))
+  assert.ok(button, '找不到卸载按钮')
+  button.props.onClick()
+  // 确认框要先过。
+  const confirmed = calls.find((call) => call.type === 'confirm')
+  assert.ok(confirmed, '没有确认就动手了')
+  await Promise.resolve()
+  await Promise.resolve()
+  const post = calls.find(
+    (call) => call.type === 'fetch' && call.init?.method === 'POST' && call.url.includes('/self'),
+  )
+  assert.ok(post, '没有发卸载请求')
+  assert.ok(post.url.includes('action=uninstall'), `请求地址不对：${post.url}`)
+})
+
+await check('用户在确认框点取消 → 不发请求', async () => {
+  const { render, calls } = await loadClient({
+    self: { ok: true, installed: true, selected: true },
+    confirmResult: false,
+  })
+  const tree = await render()
+  const button = findByClass(tree, 'dsa-set-btn').find((btn) => btn.children.includes('卸载插件'))
+  assert.ok(button, '找不到卸载按钮')
+  button.props.onClick()
+  await Promise.resolve()
+  await Promise.resolve()
+  const post = calls.find(
+    (call) => call.type === 'fetch' && call.init?.method === 'POST' && call.url.includes('/self'),
+  )
+  assert.equal(post, undefined, '取消后仍然发了请求')
+})
+
+await check('点更新 → POST action=update', async () => {
+  const { render, calls } = await loadClient({
+    self: { ok: true, installed: true, selected: true },
+    update: {
+      ok: true,
+      current: '1.10.0',
+      latest: '1.11.0',
+      reachable: true,
+      updateAvailable: true,
+      releasesUrl: 'https://github.com/WWFZS/dsh-plugin-startup-animation/releases',
+    },
+    selfResult: { ok: true, restartRequired: true, message: '已更新' },
+  })
+  const tree = await render()
+  const button = findByClass(tree, 'dsa-set-btn').find((btn) => btn.children.includes('更新到 1.11.0'))
+  assert.ok(button, '找不到更新按钮')
+  button.props.onClick()
+  await Promise.resolve()
+  await Promise.resolve()
+  const post = calls.find(
+    (call) => call.type === 'fetch' && call.init?.method === 'POST' && call.url.includes('/self'),
+  )
+  assert.ok(post, '没有发更新请求')
+  assert.ok(post.url.includes('action=update'), `请求地址不对：${post.url}`)
 })
 
 console.log('')

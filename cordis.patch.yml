@@ -1,0 +1,4 @@
+- insert:
+    - id: startup-animation
+      name: 'dsh-plugin-startup-animation'
+      config: {}

@@ -15,7 +15,24 @@ const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-host-smoke-'))
 process.env.DSH_HOME = path.join(tmp, 'home')
 
-const { apply, MANAGE_ROUTE, ASSET_ROUTE, UPDATE_ROUTE, VERSION } = await import(
+// 假 profile 目录：自我管理路由要读它的 package.json。
+const profileDir = path.join(tmp, 'profile')
+fs.mkdirSync(profileDir, { recursive: true })
+fs.writeFileSync(
+  path.join(profileDir, 'package.json'),
+  JSON.stringify(
+    {
+      name: 'dsh-profile-smoke',
+      private: true,
+      dependencies: { 'dsh-plugin-startup-animation': 'link:D:/somewhere' },
+      dsh: { profile: { bundles: ['dsh-plugin-startup-animation'] } },
+    },
+    null,
+    2,
+  ),
+)
+
+const { apply, MANAGE_ROUTE, ASSET_ROUTE, UPDATE_ROUTE, SELF_ROUTE, VERSION } = await import(
   new URL('../index.js', import.meta.url)
 )
 
@@ -34,6 +51,11 @@ const ctx = {
     return () => {}
   },
   inject: (deps, cb) => {
+    // 插件会注入两个服务：profileContext（知道自己被装在哪）与 webServer（路由）。
+    if (deps.length === 1 && deps[0] === 'profileContext') {
+      cb({ name: 'desktop', dir: profileDir, startedBundles: [] })
+      return () => {}
+    }
     assert.deepEqual(deps, ['webServer'])
     injectHandler = cb
     return () => {}
@@ -391,6 +413,35 @@ console.log('  ok   GET ?cfg=1 只回配置、不扫素材库')
   assert.equal(s.version, VERSION, '状态里缺少版本号')
   assert.ok(String(s.repo).startsWith('https://github.com/'), '缺少仓库地址')
   console.log('  ok   manage 状态携带 version / repo')
+}
+
+// ── 19. 自我管理路由（卸载 / 更新）──
+{
+  // GET：读当前 profile 里的安装形态。
+  const get = await call(SELF_ROUTE)
+  assert.equal(get.status, 200, `self GET 失败 ${get.status}`)
+  const body = get.json()
+  assert.equal(body.ok, true)
+  assert.equal(typeof body.installed, 'boolean', '缺少 installed 字段')
+  assert.equal(typeof body.selected, 'boolean', '缺少 selected 字段')
+  console.log('  ok   self GET：200 + 安装形态')
+
+  // 没有 action → 400（不给"什么都不做"一个静默成功）。
+  const noAction = await call(SELF_ROUTE, { method: 'POST' })
+  assert.equal(noAction.status, 400, `缺 action 时应是 400，实际 ${noAction.status}`)
+  console.log('  ok   self POST：缺 action 拒绝')
+
+  // 不允许更新到任意包：这个端点不能变成"往 profile 塞任意依赖"的入口。
+  const badTarget = await call(`${SELF_ROUTE}?action=update&spec=${encodeURIComponent('some-other-package')}`, {
+    method: 'POST',
+  })
+  assert.equal(badTarget.status, 400, `任意更新目标应是 400，实际 ${badTarget.status}`)
+  console.log('  ok   self POST：拒绝任意更新目标')
+
+  // 非法方法。
+  const put = await call(SELF_ROUTE, { method: 'PUT' })
+  assert.equal(put.status, 405, `PUT 应是 405，实际 ${put.status}`)
+  console.log('  ok   self：非法方法 405')
 }
 
 await new Promise((resolve) => server.close(resolve))
