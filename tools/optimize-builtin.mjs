@@ -38,7 +38,7 @@ const force = process.argv.includes('--force')
  * 但有的素材本身就是在说话（"欢迎回来"这类），去掉音轨等于把内容删了 ——
  * 这类必须保留。按文件名列在这里，重跑构建时不会被无声抹掉。
  */
-const KEEP_AUDIO = new Set(['dsh-大肥鱼'])
+const KEEP_AUDIO = new Set(['dsh-大肥鱼', '欢迎回来'])
 
 /** 用 ffmpeg 压一版网页友好的 faststart mp4（按素材决定是否保留音轨）。 */
 function transcode(source, target) {
