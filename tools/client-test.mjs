@@ -789,6 +789,84 @@ await check('点更新 → POST action=update', async () => {
   assert.equal(sent.action, 'update', `动作不对：${String(post.init.body)}`)
 })
 
+console.log('== 更新公告 ==')
+
+/** 一份按真实 Release 写法排版的正文：标题、分节、加粗、代码块、安装链接都在里面。 */
+const RELEASE_BODY = [
+  '## 开机动画 v1.13.0',
+  '',
+  '公告页签上线。',
+  '',
+  '### 改了什么',
+  '',
+  '- 标题旁的版本号点一下就地更新',
+  '- **不再跳转** GitHub 手动下载',
+  '',
+  '```sh',
+  'npm i dsh-plugin-startup-animation',
+  '```',
+  '',
+  '### 安装',
+  '',
+  'https://example.com/dsh-plugin-startup-animation.tgz',
+].join('\n')
+
+await check('更新公告页签：渲染 Release 正文，安装段/代码块不进来', async () => {
+  const { render, calls } = await loadClient({
+    update: {
+      ok: true,
+      current: '1.12.0',
+      latest: '1.13.0',
+      reachable: true,
+      updateAvailable: true,
+      notes: RELEASE_BODY,
+    },
+  })
+  const tree = await render()
+  const tab = findAll(tree, 'dsa-set-tab').find((item) => item.children.includes('更新公告'))
+  assert.ok(tab, '没有更新公告页签')
+  tab.props.onClick()
+  const panel = await render()
+  // 页面上只有这一个 tabpanel，抬头标出这是哪一版的公告。
+  const panels = findAll(panel, 'dsa-set-panel')
+  assert.equal(panels.length, 1, `面板数量异常：${panels.length}`)
+  assert.equal(panels[0].props['aria-label'], '更新公告')
+  const all = texts(panel)
+  assert.ok(all.includes('v1.13.0 更新了什么'), `抬头不对：${all.join(' | ')}`)
+  assert.ok(
+    all.some((text) => text.includes('标题旁的版本号点一下就地更新')),
+    `要点没渲染：${all.join(' | ')}`,
+  )
+  // 加粗符号要去掉（设置页不渲染富文本）。
+  assert.ok(all.some((text) => text.includes('不再跳转 GitHub 手动下载')), `加粗没剥干净：${all.join(' | ')}`)
+  assert.ok(!all.some((text) => text.includes('**')), '正文里留着 markdown 加粗符号')
+  // 安装链接与代码示例属于"怎么装"，不是"这次改了什么"。
+  assert.ok(!all.some((text) => text.includes('example.com')), `安装链接混进了公告：${all.join(' | ')}`)
+  assert.ok(!all.some((text) => text.includes('npm i ')), `代码块混进了公告：${all.join(' | ')}`)
+  // 「安装」小节与 Release 标题行是重复/无关信息：一个被截断，一个被抬头取代。
+  assert.ok(!all.some((text) => text === '安装'), `「安装」小节标题混进了公告：${all.join(' | ')}`)
+  assert.ok(!all.some((text) => text.includes('开机动画 v1.13.0')), `Release 标题与抬头重复：${all.join(' | ')}`)
+  // 公告不是素材分类：切过去就不该再有上传入口，也不该发任何写请求。
+  assert.ok(!all.some((text) => text.startsWith('选择文件')), '公告页里还留着上传入口')
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.equal(post, undefined, '切到更新公告不该发写请求')
+})
+
+await check('拿不到 Release 正文（离线）→ 公告页只显示"检查不到更新"，不报错', async () => {
+  const { render } = await loadClient({
+    update: { ok: true, current: '1.12.0', reachable: false, updateAvailable: false, reason: 'network' },
+  })
+  const tree = await render()
+  findAll(tree, 'dsa-set-tab')
+    .find((item) => item.children.includes('更新公告'))
+    .props.onClick()
+  const panel = await render()
+  const all = texts(panel)
+  assert.ok(all.includes('检查不到更新'), `离线时该是安静的提示：${all.join(' | ')}`)
+  // 没有版本号就没有抬头 —— 宁可少一行，也不拼出"v 更新了什么"。
+  assert.ok(!all.some((text) => text.includes('v 更新')), `不该出现拼凑的抬头：${all.join(' | ')}`)
+})
+
 console.log('')
 if (failures > 0) {
   console.error(`${failures} 项失败`)

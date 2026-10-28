@@ -616,6 +616,23 @@ await check('更新检查：有新版本 → updateAvailable', async () => {
   assert.equal(r.latest, '9.9.9')
   assert.equal(r.updateAvailable, true)
 })
+await check('更新检查：Release 正文随结果带回（「更新公告」的内容源）', async () => {
+  resetUpdateCache()
+  const body = '## 开机动画 v9.9.9\n\n### 改了什么\n\n- 一行要点'
+  const fake = async () => ({ ok: true, json: async () => ({ tag_name: 'v9.9.9', body }) })
+  const r = await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake, force: true })
+  assert.equal(r.notes, body, '没有把 Release 正文带回，更新公告就没有内容源')
+})
+await check('更新检查：回退 tags（没有 Release）→ 正文为空串，不编造公告', async () => {
+  resetUpdateCache()
+  const fake = async (url) => {
+    if (String(url).includes('/releases/latest')) return { ok: false, json: async () => ({}) }
+    return { ok: true, json: async () => [{ name: 'v3.0.0' }] }
+  }
+  const r = await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake, force: true })
+  assert.equal(r.latest, '3.0.0')
+  assert.equal(r.notes, '', `tags 回退不该带正文：${JSON.stringify(r.notes)}`)
+})
 await check('更新检查：本地已最新 → 不提示', async () => {
   resetUpdateCache()
   const fake = async () => ({ ok: true, json: async () => ({ tag_name: 'v1.9.0' }) })
