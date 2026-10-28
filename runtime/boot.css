@@ -179,14 +179,11 @@ html[data-dsa-cover] [data-dsh-boot] {
   animation: dsa-scene-in 0.5s ease both;
 }
 
-/* 第一帧就位：徽标场景淡出，和素材的淡入交叉 —— 交接点不出现空画面。 */
-.dsa-root[data-mode="media"][data-media="ok"] .dsa-scene {
-  animation: dsa-scene-out 240ms ease forwards;
-}
-
-@keyframes dsa-scene-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
+/* 素材模式**从头到尾不出现徽标场景**：那是内置动画（css 模式）的画面。
+   素材还没出画时只留背景色，不许拿徽标顶班 —— 用户看到的应当是"黑一下就是
+   自己的画面"，而不是先闪一张 DeepSeek Harness 标题页。 */
+.dsa-root[data-mode="media"] .dsa-scene {
+  display: none;
 }
 
 @keyframes dsa-scene-in {
@@ -251,7 +248,8 @@ html[data-dsa-cover] [data-dsh-boot] {
   text-align: center;
 }
 
-/* ── HUD：进度条 + 状态行 + 跳过胶囊（素材模式下也显示）── */
+/* ── HUD：进度条 + 状态行 + 跳过胶囊（素材模式下也显示）──
+   素材还没出画的这段，HUD 跟着素材一起淡入：不在空背景上先冒出一条进度条。 */
 .dsa-hud {
   position: absolute;
   left: 50%;
@@ -264,6 +262,11 @@ html[data-dsa-cover] [data-dsh-boot] {
   gap: 12px;
   width: min(340px, calc(100vw - 48px));
   pointer-events: none;
+  transition: opacity 260ms ease;
+}
+
+.dsa-root[data-mode="media"][data-media="loading"] .dsa-hud {
+  opacity: 0;
 }
 
 .dsa-bar {
