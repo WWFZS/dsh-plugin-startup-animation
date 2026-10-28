@@ -316,10 +316,15 @@ try {
     // 精简回包：开机动画只要 cfg，不该顺带让宿主重扫一遍素材库。
     assert.ok(src.includes('/dsh-startup-animation/manage?cfg=1'), '缺少实时配置端点（精简回包）')
     assert.ok(src.includes('function beginWithConfig(cfg)'), '缺少配置包装')
-    assert.ok(src.includes('if (cfg.enabled === false) return'), '缺少关闭政策')
+    // 每条 early-return 都要顺手摘掉解析期打的遮罩，否则关掉开关就是一块纯色。
+    const closed = src.slice(src.indexOf('function beginWithConfig(cfg)'), src.indexOf('var fadeMs ='))
+    assert.ok(/cfg\.enabled === false[\s\S]{0,80}setCover\(false\)/.test(closed), '缺少关闭政策（或没摘遮罩）')
     // 素材模式缺素材 → 不挂载（只剩永远"加载中"的空屏）。css 模式**要**挂载：
     // 那是内置动画，"零配置"承诺的那一份。行为由 tools/boot-runtime.mjs 实测。
-    assert.ok(src.includes('if (mode !== \'css\' && src === "") return'), '缺少"素材模式缺素材不挂载"政策')
+    assert.ok(
+      /mode !== 'css' && src === ""[\s\S]{0,80}setCover\(false\)/.test(closed),
+      '缺少"素材模式缺素材不挂载"政策（或没摘遮罩）',
+    )
     assert.ok(
       !src.includes('if (!(cfg.mode === "video" || cfg.mode === "image")) return'),
       '仍有"css 模式不挂载"的 early-return —— 内置动画会永远出不来',
@@ -453,19 +458,53 @@ try {
     // 最短展示从出画起算。
     assert.ok(src.includes('state.revealedAt !== null ? state.revealedAt : state.startAt'), 'minMs 未从出画起算')
   })
-  await check('boot.css 未出画=完全透明且不拦截点击（静态锚点）', () => {
+  await check('boot.css 素材未出画时也不透明（静态锚点）', () => {
     const css = fs.readFileSync(new URL('./runtime/boot.css', import.meta.url), 'utf8')
-    assert.ok(/data-media="loading"[\s\S]{0,120}opacity: 0/.test(css), 'loading 态未透明')
+    // loading 必须**不**透明：否则素材解码那几百毫秒里原生启动卡会露出来，
+    // 就是用户看到的"闪一下原生动画"。只有素材彻底失败（gone）才让开。
+    assert.ok(!/data-media="loading"[\s\S]{0,120}opacity: 0/.test(css), 'loading 态仍透明')
+    assert.ok(/\.dsa-root\[data-media="gone"\]\s*\{[\s\S]{0,120}opacity: 0/.test(css), 'gone 态未透明')
     assert.ok(css.includes('pointer-events: none'), '透明期未关闭点击拦截')
   })
   await check('boot.css 动画可见时隐藏原生启动卡（静态锚点）', () => {
     const css = fs.readFileSync(new URL('./runtime/boot.css', import.meta.url), 'utf8')
-    // 覆盖层不透明（非 loading/gone）→ [data-dsh-boot] 必须被藏起来；
-    // loading/gone 两个排除项是"素材未出画/挂掉时原生页照常"的保证，缺一不可。
+    // 覆盖层不透明（挂载起，含 loading）→ [data-dsh-boot] 必须被藏起来；
+    // gone 是唯一的排除项 —— 那是"素材挂掉时原生页照常"的保证。
     assert.ok(
-      /html:has\(\.dsa-root:not\(\[data-media="loading"\]\):not\(\[data-media="gone"\]\)\)\s*\[data-dsh-boot\][\s\S]{0,80}display: none/.test(css),
-      '缺少"动画可见时隐藏原生启动卡"规则，或未排除 loading/gone 态',
+      /html:has\(\.dsa-root:not\(\[data-media="gone"\]\)\)\s*\[data-dsh-boot\][\s\S]{0,80}display: none/.test(css),
+      '缺少"动画可见时隐藏原生启动卡"规则，或未排除 gone 态',
     )
+  })
+  await check('boot.css 首帧遮罩：解析期就能铺满并藏卡', () => {
+    const css = fs.readFileSync(new URL('./runtime/boot.css', import.meta.url), 'utf8')
+    // 覆盖层要等一次 fetch 才挂得上；这中间原生卡已经被画出来了。脚本在解析期
+    // 打 data-dsa-cover，样式同步铺满 —— 真正的覆盖层一出现（:has 命中）就撤。
+    assert.ok(
+      /html\[data-dsa-cover\]:not\(:has\(\.dsa-root\)\)::before\s*\{[\s\S]{0,200}position: fixed/.test(css),
+      '缺少首帧遮罩的铺满规则',
+    )
+    assert.ok(
+      /html\[data-dsa-cover\]\s*\[data-dsh-boot\][\s\S]{0,80}display: none/.test(css),
+      '缺少首帧遮罩期间的藏卡规则',
+    )
+    const src = fs.readFileSync(new URL('./runtime/boot.js', import.meta.url), 'utf8')
+    assert.ok(src.includes("COVER_ATTR = 'data-dsa-cover'"), 'boot.js 未定义遮罩标记')
+    assert.ok(src.includes('setCover(true)'), 'boot.js 未在解析期打开遮罩')
+    // 失败与退场必须摘标记，否则原生启动页被一直藏到动画消失。
+    assert.ok(src.includes("mediaGone('mount-throw')"), '挂载失败路径仍在')
+    assert.ok(src.includes('setCover(false)'), 'boot.js 未关闭遮罩')
+  })
+  await check('资源接口：?poster=1 没有手工封面时回 404', () => {
+    const src = fs.readFileSync(new URL('./index.js', import.meta.url), 'utf8')
+    // 以前这里回的是视频本体，客户端再把几 MB 视频塞进 <img> 当封面 —— 必然
+    // 解码失败，还白下一段流量，卡片于是先空一秒再突然出现画面。
+    assert.ok(
+      /if \(poster\) \{[\s\S]{0,400}posterFor\(filePath\)[\s\S]{0,200}404/.test(src),
+      '?poster=1 缺失时未回 404',
+    )
+    const client = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
+    assert.ok(client.includes('useState(null)'), 'VideoCover 未在探测期留空')
+    assert.ok(/hasManual === null/.test(client), 'VideoCover 探测期仍在画媒体元素')
   })
   await check('client.js 音频设置（静态锚点）', () => {
     const src = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')

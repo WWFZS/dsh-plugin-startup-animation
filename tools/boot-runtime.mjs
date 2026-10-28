@@ -374,9 +374,9 @@ await check('实时通道失败 → 退回宿主快照', async () => {
   assert.ok(overlay(), '实时通道失败后没有退回快照')
 })
 
-console.log('== 素材模式：出画前透明、出画后可见、挂掉后回落 ==')
+console.log('== 素材模式：出画前不透明顶着、出画后可见、挂掉后回落 ==')
 
-await check('素材未出画 → data-media=loading（透明、不拦点击）', async () => {
+await check('素材未出画 → data-media=loading（覆盖层不透明顶着）', async () => {
   const { overlay, sandbox } = await runBoot({
     snapshot: { enabled: true, mode: 'video', src: '/dsh-startup-animation/asset' },
   })
@@ -384,7 +384,10 @@ await check('素材未出画 → data-media=loading（透明、不拦点击）',
   assert.ok(root, '视频模式没有挂载')
   assert.equal(root.getAttribute('data-mode'), 'media')
   assert.equal(root.getAttribute('data-media'), 'loading', '未出画时没有进入 loading 态')
-  assert.equal(sandbox.document.querySelector('[data-dsh-boot]') !== null, true, '原生启动卡不该消失')
+  // 原生卡的**节点**必须留着：藏它是 CSS 的事，节点还在，失败回落后才能直接露出来。
+  assert.equal(sandbox.document.querySelector('[data-dsh-boot]') !== null, true, '原生启动卡节点被移除了')
+  // 首帧遮罩在真覆盖层挂上后必须撤掉，否则它会在覆盖层上再盖一层纯色。
+  assert.equal(sandbox.document.documentElement.getAttribute('data-dsa-cover'), null, '首帧遮罩没有撤')
 })
 
 await check('素材第一帧就位 → data-media=ok', async () => {

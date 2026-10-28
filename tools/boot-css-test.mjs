@@ -2,13 +2,13 @@
  * boot-css-test.mjs —— 用**真浏览器**校验 boot.css 里那条跨组件的规则。
  *
  * 为什么必须用浏览器：这条规则是
- *   html:has(.dsa-root:not([data-media="loading"]):not([data-media="gone"])) [data-dsh-boot]
+ *   html:has(.dsa-root:not([data-media="gone"])) [data-dsh-boot]
  * —— 选的是"宿主的原生启动卡"，靠 :has() 跨子树匹配。Node 里的 DOM 垫片没有
  * 样式引擎，测不了"选择器到底匹配不匹配"，只有 getComputedStyle 能给答案。
  *
- * 这条规则是"失败回落"原则的最后一环：动画可见 → 藏掉原生启动卡（不叠显
- * 两个 logo）；动画没出画/挂了/让开了 → 选择器不再匹配 → 原生启动页自动回来。
- * 一旦这条规则写错，后果是"开机看到两个 logo"或"原生启动页永远不回来"。
+ * 这条规则是"失败回落"原则的最后一环：动画挂上了（含素材还在加载）→ 藏掉原生
+ * 启动卡（不叠显两个 logo）；动画挂了或让开了 → 选择器不再匹配 → 原生启动页
+ * 自动回来。一旦这条规则写错，后果是"开机看到两个 logo"或"原生启动页永远不回来"。
  *
  * 用法：node tools/boot-css-test.mjs
  */
@@ -157,9 +157,11 @@ async function evaluate(url, expression) {
 }
 
 const DISPLAY = "getComputedStyle(document.querySelector('[data-dsh-boot]')).display"
+const OVERLAY_OPACITY = "getComputedStyle(document.querySelector('.dsa-root') ?? document.body).opacity"
+const COVER = "getComputedStyle(document.documentElement, '::before').content"
 const page = (state) => `http://127.0.0.1:${port}/compile-cache/boot-card.html?state=${state}`
 
-console.log('== 动画可见时藏掉宿主原生启动卡 ==')
+console.log('== 动画挂上就藏掉宿主原生启动卡 ==')
 
 await check('素材已出画（ok）→ 原生启动卡隐藏', async () => {
   assert.equal(await evaluate(page('ok'), DISPLAY), 'none')
@@ -170,11 +172,37 @@ await check('内置动画（css）→ 原生启动卡隐藏', async () => {
   assert.equal(await evaluate(page('css'), DISPLAY), 'none')
 })
 
-console.log('== 失败回落：动画不可见 → 原生启动页照常 ==')
-
-await check('素材未出画（loading）→ 原生启动卡恢复显示', async () => {
-  assert.notEqual(await evaluate(page('loading'), DISPLAY), 'none')
+await check('素材未出画（loading）→ 原生启动卡同样隐藏', async () => {
+  // 这条以前是反的：loading 期覆盖层透明 → 藏了就是空白 → 只好让原生卡露出来，
+  // 结果素材解码那几百毫秒里就"闪一下原生动画"。现在 loading 期覆盖层不透明，
+  // 由内置徽标场景顶着，原生卡必须一直藏着。
+  assert.equal(await evaluate(page('loading'), DISPLAY), 'none')
 })
+
+console.log('== 覆盖层不透明度 ==')
+
+await check('素材未出画（loading）→ 覆盖层不透明', async () => {
+  assert.equal(await evaluate(page('loading'), OVERLAY_OPACITY), '1')
+})
+
+await check('素材挂掉（gone）→ 覆盖层透明', async () => {
+  assert.equal(await evaluate(page('gone'), OVERLAY_OPACITY), '0')
+})
+
+console.log('== 首帧遮罩（覆盖层还没来得及挂上）==')
+
+await check('遮罩期：原生启动卡隐藏 + 铺满屏的伪元素在位', async () => {
+  assert.equal(await evaluate(page('cover'), DISPLAY), 'none')
+  assert.notEqual(await evaluate(page('cover'), COVER), 'none')
+})
+
+await check('覆盖层挂上后：遮罩让位（:has 命中即失效）', async () => {
+  // 标记还没撤也不能再画 —— 否则会在真覆盖层上再盖一层纯色。
+  assert.equal(await evaluate(page('cover-mounted'), COVER), 'none')
+  assert.equal(await evaluate(page('cover-mounted'), DISPLAY), 'none')
+})
+
+console.log('== 失败回落：动画不可见 → 原生启动页照常 ==')
 
 await check('素材挂掉（gone）→ 原生启动卡恢复显示', async () => {
   assert.notEqual(await evaluate(page('gone'), DISPLAY), 'none')
