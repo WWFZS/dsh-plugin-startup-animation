@@ -780,9 +780,14 @@ await check('client.js 版本小字（静态锚点）', () => {
   const src = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
   assert.ok(src.includes('useVersionInfo'), '缺少版本 hook')
   assert.ok(src.includes('dsa-set-ver'), '缺少版本小字样式')
-  // 回归：t() 不做插值，必须用 .replace
-  assert.ok(src.includes("t('updateAvailable').replace('{latest}'"), '更新提示未做变量替换')
-  assert.ok(!src.includes("t('updateAvailable', {"), '仍在给 t() 传插值参数')
+  // 回归：t() 不做插值，必须用 .replace。
+  assert.ok(src.includes("t('updateNow').replace('{version}'"), '更新按钮文案未做变量替换')
+  assert.ok(!src.includes("t('updateNow', {"), '仍在给 t() 传插值参数')
+  // 回归：有新版本时版本小字必须变成**就地更新**按钮，而不是跳转 GitHub。
+  // 跳转（window.open + releasesUrl）是旧交互，留一条就是一条死路。
+  assert.ok(src.includes('onClick: doUpdate'), '版本小字没有接上一键更新')
+  assert.ok(!src.includes("window.open(releaseUrl"), '版本小字仍在跳转 Release 页')
+  assert.ok(!src.includes('updateAvailable:'), 'updateAvailable 键已无人使用（应删）')
 })
 
 await check('cleanupLinkedInstall：只删链接，绝不动真实目录与目标', async () => {

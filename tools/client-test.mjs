@@ -593,7 +593,7 @@ await check('没有选用素材时 → 素材行显示"内置动画"', async () 
 })
 
 await check('版本小字显示当前版本', async () => {
-  const { render } = await loadClient()
+  const { render } = await loadClient({ self: { installed: false, selected: false } })
   const tree = await render()
   const badge = findAll(tree, 'dsa-set-ver')[0]
   assert.ok(badge, '没有版本小字')
@@ -603,8 +603,9 @@ await check('版本小字显示当前版本', async () => {
   )
 })
 
-await check('有新版时版本小字可点开 Release 页', async () => {
+await check('有新版 + 已安装 → 版本小字变成一键更新按钮，不再跳 GitHub', async () => {
   const { render, calls } = await loadClient({
+    self: { installed: true, selected: true, spec: 'file:whatever' },
     update: {
       ok: true,
       current: '1.10.0',
@@ -615,12 +616,49 @@ await check('有新版时版本小字可点开 Release 页', async () => {
     },
   })
   const tree = await render()
-  const button = findAll(tree, 'dsa-set-ver-btn')[0]
-  assert.ok(button, '有新版时版本小字不可点')
+  const button = findByClass(tree, 'dsa-set-ver-btn')[0]
+  assert.ok(button, '有新版时版本小字没有变成按钮')
+  // 按钮文案带当前版本与目标版本，用户知道自己从哪更新到哪。
+  const label = button.children.join('')
+  assert.ok(label.includes('v1.10.0'), `按钮没带当前版本：${label}`)
+  assert.ok(label.includes('更新到 1.11.0'), `按钮没带目标版本：${label}`)
   button.props.onClick()
+  await Promise.resolve()
+  await Promise.resolve()
+  // 一键更新：POST {action:'update'} 到 manage，不是 window.open 跳 Release 页。
+  const post = calls.find(
+    (call) =>
+      call.type === 'fetch' && call.init?.method === 'POST' && String(call.init?.body ?? '').includes('"action"'),
+  )
+  assert.ok(post, '点击没有发出更新请求')
+  const sent = JSON.parse(String(post.init.body))
+  assert.equal(sent.action, 'update', `动作不对：${String(post.init.body)}`)
   const opened = calls.find((call) => call.type === 'open')
-  assert.ok(opened, '点击没有打开 Release 页')
-  assert.ok(String(opened.args[0]).endsWith('/releases'))
+  assert.equal(opened, undefined, '仍然跳转了 GitHub')
+})
+
+await check('有新版但 link: 安装 → 版本小字保持纯文字（不给更新按钮）', async () => {
+  const { render, calls } = await loadClient({
+    self: { installed: true, selected: true, spec: 'link:D:/DeepSeek启动动画' },
+    update: {
+      ok: true,
+      current: '1.11.1',
+      latest: '1.11.2',
+      reachable: true,
+      updateAvailable: true,
+      releasesUrl: 'https://github.com/WWFZS/dsh-plugin-startup-animation/releases',
+    },
+  })
+  const tree = await render()
+  assert.equal(findByClass(tree, 'dsa-set-ver-btn').length, 0, 'link 安装也给了版本小字更新按钮')
+  // 纯文字 span 仍然在，带"更新到"提示（title 里），只是不可点。
+  const badge = findAll(tree, 'dsa-set-ver')[0]
+  assert.ok(badge, '版本号消失了')
+  const post = calls.find(
+    (call) =>
+      call.type === 'fetch' && call.init?.method === 'POST' && String(call.init?.body ?? '').includes('"action"'),
+  )
+  assert.equal(post, undefined, 'link 安装发出了更新请求')
 })
 
 console.log('== 卸载 / 更新（v1.11.0）==')
