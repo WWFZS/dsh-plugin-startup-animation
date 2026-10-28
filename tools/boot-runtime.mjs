@@ -308,11 +308,15 @@ async function runBoot(options = {}) {
     fetch:
       options.liveFails === true
         ? () => Promise.reject(new Error('offline'))
-        : () =>
-            Promise.resolve({
-              ok: true,
-              json: async () => (options.live === undefined || options.live === null ? { ok: false } : options.live),
-            }),
+        : options.holdFetch === true
+          ? // 永不落地：把运行时冻在"解析完、还没拿到实时配置"那一帧，
+            // 用来观察首帧遮罩在挂载前是否真的铺上了。
+            () => new Promise(() => {})
+          : () =>
+              Promise.resolve({
+                ok: true,
+                json: async () => (options.live === undefined || options.live === null ? { ok: false } : options.live),
+              }),
   }
   sandbox.globalThis = sandbox
   sandbox.window = sandbox
@@ -348,9 +352,31 @@ await check('默认（css 模式，无素材）→ 挂载内置动画覆盖层',
   assert.equal(root.getAttribute('data-mode'), 'css')
 })
 
+await check('css 模式同样打首帧遮罩（默认配置不闪原生启动页）', async () => {
+  // 遮罩必须在解析期同步打上：覆盖层要等一次 fetch 才挂得上，而浏览器在那之前
+  // 就把原生启动卡画出来了。以前只在 video/image 打遮罩，而默认配置正是 css 模式，
+  // 于是"默认体验"恰好是最需要遮的那一种。
+  // holdFetch 把运行时冻在那一帧，才观察得到遮罩。
+  const { sandbox, overlay } = await runBoot({
+    snapshot: { enabled: true, mode: 'css', src: '' },
+    holdFetch: true,
+  })
+  assert.equal(
+    sandbox.document.documentElement.getAttribute('data-dsa-cover'),
+    '',
+    'css 模式没打首帧遮罩 → 默认配置会闪一帧原生启动页',
+  )
+  assert.equal(overlay(), null, '这一帧还不该有覆盖层（它要等实时配置）')
+})
+
 await check('关闭开关 → 不挂载（原生启动页照常）', async () => {
-  const { overlay } = await runBoot({ snapshot: { enabled: false, mode: 'css', src: '' } })
+  const { overlay, sandbox } = await runBoot({ snapshot: { enabled: false, mode: 'css', src: '' } })
   assert.equal(overlay(), null)
+  assert.equal(
+    sandbox.document.documentElement.getAttribute('data-dsa-cover'),
+    null,
+    '关掉开关后首帧遮罩没摘 → 原生启动页被一直藏成纯色',
+  )
 })
 
 await check('视频模式但没有素材 → 不挂载', async () => {

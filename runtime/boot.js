@@ -59,15 +59,13 @@
     }
   }
 
+  // 遮罩不看素材：**内置动画（css 模式）同样要遮**。
+  // 只放行 video/image 是早期写法，那时默认配置就是"没素材"，于是默认体验
+  // 恰好是最需要遮的那一种 —— 原生启动卡先画出来，几百毫秒后才被覆盖层盖住。
+  // enabled 之外不再设第二道条件：素材缺失/失败由 beginWithConfig 与 mediaGone
+  // 在拿到实时配置后立刻摘遮罩，遮错的窗口只有那一次 500ms 上限的 fetch。
   try {
-    if (
-      baked.enabled !== false &&
-      (baked.mode === 'video' || baked.mode === 'image') &&
-      typeof baked.src === 'string' &&
-      baked.src !== ''
-    ) {
-      setCover(true)
-    }
+    if (baked.enabled !== false) setCover(true)
   } catch (error) {
     /* 同上 */
   }
@@ -317,9 +315,7 @@
       // 素材第一帧出现的时刻；null = 尚未出画（覆盖层保持透明，原生启动页照常）。
       revealedAt: null,
       mediaNode: null,
-      silenced: false,
       startAt: Date.now(),
-      reason: null,
       timers: [],
       intervals: [],
       observer: null,
@@ -462,7 +458,6 @@
         return
       }
       state.leaving = true
-      state.reason = reason
       // 淡出开始即还原：浮层随动画的消散一起显出应用自己的侧栏底色，衔接自然。
       restoreTitlebar()
       // 覆盖层要淡出了 —— 首帧遮罩必须一起摘，否则原生启动页被一直藏到动画消失。
@@ -547,83 +542,109 @@
       return state.loaded === true
     }
 
-    function watchAppReady() {
-      var check = function () {
-        if (state.leaving) return
-        if (inspectRoot()) markAppReady('watch')
-      }
-      var attach = function () {
-        if (state.observer !== null || typeof global.MutationObserver !== 'function') return
-        var container = doc.getElementById('root')
-        if (container === null || container === undefined) return
-        try {
-          state.observer = new global.MutationObserver(check)
-          state.observer.observe(container, { childList: true })
-        } catch (error) {
-          state.observer = null
-        }
-      }
-      attach()
-      interval(function () {
-        attach()
-        check()
-      }, 120)
-      if (doc.readyState === 'complete') state.loaded = true
-      else {
-        global.addEventListener('load', function () {
-          state.loaded = true
-          check()
-        })
+    /** 启动期统一 tick：三个 watch 共用一条定时器（见 watchBoot）。 */
+    var TICK_MS = 100
+
+    /** 单次就绪检查（顺手补挂 MutationObserver：#root 可能比这次 tick 晚出现）。 */
+    function checkReady() {
+      if (state.leaving) return
+      attachRootObserver()
+      if (inspectRoot()) markAppReady('watch')
+    }
+
+    /** 把就绪观察者挂到 #root 上（幂等）。 */
+    function attachRootObserver() {
+      if (state.observer !== null || typeof global.MutationObserver !== 'function') return
+      var container = doc.getElementById('root')
+      if (container === null || container === undefined) return
+      try {
+        state.observer = new global.MutationObserver(checkReady)
+        state.observer.observe(container, { childList: true })
+      } catch (error) {
+        state.observer = null
       }
     }
 
-    /** 内核启动失败：启动页列出失败清单且永远不挂应用 → 让开让用户读到原因。 */
-    function watchFailure() {
-      interval(function () {
-        if (state.leaving || state.failed) return
-        var bootEl = doc.querySelector('[data-dsh-boot]')
-        if (bootEl === null || bootEl === undefined) return
-        var text = bootEl.textContent || ''
-        if (text.indexOf('Failed to load plugins') < 0 && text.indexOf('did not activate') < 0) return
-        setAttention(COPY.failed)
-        timer(function () {
-          enter(fadeMs, 'kernel-failed')
-        }, 2600)
-      }, 400)
+    /**
+     * window load：标记"文档已完全加载"，并**摘掉自己** —— 覆盖层交接之后
+     * 应用文档上不该留着一个装饰品留下的死监听。
+     */
+    function onWindowLoad() {
+      state.loaded = true
+      try {
+        global.removeEventListener('load', onWindowLoad)
+      } catch (error) {
+        /* 尽力而为 */
+      }
+      checkReady()
     }
 
-    /** 内核真实启动进度：启动页 spinner 上的 --dsh-boot-arc（72° 空 → 288° 满）。 */
-    function watchProgress() {
-      if (!showProgress) return
-      var arcMin = 72
-      var arcSpan = 216
-      var observed = false
-      var sinceStart = 0
-      interval(function () {
-        if (state.leaving) return
-        var spinner = doc.querySelector('[data-dsh-boot-spinner]')
-        if (spinner !== null && spinner !== undefined && spinner.style) {
-          var raw = parseFloat(
-            typeof spinner.style.getPropertyValue === 'function'
-              ? spinner.style.getPropertyValue('--dsh-boot-arc')
-              : '',
-          )
-          if (isFinite(raw)) {
-            var ratio = Math.min(Math.max((raw - arcMin) / arcSpan, 0), 1)
-            root.style.setProperty('--dsa-prog', (Math.max(ratio, 0.04) * 100).toFixed(1) + '%')
-            if (!observed) {
-              observed = true
-              bar.setAttribute('data-indeterminate', '0')
-            }
-            return
+    /** 单次失败检测：启动页列出失败清单且永远不挂应用 → 让开让用户读到原因。 */
+    function checkFailure() {
+      if (state.leaving || state.failed) return
+      var bootEl = doc.querySelector('[data-dsh-boot]')
+      if (bootEl === null || bootEl === undefined) return
+      var text = bootEl.textContent || ''
+      if (text.indexOf('Failed to load plugins') < 0 && text.indexOf('did not activate') < 0) return
+      setAttention(COPY.failed)
+      timer(function () {
+        enter(fadeMs, 'kernel-failed')
+      }, 2600)
+    }
+
+    /** 采样内核真实进度：启动页 spinner 上的 --dsh-boot-arc（72° 空 → 288° 满）。 */
+    var PROGRESS_ARC_MIN = 72
+    var PROGRESS_ARC_SPAN = 216
+    var progressObserved = false
+    var progressStartAt = 0
+
+    function sampleProgress() {
+      var spinner = doc.querySelector('[data-dsh-boot-spinner]')
+      if (spinner !== null && spinner !== undefined && spinner.style) {
+        var raw = parseFloat(
+          typeof spinner.style.getPropertyValue === 'function'
+            ? spinner.style.getPropertyValue('--dsh-boot-arc')
+            : '',
+        )
+        if (isFinite(raw)) {
+          var ratio = Math.min(Math.max((raw - PROGRESS_ARC_MIN) / PROGRESS_ARC_SPAN, 0), 1)
+          root.style.setProperty('--dsa-prog', (Math.max(ratio, 0.04) * 100).toFixed(1) + '%')
+          if (!progressObserved) {
+            progressObserved = true
+            bar.setAttribute('data-indeterminate', '0')
           }
+          return
         }
-        // 4 秒还没见到内核进度 → 认定拿不到，转流光。
-        sinceStart += 200
-        if (!observed && sinceStart >= 4000 && bar.getAttribute('data-indeterminate') !== '1') {
-          bar.setAttribute('data-indeterminate', '1')
-        }
-      }, 200)
+      }
+      // 4 秒还没见到内核进度 → 认定拿不到，转流光。
+      // 用真实时间戳而不是"tick 数 × 周期"：标签页被节流时累加会失真。
+      if (!progressObserved && Date.now() - progressStartAt >= 4000) {
+        if (bar.getAttribute('data-indeterminate') !== '1') bar.setAttribute('data-indeterminate', '1')
+      }
+    }
+
+    /**
+     * 启动期的全部轮询合成**一个** tick。
+     *
+     * 分开写是三条 interval（120 / 200 / 400ms）交替唤醒 —— 启动阶段白白多两次
+     * 调度，而且同一个 DOM 在一毫秒内被扫三遍。合并后按 tick 计数分频，语义与
+     * 原来一一对应：每 tick 判就绪（最需要及时），每 2 tick 采样进度，
+     * 每 4 tick 查失败文案。enter() 的 clearScheduling 会把这一个 interval 收掉。
+     */
+    function watchBoot() {
+      // 挂上就立刻判一次：覆盖层出现前 #root 可能已经有内容了。
+      if (doc.readyState === 'complete') state.loaded = true
+      else global.addEventListener('load', onWindowLoad)
+      checkReady()
+      if (showProgress) progressStartAt = Date.now()
+      var ticks = 0
+      interval(function () {
+        if (state.leaving) return
+        ticks += 1
+        checkReady()
+        if (showProgress && ticks % 2 === 0) sampleProgress()
+        if (ticks % 4 === 0) checkFailure()
+      }, TICK_MS)
     }
 
     /** 内核迟迟不就绪的两段上界：到点只提示"较慢"并乐观就绪；再宽限后才让开。 */
@@ -633,9 +654,6 @@
         status.textContent = COPY.slow
         root.setAttribute('data-attention', '1')
         state.appReady = true
-        if (state.mediaNode !== null && typeof state.mediaNode.loop === 'boolean') {
-          // 已经在循环播放，让它继续；非循环素材（图片）本就不受影响。
-        }
         maybeEnter()
         if (state.leaving) return
         timer(function () {
@@ -661,9 +679,6 @@
       var frames = Math.max(1, Math.round(ms / 16))
       var done = 0
       var step = function () {
-        if (state.mediaNode !== mediaEl || state.leaving === false) {
-          // 交接已经开始，继续把音量走完；mediaNode 被替换则停。
-        }
         if (state.mediaNode !== mediaEl) return
         done += 1
         try {
@@ -884,12 +899,19 @@
        * 未静音的 play() 也可能既不 resolve 也不 reject —— 给一个 1.2 秒窗口兜底。
        */
       var fallbackToMuted = function (reason) {
-        state.silenced = true
         try {
           video.muted = true
           video.setAttribute('muted', '')
         } catch (error) {
           /* 尽力而为 */
+        }
+        // 记一条：用户报"启动动画没声音"时，这行能直接区分"被策略拦下"和"素材本来就没音轨"。
+        try {
+          if (global.console && global.console.info) {
+            global.console.info('[startup-animation] sound muted: ' + reason)
+          }
+        } catch (error) {
+          /* 只是日志 */
         }
         soundButton.setAttribute('data-visible', '1')
         setHint(COPY.muted)
@@ -1011,9 +1033,7 @@
       // 侧栏色，会在动画顶部显出一条不搭的色带。
       if (mode !== 'css') holdTitlebar()
       try {
-        watchAppReady()
-        watchFailure()
-        watchProgress()
+        watchBoot()
         watchHold()
         if (mode === 'video') mountVideo()
         else if (mode === 'image') mountImage()
@@ -1026,7 +1046,8 @@
         // 挂载骨架失败 → 走统一的"素材不可用"路径：透明、就绪判定继续、绝不整块撤掉。
         mediaGone('mount-throw')
         try {
-          watchAppReady()
+          // 已经在跑就不再挂第二条 —— 否则 catch 路径会把 tick 变成两条。
+          if (state.intervals.length === 0) watchBoot()
         } catch (ignored2) {
           // 最后兜底：30 秒后无论如何让开。
           timer(function () {
@@ -1045,6 +1066,10 @@
     try {
       beginWithConfig(cfg)
     } catch (error) {
+      // 这里必须摘首帧遮罩：遮罩的样式规则是 `html[data-dsa-cover] [data-dsh-boot]
+      // { display: none !important }`，只藏卡不解卡 —— 一旦在上面抛异常后把它留着，
+      // 内核启动失败时用户看到的就是一块纯色，连失败原因都读不到。
+      setCover(false)
       try {
         if (global.console && global.console.error)
           global.console.error("[startup-animation] fatal", error)
