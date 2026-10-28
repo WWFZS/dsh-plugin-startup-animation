@@ -52,6 +52,12 @@ PNG / JPG / MP3。声音有两个彼此独立的开关：视频自己的音轨�
 
 <img src="docs/library-wallpapers.jpg" width="520" height="268" alt="壁纸素材库">
 
+**开机动画效果** —— 内置《欢迎回来》（720p / 8 秒 / 带语音音轨）选中后，Harness 启动时看到的就是这一段：
+
+<img src="docs/preview-welcome.gif" width="440" alt="《欢迎回来》开机动画效果">
+
+完整版（含语音）在 [`builtin/MP4/欢迎回来.web.mp4`](builtin/MP4/欢迎回来.web.mp4)。
+
 ## 安装
 
 ### 方式一：插件管理器 + 直链（推荐）
