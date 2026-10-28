@@ -370,35 +370,53 @@ window.__ModuleLoader__.load({
      *     刷光，之后所有用户都只能看到"检查不到更新"，比缓存陈旧更糟。
      *
      * @param {(key: string) => string} t 翻译。
-     * @returns {{ version: string, update: object | null, checking: boolean }} 版本状态。
+     * @returns {{ version: string, update: object | null, checking: boolean, reload: (options?: { force?: boolean, silent?: boolean }) => Promise<object | null> }} 版本状态。
      */
     function useVersionInfo(t) {
       const [version, setVersion] = React.useState('')
       const [update, setUpdate] = React.useState(null)
       const [checking, setChecking] = React.useState(true)
 
-      React.useEffect(() => {
-        let alive = true
-        fetch(`${UPDATE}${shouldForceUpdateCheck() ? '?force=1' : ''}`, { cache: 'no-store' })
+      /**
+       * 重新取版本与更新状态。
+       *
+       * `force` 同时绕过两层缓存：宿主 `/update` 的（15 分钟）和客户端的 60 秒节流。
+       * 一键更新之后必须用它 —— 否则刷新回来的还是"有新版本"的旧结论，
+       * 界面看起来像更新失败了。
+       * `silent` 不显示"检查更新中"：更新刚成功时不该先闪一下加载态再变好。
+       *
+       * @param {{ force?: boolean, silent?: boolean }} [options] 选项。
+       * @returns {Promise<object | null>} 回包（失败为 null）。
+       */
+      const reload = (options) => {
+        const force = options !== undefined && options.force === true
+        const silent = options !== undefined && options.silent === true
+        if (!silent) setChecking(true)
+        const query = force || shouldForceUpdateCheck() ? '?force=1' : ''
+        return fetch(`${UPDATE}${query}`, { cache: 'no-store' })
           .then((res) => res.json())
           .then((payload) => {
-            if (!alive) return
             setChecking(false)
             if (payload && typeof payload === 'object') {
               if (typeof payload.version === 'string' && payload.version !== '') setVersion(payload.version)
               if (typeof payload.current === 'string' && payload.current !== '') setVersion(payload.current)
               setUpdate(payload)
             }
+            return payload
           })
           .catch(() => {
-            if (alive) setChecking(false)
+            setChecking(false)
+            return null
           })
-        return () => {
-          alive = false
-        }
+      }
+
+      React.useEffect(() => {
+        void reload()
+        // 只在挂载时查一次：reload 是稳定引用（不依赖任何 state），不用进依赖表。
+        // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [])
 
-      return { version, update, checking }
+      return { version, update, checking, reload }
     }
 
     /** POST 一个 JSON 载荷（开关/时长/素材库操作共用），返回 send 的 Promise。 */
@@ -703,7 +721,12 @@ window.__ModuleLoader__.load({
     function makeStartupAnimationPage(t) {
       return function StartupAnimationPage() {
         const { state, busy, message, setMessage, send } = useStatus(t)
-        const { version: localVersion, update, checking: updateChecking } = useVersionInfo(t)
+        const {
+          version: localVersion,
+          update,
+          checking: updateChecking,
+          reload: reloadVersion,
+        } = useVersionInfo(t)
         const [category, setCategory] = React.useState('mp4')
         // 删除上传素材前先本地撤掉预览（中断浏览器对该文件的请求，给服务端释放句柄的窗口）。
         const [previewHidden, setPreviewHidden] = React.useState([])
@@ -937,6 +960,10 @@ window.__ModuleLoader__.load({
               setSelfBusy('')
               if (payload && payload.ok) {
                 setMessage({ text: t('updated'), kind: 'ok' })
+                // 立刻重取版本：宿主那边已经用**磁盘上的**新版本应答，
+                // 这里刷新一次就能把标题换成新版本号、"更新到 x"的按钮也随之消失。
+                // 不刷新的话，用户会看到"更新成功"却仍挂着"更新到 1.12.2"，以为没生效。
+                void reloadVersion({ force: true, silent: true })
               } else {
                 const detail = payload && payload.details ? `\n${String(payload.details).slice(-400)}` : ''
                 setMessage({

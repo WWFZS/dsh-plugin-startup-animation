@@ -16,6 +16,7 @@ import {
   assertUploadedFile,
   clampDurationSec,
   cleanupLinkedInstall,
+  installedVersion,
   loadConfig,
   manageStatus,
   parseRange,
@@ -703,6 +704,35 @@ await check('更新检查缓存：命中期内不再请求', async () => {
   await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake, force: true })
   await checkForUpdate({ currentVersion: '1.9.0', repoUrl: REPO_URL, fetchImpl: fake })
   assert.equal(calls, 1, `缓存未生效，请求了 ${calls} 次`)
+})
+await check('版本号读磁盘而不是内存（更新后不重启也要显示新版）', () => {
+  // 回归：一键更新之后磁盘上的 package.json 已经是新版，但运行中的进程还是旧代码。
+  // 之前 /update 用内存里的 VERSION 去比，于是永远比出"有新版本" —— 界面一直挂着
+  // 「v1.12.1 · 更新到 1.12.2」，用户以为没更新成功，反复点。
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-ver-'))
+  try {
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ version: '9.9.9' }))
+    assert.equal(installedVersion(tmp), '9.9.9', 'installedVersion 没有跟随磁盘')
+    assert.notEqual(installedVersion(tmp), VERSION, 'installedVersion 拿的还是内存里的值')
+    // 状态接口也走同一个来源（设置页标题旁的小字读它）
+    const status = manageStatus({ packageRoot: tmp, homeDir: path.join(tmp, 'nohome'), route: '/x' })
+    assert.equal(status.version, '9.9.9', 'manageStatus 没有跟随磁盘版本')
+    // 读不到就回落，不能把界面弄成空版本号
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'dsa-empty-'))
+    try {
+      assert.equal(installedVersion(empty), VERSION, '读不到清单时没有回落到 VERSION')
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true })
+    }
+    // 静态锚点：/update 必须用磁盘版本，别哪天又改回内存常量。
+    const src = fs.readFileSync(new URL('./index.js', import.meta.url), 'utf8')
+    assert.ok(
+      /const current = installedVersion\(packageRoot\)[\s\S]{0,240}?checkForUpdate\(\{ currentVersion: current/.test(src),
+      '/update 又改回用内存里的 VERSION 了（更新后会一直提示有新版本）',
+    )
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
 })
 await check('发布包必须自带 package.json（否则版本会变成 0.0.0）', () => {
   // 回归：files 白名单曾漏掉 package.json，make-release 按白名单复制，
