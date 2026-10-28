@@ -39,6 +39,39 @@
 
   var doc = global.document
 
+  // ────────────────────────────── 首帧遮罩 ──────────────────────────────
+  //
+  // 覆盖层要等一次实时配置 fetch 才挂得上（见 resolveConfig），而浏览器在解析完
+  // 首屏之后、那次 fetch 回来之前就已经把原生启动卡画出来了 —— 那 1–2 帧就是
+  // 用户看到的"闪一下原生动画"。
+  //
+  // 这里在**解析期**（同一个同步执行栈里）按烤进去的配置先给 <html> 打个标记，
+  // 注入的样式会立刻铺满屏幕并藏起 [data-dsh-boot]，原生卡一帧都露不出来。
+  // 真正的覆盖层挂上、或决定不显示（实时配置说关掉了 / 素材失败）时立刻摘掉。
+  var COVER_ATTR = 'data-dsa-cover'
+
+  function setCover(on) {
+    try {
+      if (on) doc.documentElement.setAttribute(COVER_ATTR, '')
+      else doc.documentElement.removeAttribute(COVER_ATTR)
+    } catch (error) {
+      /* 遮罩只是"少闪一下"的优化，标记失败就当没有 */
+    }
+  }
+
+  try {
+    if (
+      baked.enabled !== false &&
+      (baked.mode === 'video' || baked.mode === 'image') &&
+      typeof baked.src === 'string' &&
+      baked.src !== ''
+    ) {
+      setCover(true)
+    }
+  } catch (error) {
+    /* 同上 */
+  }
+
   // ────────────────────────────── 小工具 ──────────────────────────────
 
   function num(value, fallback, min, max) {
@@ -173,11 +206,22 @@
     //     于是内置动画其实**一次都没出现过**，而 README 一直写着"装上就有"。
     //     默认配置 file='' → mode='css' → 内置动画本来就是"零配置"承诺的那一份，
     //     不该被一行 early-return 挡掉。
-    if (cfg === null || typeof cfg !== "object") return
-    if (cfg.enabled === false) return
+    if (cfg === null || typeof cfg !== "object") {
+      setCover(false)
+      return
+    }
+    if (cfg.enabled === false) {
+      setCover(false)
+      return
+    }
     var mode = cfg.mode === 'video' || cfg.mode === 'image' ? cfg.mode : 'css'
     var src = typeof cfg.src === 'string' ? cfg.src : ''
-    if (mode !== 'css' && src === "") return
+    // 解析期按快照打的首帧遮罩，在这里必须跟着实时配置的结论落地：
+    // 实时配置说"关掉了 / 没选素材"→ 立刻摘掉，否则整页被我们自己盖成纯色。
+    if (mode !== 'css' && src === "") {
+      setCover(false)
+      return
+    }
 
     var fadeMs = num(cfg.fadeMs, 600, 100, 6000)
     var skipFadeMs = num(cfg.skipFadeMs, 240, 60, 2000)
@@ -421,6 +465,8 @@
       state.reason = reason
       // 淡出开始即还原：浮层随动画的消散一起显出应用自己的侧栏底色，衔接自然。
       restoreTitlebar()
+      // 覆盖层要淡出了 —— 首帧遮罩必须一起摘，否则原生启动页被一直藏到动画消失。
+      setCover(false)
       var ms = Math.round(num(span, fadeMs, 60, 6000))
       root.style.setProperty('--dsa-fade', ms + 'ms')
       root.setAttribute('data-state', 'leaving')
@@ -698,6 +744,8 @@
       if (state.revealedAt === null) minMs = 900
       // 出画前失败过 → 标题栏浮层从未被按住/或按住后素材又坏了 → 还原原生取色。
       restoreTitlebar()
+      // 覆盖层转透明 = 原生启动页接回来，首帧遮罩必须一起摘掉。
+      setCover(false)
       try {
         if (global.console && global.console.warn) global.console.warn('[startup-animation] media dropped: ' + reason)
       } catch (error) {
@@ -706,8 +754,9 @@
     }
 
     /**
-     * 素材第一帧就位：这一刻才"揭幕" —— 按住标题栏浮层取色、快速淡入覆盖层、
-     * 起播开机音频（音频与画面同刻开始，不会在原生页后面干响）。
+     * 素材第一帧就位：画面交叉淡入、起播开机音频（音频与画面同刻开始，不会在
+     * 原生页后面干响）。标题栏浮层在 begin() 里就已经按住了，这里再调一次是
+     * 幂等的兜底（覆盖层可能被别的路径重新挂过）。
      */
     function markMediaOk() {
       if (state.mediaOk || state.leaving) return
@@ -950,12 +999,17 @@
       try {
         doc.body.appendChild(root)
       } catch (error) {
+        // 挂不上覆盖层 → 遮罩必须摘掉，否则整页被我们自己盖成一块纯色。
+        setCover(false)
         return
       }
+      // 真覆盖层已经挂上（:has 命中后铺满屏幕），首帧遮罩可以退场了。
+      setCover(false)
       // 原生窗口控件浮层画在网页内容之上（动画盖不住它）——按住取色融入动画，
       // 退场时还原（机制详见 holdTitlebar/restoreTitlebar 注释）。
-      // 素材模式的揭幕在"第一帧就位"（markMediaOk）：按住标题栏浮层、淡入、起播音频。
-      // 出画前覆盖层完全透明且不拦截点击 —— 原生启动页照常显示，不再有"先亮内置场景"。
+      // 素材模式从**挂载**起就按住：覆盖层现在一挂上就不透明，标题栏若还用它自己的
+      // 侧栏色，会在动画顶部显出一条不搭的色带。
+      if (mode !== 'css') holdTitlebar()
       try {
         watchAppReady()
         watchFailure()

@@ -1764,7 +1764,8 @@ export function apply(ctx) {
             }
             // `?poster=1`：视频要一张手工封面（人挑好的那一帧），
             // 因为自动挑帧只会选最亮的，而最亮的不一定是最好看的。
-            // 没有手工封面就照常回视频本身，客户端会自己挑帧兜底。
+            // 没有手工封面就回 404 —— 以前这里回的是视频本体，客户端再把几 MB
+            // 视频塞进 <img> 当封面用（必然解码失败，还要白下一段流量）。
             let poster = false
             try {
               poster = new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get('poster') === '1'
@@ -1773,7 +1774,12 @@ export function apply(ctx) {
             }
             if (poster) {
               const still = posterFor(filePath)
-              if (still !== undefined) filePath = still
+              if (still === undefined) {
+                res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+                res.end('no manual poster for this asset')
+                return
+              }
+              filePath = still
             }
             serveAsset(req, res, filePath)
           },

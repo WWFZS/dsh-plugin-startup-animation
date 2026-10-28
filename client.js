@@ -502,19 +502,20 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 视频封面：先按原来的方式挂上去（首帧可见），元数据到了之后再挑更好的帧。
-     * 这样即便挑帧失败，卡片也还是"有画面"的，不会白屏。
+     * 视频封面：有手工封面就用它，没有才用「亮度采样」自动挑一帧。
+     * 探测（HEAD）出结果之前**什么都不画** —— 以前默认按"有封面"先挂一张
+     * `<img src="…?poster=1">`，而没有手工封面时那个 URL 回的是视频本体，
+     * 浏览器得先下一段视频才判定解码失败：卡片于是先空一秒、再突然出现画面。
      */
     function VideoCover(props) {
       const ref = React.useRef(null)
       const [poster, setPoster] = React.useState('')
-      // 有手工封面（人挑好的那一帧）就直接用，不再跑自动挑帧：
-      // 自动挑帧只会选"最亮"，而有的素材最亮的那段是特效/转场，不好看。
       const manualPoster = withParam(props.src, 'poster=1')
-      const [hasManual, setHasManual] = React.useState(true)
+      // null = 还在探测；false = 没有手工封面，走自动挑帧。
+      const [hasManual, setHasManual] = React.useState(null)
       React.useEffect(() => {
         const video = ref.current
-        if (!video || hasManual) return undefined
+        if (!video || hasManual !== false) return undefined
         let alive = true
         const onMeta = () => {
           void (async () => {
@@ -549,13 +550,12 @@ window.__ModuleLoader__.load({
         }
       }, [props.src, hasManual])
 
-      // 先探测一次手工封面是否存在（HEAD），不存在再退回自动挑帧。
+      // 先探测一次手工封面是否存在（HEAD，只回一个头，不下载内容）。
       React.useEffect(() => {
         let alive = true
         fetch(manualPoster, { method: 'HEAD', cache: 'no-store' })
           .then((res) => {
-            if (alive && res.ok) setHasManual(true)
-            else if (alive) setHasManual(false)
+            if (alive) setHasManual(res.ok)
           })
           .catch(() => {
             if (alive) setHasManual(false)
@@ -565,7 +565,9 @@ window.__ModuleLoader__.load({
         }
       }, [manualPoster])
 
-      // 手工封面模式下用 <img> 显示封面；否则用 <video> 让浏览器/自动挑帧出画面。
+      // 探测期间占位（保持卡片尺寸，不画任何媒体元素）。
+      if (hasManual === null) return h('div', { className: props.className, 'aria-hidden': true })
+
       if (hasManual) {
         return h('img', {
           className: props.className,
@@ -574,6 +576,7 @@ window.__ModuleLoader__.load({
           decoding: 'async',
           alt: '',
           'aria-hidden': true,
+          // 探测成功但取图失败（文件被删等）→ 退回自动挑帧。
           onError: () => setHasManual(false),
         })
       }

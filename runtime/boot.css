@@ -37,21 +37,43 @@
   opacity: 0;
 }
 
-/* 素材未出画 / 素材失败：覆盖层完全透明 —— 原生启动页照常显示，出画瞬间再淡入。
-   pointer-events 同步关闭：透明期间绝不挡原生页面与应用界面的任何点击。 */
-.dsa-root[data-media="loading"],
+/* 素材失败：覆盖层完全透明 —— 原生启动页接回来。pointer-events 同步关闭，
+   透明期间绝不挡原生页面的任何点击。
+   注意这里**不再包含 loading**：素材没出画时覆盖层照样铺满（内置徽标场景顶着），
+   否则原生启动卡会在素材解码那几百毫秒里露出来 —— 那正是"闪一下原生动画"。 */
 .dsa-root[data-media="gone"] {
   opacity: 0;
   pointer-events: none;
 }
 
-/* 覆盖层已挂载且不透明（内置 CSS 动画从挂载起就不透明；素材模式在第一帧就位
-   data-media="ok" 起）→ 整块隐藏宿主的原生启动卡（[data-dsh-boot]：HARNESS /
-   Loading plugins…），启用动画时不再叠显原生 logo。
-   纯 :has() 驱动、零 JS 同步：素材挂掉（gone）、未出画（loading）、动画让开
-   （覆盖层移除）时选择器不再匹配，原生启动页自动恢复 —— 失败回落原则不变。 */
-html:has(.dsa-root:not([data-media="loading"]):not([data-media="gone"])) [data-dsh-boot] {
+/* 覆盖层已挂载且没失败（含 loading）→ 整块隐藏宿主的原生启动卡（[data-dsh-boot]：
+   HARNESS / Loading plugins…），启用动画时不再叠显原生 logo。
+   纯 :has() 驱动、零 JS 同步：素材挂掉（gone）、动画让开（覆盖层移除）时选择器
+   不再匹配，原生启动页自动恢复 —— 失败回落原则不变。 */
+html:has(.dsa-root:not([data-media="gone"])) [data-dsh-boot] {
   display: none !important;
+}
+
+/* 首帧遮罩：覆盖层要等一次 fetch 才挂得上，而浏览器在这之前就把原生卡画出来了，
+   那 1–2 帧同样是"闪一下"。脚本在解析期就按烤进去的配置在 <html> 上打标记，
+   这里同步铺满屏幕并藏卡 —— 一帧都不给。真正的覆盖层挂上（:has 命中）或决定
+   放弃显示时，标记立刻被摘掉。 */
+html[data-dsa-cover]:not(:has(.dsa-root))::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  background: radial-gradient(1200px 800px at 50% 36%, #0a0e18, #04060d 72%);
+}
+
+html[data-dsa-cover] [data-dsh-boot] {
+  display: none !important;
+}
+
+@media (prefers-color-scheme: light) {
+  html[data-dsa-cover]:not(:has(.dsa-root))::before {
+    background: radial-gradient(1200px 800px at 50% 36%, #f3f6fd, #dde6f8 72%);
+  }
 }
 
 /* ── 调色板 ── */
@@ -96,6 +118,14 @@ html:has(.dsa-root:not([data-media="loading"]):not([data-media="gone"])) [data-d
   position: absolute;
   inset: 0;
   display: none;
+  /* 出画前是透明的：底下露着内置徽标场景，第一帧就位后 260ms 交叉淡入，
+     不会出现"黑一下就跳画面"的硬切。 */
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+
+.dsa-root[data-media="ok"] .dsa-media {
+  opacity: 1;
 }
 
 .dsa-root[data-mode="media"] .dsa-media {
@@ -149,8 +179,14 @@ html:has(.dsa-root:not([data-media="loading"]):not([data-media="gone"])) [data-d
   animation: dsa-scene-in 0.5s ease both;
 }
 
+/* 第一帧就位：徽标场景淡出，和素材的淡入交叉 —— 交接点不出现空画面。 */
 .dsa-root[data-mode="media"][data-media="ok"] .dsa-scene {
-  visibility: hidden;
+  animation: dsa-scene-out 240ms ease forwards;
+}
+
+@keyframes dsa-scene-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 @keyframes dsa-scene-in {
