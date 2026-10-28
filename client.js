@@ -299,10 +299,16 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      /**
+       * 发一个管理请求。
+       * @param {RequestInit} init 请求参数。
+       * @param {string | ((payload: object) => string)} successText 成功文案（可传函数按回包定制）。
+       * @returns {Promise<object | null>} 回包；网络失败为 null。
+       */
       const send = (init, successText) => {
         setBusy(true)
         setMessage({ text: '', kind: '' })
-        fetch(MANAGE, init)
+        return fetch(MANAGE, init)
           .then((res) => res.json().catch(() => null))
           .then((payload) => {
             setBusy(false)
@@ -316,14 +322,38 @@ window.__ModuleLoader__.load({
             } else {
               setMessage({ text: (payload && payload.error) || t('fail'), kind: 'error' })
             }
+            return payload
           })
           .catch(() => {
             setBusy(false)
             setMessage({ text: t('netFail'), kind: 'error' })
+            return null
           })
       }
 
       return { state, busy, message, setMessage, send }
+    }
+
+    /** 更新检查的强制窗口：同一会话 60 秒内只强制一次。 */
+    const UPDATE_FORCE_KEY = 'dsa:update-forced-at'
+    const UPDATE_FORCE_WINDOW_MS = 60000
+
+    /**
+     * 这次更新检查要不要 `?force=1`（绕过宿主 15 分钟缓存）。
+     *
+     * 存储不可用时（自定义协议、隐私模式）退回"每次都强制" —— 那是改动前的
+     * 行为，宁可多打一次请求，也不要让功能在环境受限时静默退化。
+     * @returns {boolean} 是否强制。
+     */
+    function shouldForceUpdateCheck() {
+      try {
+        const last = Number(window.sessionStorage.getItem(UPDATE_FORCE_KEY) || 0)
+        if (Number.isFinite(last) && Date.now() - last < UPDATE_FORCE_WINDOW_MS) return false
+        window.sessionStorage.setItem(UPDATE_FORCE_KEY, String(Date.now()))
+        return true
+      } catch {
+        return true
+      }
     }
 
     /**
@@ -336,7 +366,8 @@ window.__ModuleLoader__.load({
      *   - 检查结果由宿主的 `/update` 端点给出。打开设置页**强制查一次**
      *     （`?force=1`）：宿主那层有 15 分钟缓存，用它兜底会让"刚发了新版"
      *     的用户在缓存窗口里看到"已是最新" —— 这个按钮存在的意义就没了。
-     *     一次开页一个请求，远低于 GitHub 的配额。
+     *     但不在 60 秒内重复强制：反复开关设置页会把 GitHub 匿名配额（60 次/小时）
+     *     刷光，之后所有用户都只能看到"检查不到更新"，比缓存陈旧更糟。
      *
      * @param {(key: string) => string} t 翻译。
      * @returns {{ version: string, update: object | null, checking: boolean }} 版本状态。
@@ -348,7 +379,7 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         let alive = true
-        fetch(`${UPDATE}?force=1`, { cache: 'no-store' })
+        fetch(`${UPDATE}${shouldForceUpdateCheck() ? '?force=1' : ''}`, { cache: 'no-store' })
           .then((res) => res.json())
           .then((payload) => {
             if (!alive) return
@@ -420,7 +451,6 @@ window.__ModuleLoader__.load({
       return `${src}${src.includes('?') ? '&' : '?'}${param}`
     }
 
-    /**
     /**
      * 视频封面取帧点：在 25% / 50% / 75% 三个候选位置里，选**画面最亮**的那一帧。
      *

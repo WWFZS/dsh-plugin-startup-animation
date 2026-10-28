@@ -27,7 +27,6 @@ import { fileURLToPath } from 'node:url'
 import {
   PACKAGE_NAME,
   describeSelfInstall,
-  dropSelfDependency,
   findPnpm,
   readBundleSelection,
   readProfileManifest,
@@ -35,6 +34,7 @@ import {
   withSelf,
   withoutSelf,
   writeBundleSelection,
+  writeJsonAtomic,
   writeProfileManifest,
 } from './lib/self-manage.mjs'
 
@@ -535,12 +535,16 @@ export function loadRawBoot(options) {
  * 端到端：读配置文件 → 合并默认值 → 夹取 → 解析素材。
  * 每次索引渲染都会调用（很便宜），所以改完 JSON 刷新/重启即可生效。
  *
+ * 顺带把合并前的 `raw` 段与命中的 `sources` 一起返回：调用方经常两者都要
+ * （管理接口要 `file`/`audioFile`/`deleted` 原值，启动日志要"配置来源"），
+ * 再单独调一次 `loadRawBoot` 就是同一份文件读两遍。
+ *
  * @param {{ packageRoot: string, homeDir?: string, route: string }} options 位置。
- * @returns {{ client: Record<string, unknown>, assetPath: string | undefined, warnings: string[] }} 运行时配置。
+ * @returns {{ client: Record<string, unknown>, assetPath: string | undefined, warnings: string[], raw: Record<string, unknown>, sources: string[] }} 运行时配置。
  */
 export function loadConfig(options) {
   const warnings = []
-  const { raw } = loadRawBoot(options)
+  const { raw, sources } = loadRawBoot(options)
   const d = DEFAULT_CONFIG
 
   /** @type {string | undefined} */
@@ -634,7 +638,7 @@ export function loadConfig(options) {
     soundLabel: pickString(raw.soundLabel, ''),
   }
 
-  return { client, assetPath, warnings }
+  return { client, assetPath, warnings, raw, sources }
 }
 
 /**
@@ -924,24 +928,53 @@ export function posterFor(filePath) {
 export function thumbnailFor(filePath) {
   if (!THUMBABLE.has(path.extname(filePath).toLowerCase())) return undefined
   const dir = path.join(path.dirname(filePath), THUMB_DIR_NAME)
-  const stem = path.parse(filePath).name
-  let entries
-  try {
-    entries = fs.readdirSync(dir)
-  } catch {
-    return undefined
-  }
-  const prefix = `${stem}.`
-  for (const entry of entries) {
-    if (!entry.startsWith(prefix) || !entry.endsWith('.jpg')) continue
-    const abs = path.join(dir, entry)
-    try {
-      if (fs.statSync(abs).isFile()) return abs
-    } catch {
-      continue
-    }
+  const prefix = `${path.parse(filePath).name}.`
+  for (const entry of thumbFiles(dir)) {
+    if (entry.startsWith(prefix)) return path.join(dir, entry)
   }
   return undefined
+}
+
+/** 缩略图目录索引缓存：目录路径 → { mtimeMs, files }。 */
+const THUMB_FILE_CACHE = new Map()
+/** 目录不存在/读不到时的共享空表（只读，别往里 push）。 */
+const NO_THUMB_FILES = []
+
+/**
+ * 列一个缩略图目录里的 .jpg 文件，按目录 mtime 缓存。
+ *
+ * 为什么值得缓存：素材网格一次渲染要对同一批素材各查一遍缩略图，原先是
+ * 每查一次就 `readdirSync` + 逐个 `statSync` —— 7 张壁纸等于 7 次目录扫描。
+ * 目录 mtime 一变（重新生成缩略图、增删素材）缓存自然失效，不需要手动清。
+ *
+ * @param {string} dir 缩略图目录。
+ * @returns {string[]} 目录内的 .jpg 文件名。
+ */
+function thumbFiles(dir) {
+  let mtimeMs
+  try {
+    mtimeMs = fs.statSync(dir).mtimeMs
+  } catch {
+    return NO_THUMB_FILES
+  }
+  const hit = THUMB_FILE_CACHE.get(dir)
+  if (hit !== undefined && hit.mtimeMs === mtimeMs) return hit.files
+  /** @type {string[]} */
+  let files = NO_THUMB_FILES
+  try {
+    files = fs.readdirSync(dir).filter((entry) => {
+      if (!entry.endsWith('.jpg')) return false
+      try {
+        return fs.statSync(path.join(dir, entry)).isFile()
+      } catch {
+        return false
+      }
+    })
+  } catch {
+    files = NO_THUMB_FILES
+  }
+  THUMB_FILE_CACHE.set(dir, { mtimeMs, files })
+  return files
 }
 
 /**
@@ -1006,18 +1039,10 @@ export function writeHomeBootPatch(homeDir, patch, removes = []) {
   if (Object.keys(boot).length === 0) delete next.boot
   else next.boot = boot
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  // 原子写：先写临时文件再 rename。管理接口是并发可达的（多个页面同时开着设置页），
-  // 直接 writeFileSync 有截断窗口 —— 崩在中间会让配置文件变成半截 JSON，
-  // 下次 loadConfig 读不出任何配置（用户视角是"动画突然全没了"）。
-  const temp = `${file}.${process.pid}.${Date.now().toString(36)}.tmp`
-  fs.writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
-  try {
-    fs.renameSync(temp, file)
-  } catch (error) {
-    fs.rmSync(temp, { force: true })
-    throw error
-  }
-  return file
+  // 原子写：管理接口是并发可达的（多个页面同时开着设置页），直接 writeFileSync
+  // 有截断窗口 —— 崩在中间会让配置文件变成半截 JSON，下次 loadConfig 读不出任何
+  // 配置（用户视角是"动画突然全没了"）。实现与 profile 清单共用一份。
+  return writeJsonAtomic(file, next)
 }
 
 /**
@@ -1035,6 +1060,10 @@ export function pickMediaExtension(filename) {
  * 去掉任何目录部分、控制符与 Windows 非法字符（`<>:"|?*`），限长 110；
  * 结果为空（如 `..`）时返回 ''，由调用方兜底命名。
  *
+ * 还要绕过 Windows 的**设备名**：`CON` / `PRN` / `AUX` / `NUL` / `COM1-9` /
+ * `LPT1-9` 不管带不带扩展名都被当成设备，`fs.linkSync` 会 EPERM，用户看到的
+ * 只是"保存失败" —— 而文件名本身完全合法，没人会想到是名字的问题。
+ *
  * @param {string} filename 客户端上传的原始文件名。
  * @returns {string} 净化后的文件名（不含目录）。
  */
@@ -1045,7 +1074,22 @@ export function sanitizeUploadName(filename) {
   if (name === '' || name === '.' || name === '..') return ''
   const ext = path.extname(name)
   if (name.length > 110) name = name.slice(0, Math.max(1, 110 - ext.length)) + ext
-  return name
+  return avoidWindowsDeviceName(name)
+}
+
+/** Windows 保留设备名（大小写不敏感，且只看第一个点之前的部分）。 */
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i
+
+/**
+ * 给撞上设备名的文件加一个下划线前缀。
+ * 判据用"第一个点之前"而不是 `path.extname` 的 stem：Windows 对
+ * `con.tar.gz` 一样当设备，取 stem 会漏。
+ * @param {string} name 已净化的文件名。
+ * @returns {string} 可落盘的文件名。
+ */
+function avoidWindowsDeviceName(name) {
+  if (!WINDOWS_DEVICE_NAME.test(name.split('.')[0])) return name
+  return `_${name}`
 }
 
 /**
@@ -1262,20 +1306,51 @@ export function runProfilePnpm(profileDir, args_, timeoutMs = 120000) {
     }
     child.stdout?.on('data', collect)
     child.stderr?.on('data', collect)
-    const timer = setTimeout(() => {
+    let timer = null
+    let settled = false
+    /** 只认第一次落地：error / close / 超时兜底三条路都会走到这里。 */
+    const finish = (result) => {
+      if (settled) return
+      settled = true
+      if (timer !== null) clearTimeout(timer)
+      resolve(result)
+    }
+    timer = setTimeout(() => {
+      // 只杀直接子进程不够：shell 模式下那是 cmd.exe，pnpm 自己的 node 子进程
+      // 会活下来继续改 profile —— 用户看到「更新失败」，磁盘却已经被改了一半，
+      // 下一次启动就是一个半新半旧的插件。
+      // Windows 用 taskkill /T 连整棵进程树一起收。
+      // （POSIX 不用 process.kill(-pid)：没 detached 的子进程不单独成组，
+      //   负 pid 会打到调用者自己的进程组，那才是真事故。）
+      if (process.platform === 'win32' && typeof child.pid === 'number') {
+        try {
+          const killer = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+            windowsHide: true,
+            stdio: 'ignore',
+          })
+          killer.on('error', () => {
+            /* 退回到下面的单进程 kill */
+          })
+        } catch {
+          /* 退回到下面的单进程 kill */
+        }
+      }
       try {
         child.kill()
       } catch {
         /* 已经退出 */
       }
+      // taskkill 也可能失败（进程已消失、权限不足）：再给 3 秒兜底，
+      // 绝不让这个 Promise 永远挂着 —— 设置页会一直转圈到用户重开页面。
+      setTimeout(() => {
+        finish({ code: 124, output: `${output}\n(timed out after ${timeoutMs}ms)` })
+      }, 3000).unref?.()
     }, timeoutMs)
     child.on('error', (error) => {
-      clearTimeout(timer)
-      resolve({ code: 127, output: `cannot run pnpm: ${describe(error)}` })
+      finish({ code: 127, output: `cannot run pnpm: ${describe(error)}` })
     })
     child.on('close', (code) => {
-      clearTimeout(timer)
-      resolve({ code: code ?? 1, output })
+      finish({ code: code ?? 1, output })
     })
   })
 }
@@ -1454,7 +1529,7 @@ export async function updateSelf(options) {
 
   const result = await runProfilePnpm(profileDir, ['add', spec])
   if (result.code !== 0) {
-    // pnpm 失败时把 bundles 列表恢复原样（只有第 15 行真的改过它才需要）。
+    // pnpm 失败时把 bundles 列表恢复原样（只有上面真的改过它才需要）。
     if (bundlesChanged) {
       const rollback = readProfileManifest(profileDir)
       if (rollback !== undefined) {
@@ -1473,7 +1548,17 @@ export async function updateSelf(options) {
       details: result.output.slice(-2000),
     }
   }
-  return { ok: true, restartRequired: true, message: '已更新。重启 DSH 后生效。' }
+  // 与卸载同款收尾：pnpm 覆盖 `node_modules` 里的旧联接时同样可能留下
+  // `<包名>_tmp_<pid>_<n>` 或没删干净的联接，下一次安装就撞 EPERM，被宿主报成
+  // 「没有写入权限」。清理失败不影响"已更新"这个结论，只如实提醒一句。
+  const link = await cleanupLinkedInstall(profileDir)
+  return {
+    ok: true,
+    restartRequired: true,
+    message: link.blocked
+      ? '已更新。重启 DSH 后生效；node_modules 里还有个链接被占用，重启后删除它再更新。'
+      : '已更新。重启 DSH 后生效。',
+  }
 }
 
 /**
@@ -1569,8 +1654,8 @@ export function removeUploadedFile(homeDir, value) {
  * @returns {Record<string, unknown>} 状态对象。
  */
 export function manageStatus(options) {
-  const { client, assetPath, warnings } = loadConfig(options)
-  const { raw } = loadRawBoot(options)
+  // 一次 loadConfig 就够：`raw` 与 `sources` 已经在里面读好了。
+  const { client, assetPath, warnings, raw } = loadConfig(options)
   const fileRaw = typeof raw.file === 'string' ? raw.file : ''
   const audioFileRaw = typeof raw.audioFile === 'string' ? raw.audioFile : ''
   const deleted = Array.isArray(raw.deleted)
@@ -1750,6 +1835,42 @@ export function apply(ctx) {
         res.end(text)
       }
 
+      /**
+       * 取一个查询参数。`req.url` 是 origin-form（`/path?x=1`），必须给个 base 才能
+       * `new URL`；这个 base 不参与任何网络动作，只用于解析。解析失败一律当"没这个参数"。
+       * @param {import('node:http').IncomingMessage} req 请求。
+       * @param {string} key 参数名。
+       * @returns {string | null} 参数值（缺省/解析失败为 null）。
+       */
+      const requestParam = (req, key) => {
+        try {
+          return new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get(key)
+        } catch {
+          return null
+        }
+      }
+
+      /** 布尔开关：`?k=1` 为真，其余（含解析失败）为假。 */
+      const requestFlag = (req, key) => requestParam(req, key) === '1'
+
+      /**
+       * 跨站写请求拦截。
+       *
+       * `/manage` 的写操作能跑 pnpm 改磁盘（卸载/更新），是这个插件唯一"能提权"
+       * 的入口。它现在靠"自定义头 + JSON Content-Type 需要 CORS 预检"隐含挡着
+       * 跨站表单 —— 但那只是浏览器当前实现的副产品，不是我们能承诺的语义。
+       * 显式看 `Sec-Fetch-Site` 更直接：浏览器只在真的跨站时才给 `cross-site`。
+       *
+       * 缺这个头时**放行**：老浏览器、curl、测试工具都没有它，加严会把合法
+       * 调用一起挡掉，而它们本来也不受浏览器同源策略保护。
+       * @param {import('node:http').IncomingMessage} req 请求。
+       * @returns {boolean} 是否应拒绝。
+       */
+      const isCrossSite = (req) => {
+        const site = req.headers['sec-fetch-site']
+        return typeof site === 'string' && site.trim().toLowerCase() === 'cross-site'
+      }
+
       // 素材本体：每次请求都重新解析配置。无参数 = 当前选用的素材（开机动画自身）；
       // `?path=` = 列表预览用的任意受校验素材（内置 rel 或 media 目录内绝对路径）。
       disposers.push(
@@ -1759,8 +1880,7 @@ export function apply(ctx) {
           handler: (req, res) => {
             let filePath
             try {
-              const url = new URL(String(req.url ?? '/'), 'http://localhost')
-              const wanted = url.searchParams.get('path')
+              const wanted = requestParam(req, 'path')
               if (wanted !== null && wanted !== '') {
                 if (path.isAbsolute(wanted)) {
                   filePath = assertUploadedFile(homeDir, wanted)
@@ -1786,13 +1906,7 @@ export function apply(ctx) {
             }
             // `?thumb=1`：卡片/小预览要的是 480px 的小图，不是 8000px 的原图。
             // 有预生成缩略图（内置素材）就用它；没有（用户上传）就照常发原图。
-            let thumb = false
-            try {
-              thumb = new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get('thumb') === '1'
-            } catch {
-              thumb = false
-            }
-            if (thumb) {
+            if (requestFlag(req, 'thumb')) {
               const small = thumbnailFor(filePath)
               if (small !== undefined) filePath = small
             }
@@ -1800,13 +1914,7 @@ export function apply(ctx) {
             // 因为自动挑帧只会选最亮的，而最亮的不一定是最好看的。
             // 没有手工封面就回 404 —— 以前这里回的是视频本体，客户端再把几 MB
             // 视频塞进 <img> 当封面用（必然解码失败，还要白下一段流量）。
-            let poster = false
-            try {
-              poster = new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get('poster') === '1'
-            } catch {
-              poster = false
-            }
-            if (poster) {
+            if (requestFlag(req, 'poster')) {
               const still = posterFor(filePath)
               if (still === undefined) {
                 res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
@@ -1860,17 +1968,18 @@ export function apply(ctx) {
             }
             const method = String(req.method ?? 'GET').toUpperCase()
 
+            // 写操作一律先过同源检查（GET 只读，放行）。
+            if (method !== 'GET' && method !== 'HEAD' && isCrossSite(req)) {
+              reply(res, 403, { ok: false, error: 'cross-site request rejected' })
+              req.resume()
+              return
+            }
+
             if (method === 'GET') {
               // 开机动画每加载一次页面都会打这个接口（boot.js 的实时配置通道），而
               // 完整 manageStatus 要重扫素材库、stat 每个内置文件 —— 对一个只想要
               // `cfg` 的调用方是白花的 IO。`?cfg=1` 给全屏动画用的精简回包。
-              let cfgOnly = false
-              try {
-                cfgOnly = new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get('cfg') === '1'
-              } catch {
-                cfgOnly = false
-              }
-              if (cfgOnly) {
+              if (requestFlag(req, 'cfg')) {
                 try {
                   const { client } = loadConfig(options())
                   reply(res, 200, { ok: true, cfg: client })
@@ -2332,12 +2441,7 @@ export function apply(ctx) {
               reply(res, 405, { ok: false, error: 'use GET' })
               return
             }
-            let force = false
-            try {
-              force = new URL(String(req.url ?? '/'), 'http://localhost').searchParams.get('force') === '1'
-            } catch {
-              force = false
-            }
+            const force = requestFlag(req, 'force')
             // 网络失败不抛：checkForUpdate 已经把任何异常归一成 reachable:false。
             void checkForUpdate({ currentVersion: VERSION, repoUrl: REPO_URL, force })
               .then((result) => {
@@ -2373,11 +2477,7 @@ export function apply(ctx) {
   })
 
   try {
-    const { client, sources, warnings } = (() => {
-      const loaded = loadConfig({ packageRoot, homeDir, route: ASSET_ROUTE })
-      const { sources } = loadRawBoot({ packageRoot, homeDir })
-      return { ...loaded, sources }
-    })()
+    const { client, sources, warnings } = loadConfig({ packageRoot, homeDir, route: ASSET_ROUTE })
     for (const warning of warnings) warn(warning)
     // 崩溃留下的半截上传文件：启动时收一次，别让它们一直占盘。
     try {
