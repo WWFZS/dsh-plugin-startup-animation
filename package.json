@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 {
   "name": "dsh-plugin-startup-animation",
   "version": "1.11.6",
@@ -95,3 +96,102 @@
     "access": "public"
   }
 }
+=======
+{
+  "name": "dsh-plugin-startup-animation",
+  "version": "1.11.6",
+  "type": "module",
+  "description": "Animated full-screen startup screen shown while DeepSeek Harness boots — click to skip. Ships a built-in MP4/wallpaper/audio library and accepts your own files. 开机动画 / 启动动画：启动 Harness 时显示全屏动画，随包内置视频、壁纸与开机音频，也可以用自己的素材。",
+  "license": "MIT",
+  "author": "dsh-plugin-startup-animation contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/WWFZS/dsh-plugin-startup-animation.git"
+  },
+  "homepage": "https://github.com/WWFZS/dsh-plugin-startup-animation#readme",
+  "bugs": {
+    "url": "https://github.com/WWFZS/dsh-plugin-startup-animation/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "startup",
+    "boot",
+    "splash",
+    "animation",
+    "theme"
+  ],
+  "engines": {
+    "node": ">=22.12.0",
+    "dsh": ">=0.2.0"
+  },
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./icon.svg": "./icon.svg"
+  },
+  "files": [
+    "package.json",
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib/self-manage.mjs",
+    "runtime/boot.css",
+    "runtime/boot.js",
+    "builtin/MP4/dsh-大肥鱼.web.mp4",
+    "builtin/MP4/傍晚海风-海边.web.mp4",
+    "builtin/MP4/光影-动漫美女-彩色.web.mp4",
+    "builtin/MP4/.posters/*",
+    "builtin/MP4/多重影像.web.mp4",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "docs/*.jpg",
+    "docs/*.png",
+    "screenshots.json",
+    "LICENSE",
+    "builtin/图片/**/*",
+    "builtin/音频/**/*"
+  ],
+  "scripts": {
+    "test": "node selftest.mjs && node tools/boot-runtime.mjs && node tools/client-test.mjs && node lib/self-manage-test.mjs && node lib/e2e-uninstall.mjs && node tools/boot-css-test.mjs && node tools/host-smoke.mjs",
+    "test:unit": "node selftest.mjs",
+    "test:boot": "node tools/boot-runtime.mjs",
+    "test:client": "node tools/client-test.mjs",
+    "test:self": "node lib/self-manage-test.mjs",
+    "test:e2e": "node lib/e2e-uninstall.mjs",
+    "test:css": "node tools/boot-css-test.mjs",
+    "test:host": "node tools/host-smoke.mjs",
+    "thumbs": "node tools/make-thumbs.mjs",
+    "optimize": "node tools/optimize-builtin.mjs",
+    "build": "node tools/optimize-builtin.mjs && node tools/make-thumbs.mjs",
+    "check": "node tools/preflight.mjs",
+    "release": "node tools/make-release.mjs"
+  },
+  "dsh": {
+    "engines": {
+      "dsh": ">=0.2.0"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
+>>>>>>> bfa4ff6 (chore: 添加 screenshots.json（市场详情页截图声明）)
