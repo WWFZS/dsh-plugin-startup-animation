@@ -81,7 +81,6 @@ window.__ModuleLoader__.load({
       fail: '操作失败',
       versionLabel: 'v',
       updateChecking: '检查更新中…',
-      updateAvailable: '有新版本 {latest}',
       updateLatest: '已是最新',
       updateUnknown: '检查不到更新',
       // ── 卸载 / 更新（v1.11.0）──
@@ -151,7 +150,6 @@ window.__ModuleLoader__.load({
       fail: 'Action failed',
       versionLabel: 'v',
       updateChecking: 'Checking for updates…',
-      updateAvailable: 'Version {latest} available',
       updateLatest: 'Up to date',
       updateUnknown: 'Update check unavailable',
       // ── Uninstall / update (v1.11.0) ──
@@ -184,12 +182,14 @@ window.__ModuleLoader__.load({
 .dsa-set-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 2px; }
 .dsa-set-title { font-size: 15px; font-weight: 600; color: var(--dsw-alias-label-primary); margin: 0; }
 .dsa-set-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-/* 版本小字：贴着标题，不抢视觉重量；可点击时打开 Release 页。 */
+/* 版本小字：贴着标题，不抢视觉重量；有新版本时整个变成"就地更新"按钮。 */
 .dsa-set-ver { font-size: 11.5px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dsa-set-ver[data-update="1"] { color: var(--dsw-alias-brand-primary); font-weight: 600; }
-.dsa-set-ver-btn { font: inherit; font-size: 11.5px; padding: 0; border: none; background: none; color: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
-.dsa-set-ver-btn:hover { color: var(--dsw-alias-brand-primary); }
-.dsa-set-ver-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 4px; }
+/* 更新按钮形态：和「立即刷新」同级的小药丸 —— 它现在是页面上的主行动点。 */
+.dsa-set-ver-btn { font: inherit; font-size: 11.5px; padding: 4px 10px; border: 1px solid var(--dsw-alias-brand-primary); border-radius: 999px; background: var(--dsw-alias-brand-primary); color: var(--dsw-alias-bg-base); cursor: pointer; white-space: nowrap; transition: filter 120ms ease; }
+.dsa-set-ver-btn:hover { filter: brightness(1.1); }
+.dsa-set-ver-btn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; border-radius: 999px; }
+.dsa-set-ver-btn:disabled { opacity: 0.55; cursor: default; }
 .dsa-set-tabs { display: flex; gap: 4px; padding: 3px; margin: 14px 0 8px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; align-self: flex-start; }
 .dsa-set-tab { font: inherit; font-size: 13px; padding: 6px 18px; border: none; border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; transition: background 120ms ease, color 120ms ease; }
 .dsa-set-tab:hover { color: var(--dsw-alias-label-primary); }
@@ -893,15 +893,18 @@ window.__ModuleLoader__.load({
         /**
          * 标题旁的版本小字。
          *
-         * 三种状态：
-         *   - 有新版本 → 可点击，打开 GitHub Release 页（**不自动下载**：更新由用户决定）；
-         *   - 已是最新 → 灰字"已是最新"；
-         *   - 检查不到（离线/GitHub 不可达）→ 灰字，不给红色错误（这不是插件故障）。
-         * 版本号本身永远显示，即便更新检查失败 —— 它是用户确认"装的是哪一版"的唯一依据。
+         * 有新版本时它就是「更新」按钮本体 —— 点一下直接更新（manage 路由的
+         * `{action:'update'}`，宿主拿 Release tgz 跑 pnpm），不再跳转 GitHub
+         * 让用户自己下包。当前版本号永远显示，用户确认装的是哪一版只看这里。
+         *
+         *   - 有新版本 → 按钮亮起「v1.2.3 · 更新到 1.2.4」，点了就地更新；
+         *   - 更新中 → 转成「更新中…」；
+         *   - 已是最新 / 检查不到 → 安静的版本号（不给红色错误）。
          */
         const versionBadge = () => {
+          // 安装形态：selfState（刚卸载后的本地覆盖）优先，否则取 manage 状态里的 self。
+          const info = selfState !== null ? selfState : state && typeof state.self === 'object' ? state.self : null
           // 版本前缀两语共用「v」，和版本号之间不留空格：`v1.11.0`。
-          // 中文界面里「版本 1.11.0」多一个词，读起来并不比 `v` 更清楚。
           const text = localVersion === '' ? '' : `${t('versionLabel')}${localVersion}`
           if (text === '') return null
           const hasUpdate = update !== null && update.updateAvailable === true
@@ -910,7 +913,7 @@ window.__ModuleLoader__.load({
            * 副标签只在**真的需要用户行动**时出现。
            *
            * 平时标题旁只留一枚安静的版本号。只有两种情况会加字：
-           *   - 有新版本 → 「有新版本 x.y.z」，可点，打开 Release 页；
+           *   - 有新版本 → 「更新到 x.y.z」（就在这个按钮上，点了直接更新）；
            *   - 检查中 → 「检查更新中…」，仅在没有缓存结果的首帧出现。
            * 「已是最新」「检查不到」都不加字：用户没装新版时不需要被打扰，
            * 而离线时把"检查不到"挂在标题上只会让人以为插件坏了。
@@ -921,31 +924,37 @@ window.__ModuleLoader__.load({
             : hasUpdate && typeof update.latest === 'string'
               // t() 不做变量插值（生态通行做法是 .replace）：直接给它第二参数
               // 只会原样显示 "{latest}"，所以这里必须自己替换。
-              ? t('updateAvailable').replace('{latest}', update.latest)
+              ? t('updateNow').replace('{version}', update.latest)
               : reachable
                 ? t('updateLatest')
                 : t('updateUnknown')
           const showNote = updateChecking || hasUpdate
-          const releaseUrl =
-            hasUpdate && typeof update?.releasesUrl === 'string' && update.releasesUrl !== ''
-              ? update.releasesUrl
-              : ''
+
+          // 有新版本 → 版本小字整个变成按钮：点一下就地更新，不跳 GitHub。
+          // 不满足更新条件的（link: 安装、更新中、还没拿到安装形态）保持纯文字，
+          // selfPanel 里那颗大按钮是同一条 doUpdate，行为完全一致。
+          if (hasUpdate && info !== null && info.installed === true) {
+            const linked = typeof info.spec === 'string' && info.spec.startsWith('link:')
+            if (!linked) {
+              return h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsa-set-ver-btn',
+                  'data-update': '1',
+                  title: `${text} · ${t('updateNow').replace('{version}', update.latest)}`,
+                  disabled: selfBusy !== '',
+                  onClick: doUpdate,
+                },
+                selfBusy === 'update' ? t('updating') : `${text} · ${note}`,
+              )
+            }
+          }
+
           return h(
             'span',
             { className: 'dsa-set-ver', 'data-update': hasUpdate ? '1' : '0', title: note },
-            releaseUrl === ''
-              ? showNote
-                ? `${text} · ${note}`
-                : text
-              : h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dsa-set-ver-btn',
-                    onClick: () => window.open(releaseUrl, '_blank', 'noopener'),
-                  },
-                  `${text} · ${note}`,
-                ),
+            showNote ? `${text} · ${note}` : text,
           )
         }
 
