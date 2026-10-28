@@ -505,18 +505,30 @@ try {
     const src = fs.readFileSync(new URL('./runtime/boot.js', import.meta.url), 'utf8')
     assert.ok(src.includes("COVER_ATTR = 'data-dsa-cover'"), 'boot.js 未定义遮罩标记')
     assert.ok(src.includes('setCover(true)'), 'boot.js 未在解析期打开遮罩')
+    // 遮罩不能只看素材模式：默认配置 file='' → mode='css'（内置动画），
+    // 那时同样要先遮 —— 否则默认体验恰好是"原生启动卡闪一帧再被盖住"。
+    assert.ok(
+      /baked\.enabled !== false\)\s*setCover\(true\)/.test(src),
+      '首帧遮罩又变回只在 video/image 打开（默认配置会闪原生启动页）',
+    )
     // 失败与退场必须摘标记，否则原生启动页被一直藏到动画消失。
     assert.ok(src.includes("mediaGone('mount-throw')"), '挂载失败路径仍在')
     assert.ok(src.includes('setCover(false)'), 'boot.js 未关闭遮罩')
+    // 致命异常路径（beginWithConfig 抛）也必须摘：规则是 display:none !important，
+    // 只藏卡不解卡 —— 内核启动失败时用户会看到一块纯色，连失败原因都读不到。
+    assert.ok(
+      /try \{\s*beginWithConfig\(cfg\)[\s\S]{0,400}?setCover\(false\)/.test(src),
+      '致命异常路径没摘首帧遮罩（内核失败时会变纯色屏）',
+    )
   })
   await check('资源接口：?poster=1 没有手工封面时回 404', () => {
     const src = fs.readFileSync(new URL('./index.js', import.meta.url), 'utf8')
     // 以前这里回的是视频本体，客户端再把几 MB 视频塞进 <img> 当封面 —— 必然
     // 解码失败，还白下一段流量，卡片于是先空一秒再突然出现画面。
-    assert.ok(
-      /if \(poster\) \{[\s\S]{0,400}posterFor\(filePath\)[\s\S]{0,200}404/.test(src),
-      '?poster=1 缺失时未回 404',
-    )
+    // 断言只锚"poster 分支存在"与"posterFor 之后紧跟 404"，不锚 if 的具体写法 ——
+    // 上一版锚的是 `if (poster) {`，查询参数解析一抽公共就误报。
+    assert.ok(src.includes("requestFlag(req, 'poster')"), '?poster=1 分支没了')
+    assert.ok(/posterFor\(filePath\)[\s\S]{0,300}?404/.test(src), '?poster=1 缺失时未回 404')
     const client = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
     assert.ok(client.includes('useState(null)'), 'VideoCover 未在探测期留空')
     assert.ok(/hasManual === null/.test(client), 'VideoCover 探测期仍在画媒体元素')
