@@ -198,18 +198,20 @@ async function loadClient(options = {}) {
             options.update ?? { ok: true, current: '1.10.0', reachable: false, updateAvailable: false },
         })
       }
-      // 自我管理端点：GET 读安装形态，POST 做卸载/更新。
-      if (path.includes('/self')) {
-        const isPost = init?.method === 'POST'
-        if (isPost && options.selfResult !== undefined) {
-          return Promise.resolve({ ok: true, json: async () => options.selfResult })
-        }
+      // 自我管理并入 manage：GET 状态里带 `self`，POST 用 `{action}` 触发。
+      // 以前是单独的 `/self` 端点，但那条路由在某些宿主上会被吃掉（400 无 body），
+      // 设置页因此整块不显示卸载/更新 —— 所以状态与动作现在都走 manage。
+      const isSelfAction = init?.method === 'POST' && String(init?.body ?? '').includes('"action"')
+      if (isSelfAction) {
         return Promise.resolve({
           ok: true,
-          json: async () => options.self ?? { ok: true, installed: false, selected: false },
+          json: async () => options.selfResult ?? { ok: true },
         })
       }
-      return Promise.resolve({ ok: true, json: async () => status })
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ ...status, self: options.self ?? { installed: false, selected: false } }),
+      })
     },
     confirm: (text) => {
       calls.push({ type: 'confirm', text })
@@ -659,6 +661,27 @@ await check('有新版本 → 同时显示更新按钮', async () => {
   assert.ok(labels.includes('卸载插件'), '没有卸载按钮')
 })
 
+await check('link: 安装（指向源码目录）→ 不显示更新按钮', async () => {
+  const { render } = await loadClient({
+    self: { installed: true, selected: true, spec: 'link:D:/DeepSeek启动动画' },
+    update: {
+      ok: true,
+      current: '1.11.1',
+      latest: '1.11.2',
+      reachable: true,
+      updateAvailable: true,
+      releasesUrl: 'https://github.com/WWFZS/dsh-plugin-startup-animation/releases',
+    },
+  })
+  const tree = await render()
+  const panel = findAll(tree, 'dsa-set-self')[0]
+  assert.ok(panel, '没显示自管区')
+  const labels = texts(panel)
+  // 开发链接不指向任何版本；用 tgz 覆盖会把链接换成发行包 —— 不是用户想要的。
+  assert.ok(!labels.some((text) => text.startsWith('更新到')), `link 安装不该有更新按钮：${labels.join(' | ')}`)
+  assert.ok(labels.includes('卸载插件'), '卸载按钮应该照常可用')
+})
+
 await check('点卸载 → 先确认，再 POST action=uninstall', async () => {
   const { render, calls } = await loadClient({
     self: { ok: true, installed: true, selected: true },
@@ -677,10 +700,11 @@ await check('点卸载 → 先确认，再 POST action=uninstall', async () => {
   await Promise.resolve()
   await Promise.resolve()
   const post = calls.find(
-    (call) => call.type === 'fetch' && call.init?.method === 'POST' && call.url.includes('/self'),
+    (call) => call.type === 'fetch' && call.init?.method === 'POST' && String(call.init?.body ?? '').includes("action"),
   )
   assert.ok(post, '没有发卸载请求')
-  assert.ok(post.url.includes('action=uninstall'), `请求地址不对：${post.url}`)
+  const sent = JSON.parse(String(post.init.body))
+  assert.equal(sent.action, 'uninstall', `动作不对：${String(post.init.body)}`)
 })
 
 await check('用户在确认框点取消 → 不发请求', async () => {
@@ -695,7 +719,7 @@ await check('用户在确认框点取消 → 不发请求', async () => {
   await Promise.resolve()
   await Promise.resolve()
   const post = calls.find(
-    (call) => call.type === 'fetch' && call.init?.method === 'POST' && call.url.includes('/self'),
+    (call) => call.type === 'fetch' && call.init?.method === 'POST' && String(call.init?.body ?? '').includes("action"),
   )
   assert.equal(post, undefined, '取消后仍然发了请求')
 })
@@ -720,10 +744,11 @@ await check('点更新 → POST action=update', async () => {
   await Promise.resolve()
   await Promise.resolve()
   const post = calls.find(
-    (call) => call.type === 'fetch' && call.init?.method === 'POST' && call.url.includes('/self'),
+    (call) => call.type === 'fetch' && call.init?.method === 'POST' && String(call.init?.body ?? '').includes("action"),
   )
   assert.ok(post, '没有发更新请求')
-  assert.ok(post.url.includes('action=update'), `请求地址不对：${post.url}`)
+  const sent = JSON.parse(String(post.init.body))
+  assert.equal(sent.action, 'update', `动作不对：${String(post.init.body)}`)
 })
 
 console.log('')

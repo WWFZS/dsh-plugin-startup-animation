@@ -100,8 +100,12 @@ export const UPDATE_ROUTE = '/dsh-startup-animation/update'
  * 用户就不用去记命令行了。
  *
  * 更新同理：插件可以自己在 profile 目录跑 `pnpm add` 把版本升上去。
+ *
+ * 自我管理不单独占路由：状态与动作都并进了 `MANAGE_ROUTE`。原先那条
+ * `/dsh-startup-animation/self` 在某些宿主上会被别的东西吃掉（GET/POST
+ * 都直接 400、连 body 都没有），设置页读不到安装形态，卸载/更新按钮
+ * 整块不显示 —— 一条已经验证可用的路由比两条各有用处的路由更可靠。
  */
-export const SELF_ROUTE = '/dsh-startup-animation/self'
 
 /**
  * 版本比较：只比较 `MAJOR.MINOR.PATCH` 的数字段，忽略预发布后缀。
@@ -133,8 +137,10 @@ export function compareVersions(a, b) {
 
 /**
  * 更新检查结果缓存（进程内）：GitHub 匿名 API 每小时只给 60 次，
- * 而设置页可能被反复打开。成功结果缓存 6 小时，失败只缓存 5 分钟
- * （网络抖动不该让用户等一整天才能重试）。
+ * 而设置页可能被反复打开。成功结果缓存 15 分钟 —— 原来是 6 小时，
+ * 结果作者自己发完新版、设置页还挂着"已是最新"（缓存里是上一个版本），
+ * 用户会以为更新机制坏了。15 分钟对 60 次/小时的额度也很宽松。
+ * 失败只缓存 5 分钟（网络抖动不该让用户等一整天才能重试）。
  */
 const updateCache = { at: 0, ttlMs: 0, value: null }
 
@@ -233,7 +239,7 @@ export async function checkForUpdate(options) {
 
   const reachable = result.reachable === true
   updateCache.at = now
-  updateCache.ttlMs = reachable ? 6 * 60 * 60 * 1000 : 5 * 60 * 1000
+  updateCache.ttlMs = reachable ? 15 * 60 * 1000 : 5 * 60 * 1000
   updateCache.value = result
   return result
 }
@@ -256,6 +262,26 @@ export const BUILTIN_DIR_NAME = 'builtin'
 
 /** 仓库主页（更新提示与"查看更新"链接的唯一来源）。 */
 export const REPO_URL = 'https://github.com/WWFZS/dsh-plugin-startup-animation'
+
+/**
+ * 更新时喂给 pnpm 的目标：Release 的 tgz 直链。
+ *
+ * 为什么不用 `github:` 里的 git 地址：走 git 要 clone 整个仓库（含内置素材母版），
+ * 实测同一个网络下 tgz 约 20 秒、git 要近 3 分钟且经常被掐断。tgz 是打包好的
+ * 发布产物，体积更小、路径更短、也不依赖 git。
+ */
+export const UPDATE_SPEC = `${REPO_URL}/releases/latest/download/dsh-plugin-startup-animation.tgz`
+
+/**
+ * 允许 `update` 动作使用的 spec 白名单。
+ *
+ * 只认本插件自己的两种地址 —— 否则这条接口就成了"往 profile 里塞任意包"的入口。
+ * @param {string} spec 客户端给的 spec。
+ * @returns {boolean} 是否允许。
+ */
+export function isAllowedUpdateSpec(spec) {
+  return spec === UPDATE_SPEC || /^github:WWFZS\/dsh-plugin-startup-animation$/.test(spec)
+}
 
 /** 注入到页面的配置全局名。 */
 export const BOOT_GLOBAL = '__DSA_BOOT__'
@@ -1786,6 +1812,16 @@ export function apply(ctx) {
         }),
       )
 
+      // profile 目录：宿主注入的 profileContext 给出当前 profile。
+      // 没有它（比如跑在 web 宿主上）就退回 DSH_HOME/profiles/<name>。
+      // 自我管理（卸载/更新）也用它 —— 所以提到外面，两个路由共用一份口径。
+      const currentProfileDir = () => {
+        const profileName = profileContext?.name ?? 'desktop'
+        return typeof profileContext?.dir === 'string' && profileContext.dir !== ''
+          ? profileContext.dir
+          : path.join(homeDir ?? resolveDshHome(process.env, os.homedir) ?? '', 'profiles', profileName)
+      }
+
       // 管理面：GET 状态 / POST(JSON) 开关 / POST(二进制) 上传 / DELETE 恢复默认。
       disposers.push(
         child.webServer.register({
@@ -1835,8 +1871,18 @@ export function apply(ctx) {
                 }
                 return
               }
+              // 自我管理状态一起回：以前它是单独的 `/self` 端点，但在某些宿主上
+              // 那条路由会被别的东西吃掉（GET/POST 都直接 400、连 body 都没有），
+              // 设置页因此读不到状态，卸载/更新按钮整块不显示。并进一条已经验证
+              // 可用的路由，少一条路由就少一种失败模式。
               const payload = status()
-              reply(res, payload.ok === false ? 500 : 200, payload)
+              let self = null
+              try {
+                self = selfInstallState({ profileDir: currentProfileDir() })
+              } catch {
+                self = null
+              }
+              reply(res, payload.ok === false ? 500 : 200, self === null ? payload : { ...payload, self })
               return
             }
 
@@ -1889,6 +1935,43 @@ export function apply(ctx) {
                     if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) Object.assign(body, parsed)
                   } catch (error) {
                     reply(res, 400, { ok: false, error: 'invalid JSON' })
+                    return
+                  }
+
+                  // 自我管理动作（卸载 / 更新）：和设置在**同一条路由**上 ——
+                  // 独立那条 `/self` 在某些宿主上会被吃掉（400 且无 body），
+                  // 设置页读不到状态，卸载/更新按钮整块消失。
+                  if (typeof body.action === 'string' && body.action !== '') {
+                    const action = body.action
+                    if (action === 'uninstall') {
+                      void uninstallSelf({ profileDir: currentProfileDir(), homeDir })
+                        .then((result) => {
+                          reply(res, result.ok ? 200 : 400, {
+                            ...result,
+                            self: { installed: false, selected: false, spec: undefined },
+                          })
+                        })
+                        .catch((error) => reply(res, 500, { ok: false, message: describe(error) }))
+                      return
+                    }
+                    if (action === 'update') {
+                      const target =
+                        typeof body.spec === 'string' && body.spec !== '' ? body.spec : UPDATE_SPEC
+                      if (!isAllowedUpdateSpec(target)) {
+                        reply(res, 400, { ok: false, message: `不支持的更新目标：${target}` })
+                        return
+                      }
+                      void updateSelf({ profileDir: currentProfileDir(), spec: target })
+                        .then((result) => {
+                          // 换版本成功 → 丢掉"已是最新"的旧结论，别让用户
+                          // 刷新后还被告知是最新。
+                          if (result.ok) resetUpdateCache()
+                          reply(res, result.ok ? 200 : 400, result)
+                        })
+                        .catch((error) => reply(res, 500, { ok: false, message: describe(error) }))
+                      return
+                    }
+                    reply(res, 400, { ok: false, message: `不支持的动作：${action}` })
                     return
                   }
 
@@ -2268,70 +2351,6 @@ export function apply(ctx) {
         }),
       )
 
-      // 自我管理：卸载 / 更新本插件。
-      //
-      // 为什么需要它：宿主插件管理器的
-      // removeBundle() 在 profile 没启用 HMR 时会拒绝卸载"正在使用的包"
-      // （stop-profile）—— 桌面 profile 默认没 HMR，所以设置页里的卸载必然失败。
-      // 这里自己跑 pnpm 改磁盘（就是 `dsh plugin --profile <p> remove <pkg>`
-      // 走的那条路），改完提示用户重启。
-      disposers.push(
-        child.webServer.register({
-          kind: 'exact',
-          path: SELF_ROUTE,
-          handler: (req, res) => {
-            const method = String(req.method ?? 'GET').toUpperCase()
-            if (method !== 'POST' && method !== 'GET') {
-              reply(res, 405, { ok: false, error: 'use GET or POST' })
-              return
-            }
-
-            // profile 目录：宿主注入的 profileContext 给出当前 profile。
-            // 没有它（比如跑在 web 宿主上）就退回 DSH_HOME/profiles/<name>。
-            const profileName = profileContext?.name ?? 'desktop'
-            const profileDir =
-              typeof profileContext?.dir === 'string' && profileContext.dir !== ''
-                ? profileContext.dir
-                : path.join(homeDir ?? resolveDshHome(process.env, os.homedir) ?? '', 'profiles', profileName)
-
-            if (method === 'GET') {
-              reply(res, 200, { ok: true, ...selfInstallState({ profileDir }) })
-              return
-            }
-
-            let action = ''
-            let spec = ''
-            try {
-              const url = new URL(String(req.url ?? '/'), 'http://localhost')
-              action = url.searchParams.get('action') ?? ''
-              spec = url.searchParams.get('spec') ?? ''
-            } catch {
-              action = ''
-            }
-
-            if (action === 'uninstall') {
-              void uninstallSelf({ profileDir, homeDir })
-                .then((result) => reply(res, result.ok ? 200 : 400, result))
-                .catch((error) => reply(res, 500, { ok: false, message: describe(error) }))
-              return
-            }
-            if (action === 'update') {
-              // 只允许更新到本插件自己的 GitHub 仓库 —— 不接受任意 spec，
-              // 免得这个接口变成"往 profile 里塞任意包"的入口。
-              const target = spec === '' ? `github:${REPO_URL.replace('https://github.com/', '')}` : spec
-              if (!/^github:WWFZS\/dsh-plugin-startup-animation$/.test(target)) {
-                reply(res, 400, { ok: false, message: `不支持的更新目标：${target}` })
-                return
-              }
-              void updateSelf({ profileDir, spec: target })
-                .then((result) => reply(res, result.ok ? 200 : 400, result))
-                .catch((error) => reply(res, 500, { ok: false, message: describe(error) }))
-              return
-            }
-            reply(res, 400, { ok: false, error: 'expected action=uninstall or action=update' })
-          },
-        }),
-      )
 
       return () => {
         for (const dispose of disposers) {

@@ -32,7 +32,7 @@ fs.writeFileSync(
   ),
 )
 
-const { apply, MANAGE_ROUTE, ASSET_ROUTE, UPDATE_ROUTE, SELF_ROUTE, VERSION } = await import(
+const { apply, MANAGE_ROUTE, ASSET_ROUTE, UPDATE_ROUTE, UPDATE_SPEC, VERSION } = await import(
   new URL('../index.js', import.meta.url)
 )
 
@@ -415,33 +415,48 @@ console.log('  ok   GET ?cfg=1 只回配置、不扫素材库')
   console.log('  ok   manage 状态携带 version / repo')
 }
 
-// ── 19. 自我管理路由（卸载 / 更新）──
+// ── 19. 自我管理（卸载 / 更新）：并进 manage 路由 ──
 {
-  // GET：读当前 profile 里的安装形态。
-  const get = await call(SELF_ROUTE)
-  assert.equal(get.status, 200, `self GET 失败 ${get.status}`)
+  // GET：状态里带安装形态。以前它是单独的 /self 端点，在某些宿主上会被
+  // 别的东西吃掉（400 且无 body），设置页因此整块不显示卸载/更新按钮。
+  const get = await call(MANAGE_ROUTE)
+  assert.equal(get.status, 200, `manage GET 失败 ${get.status}`)
   const body = get.json()
   assert.equal(body.ok, true)
-  assert.equal(typeof body.installed, 'boolean', '缺少 installed 字段')
-  assert.equal(typeof body.selected, 'boolean', '缺少 selected 字段')
-  console.log('  ok   self GET：200 + 安装形态')
+  assert.equal(typeof body.self, 'object', 'manage 状态里缺少 self 字段')
+  assert.equal(typeof body.self.installed, 'boolean', '缺少 installed 字段')
+  assert.equal(typeof body.self.selected, 'boolean', '缺少 selected 字段')
+  console.log('  ok   manage GET：带 self 安装形态')
 
-  // 没有 action → 400（不给"什么都不做"一个静默成功）。
-  const noAction = await call(SELF_ROUTE, { method: 'POST' })
-  assert.equal(noAction.status, 400, `缺 action 时应是 400，实际 ${noAction.status}`)
-  console.log('  ok   self POST：缺 action 拒绝')
-
-  // 不允许更新到任意包：这个端点不能变成"往 profile 塞任意依赖"的入口。
-  const badTarget = await call(`${SELF_ROUTE}?action=update&spec=${encodeURIComponent('some-other-package')}`, {
+  // 不认识的 action → 400（不给"什么都不做"一个静默成功）。
+  const noAction = await call(MANAGE_ROUTE, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'nope' }),
+  })
+  assert.equal(noAction.status, 400, `未知 action 应是 400，实际 ${noAction.status}`)
+  console.log('  ok   manage POST：未知 action 拒绝')
+
+  // 不允许更新到任意包：这条接口不能变成"往 profile 塞任意依赖"的入口。
+  const badTarget = await call(MANAGE_ROUTE, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'update', spec: 'some-other-package' }),
   })
   assert.equal(badTarget.status, 400, `任意更新目标应是 400，实际 ${badTarget.status}`)
-  console.log('  ok   self POST：拒绝任意更新目标')
+  console.log('  ok   manage POST：拒绝任意更新目标')
+
+  // 默认更新目标是 Release 的 tgz 直链（不走 git：实测快一个数量级）。
+  assert.ok(
+    /releases\/latest\/download\/dsh-plugin-startup-animation\.tgz$/.test(UPDATE_SPEC),
+    'UPDATE_SPEC 不是 Release tgz 直链',
+  )
+  console.log('  ok   UPDATE_SPEC 指向 Release tgz 直链')
 
   // 非法方法。
-  const put = await call(SELF_ROUTE, { method: 'PUT' })
+  const put = await call(MANAGE_ROUTE, { method: 'PUT' })
   assert.equal(put.status, 405, `PUT 应是 405，实际 ${put.status}`)
-  console.log('  ok   self：非法方法 405')
+  console.log('  ok   manage：非法方法 405')
 }
 
 await new Promise((resolve) => server.close(resolve))

@@ -26,7 +26,6 @@ window.__ModuleLoader__.load({
 
     const MANAGE = '/dsh-startup-animation/manage'
     const UPDATE = '/dsh-startup-animation/update'
-    const SELF = '/dsh-startup-animation/self'
     const ASSET = '/dsh-startup-animation/asset'
     const NS = 'startup-animation'
 
@@ -320,7 +319,10 @@ window.__ModuleLoader__.load({
      *   - **不阻塞页面**：先渲染"版本 x.y.z"，更新检查在后台跑，回来再补提示；
      *   - **失败不报错**：离线/墙内/GitHub 挂了都只显示"检查不到更新"，
      *     因为这只是个提示，不该让设置页看起来像坏了；
-     *   - 检查结果由宿主的 `/update` 端点给出（宿主有缓存，不会每次开页面都打 GitHub）。
+     *   - 检查结果由宿主的 `/update` 端点给出。打开设置页**强制查一次**
+     *     （`?force=1`）：宿主那层有 15 分钟缓存，用它兜底会让"刚发了新版"
+     *     的用户在缓存窗口里看到"已是最新" —— 这个按钮存在的意义就没了。
+     *     一次开页一个请求，远低于 GitHub 的配额。
      *
      * @param {(key: string) => string} t 翻译。
      * @returns {{ version: string, update: object | null, checking: boolean }} 版本状态。
@@ -332,7 +334,7 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         let alive = true
-        fetch(`${UPDATE}?check=1`, { cache: 'no-store' })
+        fetch(`${UPDATE}?force=1`, { cache: 'no-store' })
           .then((res) => res.json())
           .then((payload) => {
             if (!alive) return
@@ -354,9 +356,9 @@ window.__ModuleLoader__.load({
       return { version, update, checking }
     }
 
-    /** POST 一个 JSON 载荷（开关/时长/素材库操作共用）。 */
+    /** POST 一个 JSON 载荷（开关/时长/素材库操作共用），返回 send 的 Promise。 */
     function postJson(send, body, okText) {
-      send(
+      return send(
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -640,21 +642,11 @@ window.__ModuleLoader__.load({
         }, [state])
 
         // 卸载 / 更新要知道自己有没有被装在当前 profile 里。
-        // 读不到不算错 —— 只是没有那两个按钮，不影响别的功能。
-        React.useEffect(() => {
-          let alive = true
-          fetch(SELF, { cache: 'no-store' })
-            .then((res) => res.json())
-            .then((payload) => {
-              if (alive && payload && payload.ok) setSelfState(payload)
-            })
-            .catch(() => {
-              /* 没有这个接口就当没有自管能力 */
-            })
-          return () => {
-            alive = false
-          }
-        }, [])
+        // 状态跟着 manage 的状态回包一起来（以前是单独的 /self 端点，但那条
+        // 路由在某些宿主上会被吃掉 —— 400 且没有 body —— 于是按钮整块消失）。
+        // 这里**不**再把它拷进独立 state：直接从 `state.self` 派生，少一次
+        // 渲染回合，也少一处可能对不上的副本。`selfState` 只用来放"刚卸载完"
+        // 这种本地覆盖。
 
         // 卸载时清掉未触发的防抖提交与试听播放。
         React.useEffect(
@@ -782,9 +774,24 @@ window.__ModuleLoader__.load({
         }
 
         /**
+         * 自我管理动作的提交口：只发请求、只管拿到回包。
+         *
+         * 不复用 `send` —— 那条路会改 `busy` 并把 `error` 当成失败文案，
+         * 而卸载/更新要的是 `message` + `details`，并且自己管 `selfBusy`。
+         * @param {object} body 动作载荷（`{action:'uninstall'}` 等）。
+         * @returns {Promise<object|null>} 回包，拿不到就是 null。
+         */
+        const postSelf = (body) =>
+          fetch(MANAGE, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }).then((res) => res.json().catch(() => null))
+
+        /**
          * 卸载本插件。
          *
-         * 走宿主自己的 `self` 端点（不是插件管理器的卸载按钮 —— 那条路在没有
+         * 走插件自己的 manage 端点（不是插件管理器的卸载按钮 —— 那条路在没有
          * HMR 的桌面 profile 上必然被拒）。
          * 卸载会改磁盘上的 profile 清单，所以要重启 DSH 才完全生效。
          */
@@ -792,8 +799,7 @@ window.__ModuleLoader__.load({
           if (!globalThis.confirm(t('uninstallConfirm'))) return
           setSelfBusy('uninstall')
           setMessage({ text: '', kind: '' })
-          fetch(`${SELF}?action=uninstall`, { method: 'POST' })
-            .then((res) => res.json().catch(() => null))
+          postSelf({ action: 'uninstall' })
             .then((payload) => {
               setSelfBusy('')
               if (payload && payload.ok) {
@@ -818,18 +824,16 @@ window.__ModuleLoader__.load({
         }
 
         /**
-         * 更新本插件到 GitHub 上的最新版。
+         * 更新本插件到最新版。
          *
-         * 同样走 `self` 端点：它在 profile 目录跑 pnpm 把依赖换成新的。
+         * 目标 spec 由宿主决定（Release 的 tgz 直链）—— 客户端不拼 URL，
+         * 免得白名单在两边各写一份、慢慢走样。
          * 磁盘改动要重启 DSH 才生效。
          */
-        const doUpdate = (version) => {
+        const doUpdate = () => {
           setSelfBusy('update')
           setMessage({ text: '', kind: '' })
-          fetch(`${SELF}?action=update&spec=${encodeURIComponent(`github:WWFZS/dsh-plugin-startup-animation`)}`, {
-            method: 'POST',
-          })
-            .then((res) => res.json().catch(() => null))
+          postSelf({ action: 'update' })
             .then((payload) => {
               setSelfBusy('')
               if (payload && payload.ok) {
@@ -953,11 +957,16 @@ window.__ModuleLoader__.load({
          *
          * 「更新」按钮只在真的有新版本时出现；「卸载」一直在（用户不需要插件时
          * 最需要的就是它）。
+         *
+         * `link:` 安装（开发时把 profile 指向源码目录）不给「更新」：那条依赖
+         * 不指向任何版本，用 tgz 覆盖会把开发链接换成发行包 —— 不是用户想要的。
          */
         const selfPanel = () => {
-          if (!selfState || selfState.installed !== true) return null
+          const info = selfState !== null ? selfState : state && typeof state.self === 'object' ? state.self : null
+          if (!info || info.installed !== true) return null
           const hasUpdate = update !== null && update.updateAvailable === true
           const latest = hasUpdate && typeof update.latest === 'string' ? update.latest : ''
+          const linked = typeof info.spec === 'string' && info.spec.startsWith('link:')
           return h(
             'div',
             { className: 'dsa-set-self' },
@@ -968,14 +977,14 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { className: 'dsa-set-right' },
-                hasUpdate && latest !== ''
+                hasUpdate && latest !== '' && !linked
                   ? h(
                       'button',
                       {
                         type: 'button',
                         className: 'dsa-set-btn',
                         disabled: selfBusy !== '' || busy,
-                        onClick: () => doUpdate(latest),
+                        onClick: doUpdate,
                       },
                       selfBusy === 'update' ? t('updating') : t('updateNow').replace('{version}', latest),
                     )
