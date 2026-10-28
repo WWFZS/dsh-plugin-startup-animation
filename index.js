@@ -75,6 +75,31 @@ export const VERSION = (() => {
   return '0.0.0'
 })()
 
+/**
+ * 磁盘上**实际安装的**版本号（每次实时读 package.json）。
+ *
+ * 为什么不能只用上面的 `VERSION`：那个常量在模块加载时读一次就固定了。
+ * 用户点「一键更新」之后，磁盘上的清单已经换成新版，但**运行中的进程**还是旧代码
+ * —— `VERSION` 仍是旧值，于是 /update 一直拿旧版本去和 GitHub 比，界面就永远停在
+ * 「v1.12.1 · 更新到 1.12.2」，用户以为没更新成功，反复点。
+ *
+ * 用户问"我装的是哪个版本"，答案在磁盘上。读失败才回落 `VERSION`
+ * （正常安装不会失败，失败说明包被改动过）。
+ *
+ * @param {string} packageRoot 包根目录。
+ * @returns {string} 版本号。
+ */
+export function installedVersion(packageRoot) {
+  try {
+    const raw = fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')
+    const parsed = JSON.parse(raw)
+    if (typeof parsed.version === 'string' && parsed.version !== '') return parsed.version
+  } catch {
+    /* 回落到加载时的版本 */
+  }
+  return VERSION
+}
+
 /** 素材路由（页面侧用根相对路径引用，与参考实现一致，桌面壳同样可达）。 */
 export const ASSET_ROUTE = '/dsh-startup-animation/asset'
 
@@ -1663,8 +1688,8 @@ export function manageStatus(options) {
     : []
   return {
     ok: true,
-    /** 当前安装的版本（唯一来源：package.json）。设置页标题旁的小字用它。 */
-    version: VERSION,
+    /** 当前**安装的**版本（实时读 package.json；更新后不必重启即可显示新版本）。 */
+    version: installedVersion(options.packageRoot),
     /** 更新检查所需的仓库信息；前端只用它拼 GitHub 链接，不做任何写操作。 */
     repo: REPO_URL,
     releasesUrl: `${REPO_URL}/releases`,
@@ -2442,19 +2467,22 @@ export function apply(ctx) {
               return
             }
             const force = requestFlag(req, 'force')
+            // 用**磁盘上**的版本，不是内存里的 VERSION：更新完（磁盘已换新、进程没重启）
+            // 时前者是用户真正装上的版本，后者还停在旧值 —— 用旧的比就会一直喊"有新版本"。
+            const current = installedVersion(packageRoot)
             // 网络失败不抛：checkForUpdate 已经把任何异常归一成 reachable:false。
-            void checkForUpdate({ currentVersion: VERSION, repoUrl: REPO_URL, force })
+            void checkForUpdate({ currentVersion: current, repoUrl: REPO_URL, force })
               .then((result) => {
-                reply(res, 200, { ok: true, version: VERSION, repo: REPO_URL, ...result })
+                reply(res, 200, { ok: true, version: current, repo: REPO_URL, ...result })
               })
               .catch((error) => {
                 reply(res, 200, {
                   ok: true,
-                  version: VERSION,
+                  version: current,
                   repo: REPO_URL,
                   reachable: false,
                   reason: describe(error),
-                  current: VERSION,
+                  current,
                   latest: null,
                   updateAvailable: false,
                 })
