@@ -44,13 +44,13 @@ PNG / JPG / MP3。声音有两个彼此独立的开关：视频自己的音轨�
 
 ## 界面预览
 
-**视频素材库** —— 分类页签、卡片点选即用、内置/上传来源标记：
+**视频素材库** —— 卡片点选即用，来源直接标在卡片上（内置 / 上传），当前在用的那张标「使用中」：
 
-<img src="docs/library.jpg" width="520" height="400" alt="视频素材库">
+<img src="docs/library.jpg" width="520" height="268" alt="视频素材库">
 
-**壁纸素材库** —— 选中即生效，卡片左下角标出来源（内置 / 上传）：
+**壁纸素材库** —— 同样点卡片即生效，来源标记同上：
 
-<img src="docs/library-wallpapers.jpg" width="520" alt="壁纸素材库">
+<img src="docs/library-wallpapers.jpg" width="520" height="268" alt="壁纸素材库">
 
 ## 安装
 
