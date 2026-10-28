@@ -29,3 +29,7 @@ tools/push-commit.mjs
 .env.*
 *.token
 *.secret
+
+# 本地 GitHub 令牌：永不进公开仓库
+*令牌*
+

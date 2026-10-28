@@ -3,8 +3,9 @@
  *
  * **一个** settings.section 条目（侧栏只显示「启动动画」），页面自上而下：
  *   1. 设置区（常驻）：总开关、声音、展示时长（共用主配置，3–15 秒）、当前素材预览 + 恢复默认；
- *   2. 分类切换器 [MP4 | 壁纸]；
+ *   2. 分类切换器 [MP4 | 壁纸 | 音频 | 更新公告]；
  *   3. 分类区：上传（按文件类型自动归入本分类）+ 该分类素材**卡片网格**（点卡片即用，悬停出删除）。
+ *      「更新公告」不是素材分类：它渲染 `/update` 顺手带回的 Release 正文（parseReleaseNotes）。
  *
  * 素材**只在** MP4 / 壁纸卡片里选用：上传只入库不生效，点卡片才写入配置。
  * 删除语义：内置素材 = 从列表隐藏（包内文件保留）；上传素材 = 真删文件。
@@ -83,6 +84,9 @@ window.__ModuleLoader__.load({
       updateChecking: '检查更新中…',
       updateLatest: '已是最新',
       updateUnknown: '检查不到更新',
+      // ── 更新公告（第四个页签；正文来自 /update 带回的 Release body）──
+      catRelease: '更新公告',
+      annHead: 'v{version} 更新了什么',
       // ── 卸载 / 更新（v1.11.0）──
       uninstall: '卸载插件',
       uninstallConfirm: '确认卸载？插件会从 DSH 里移除，需要重启 DSH 才完全生效。你的设置与上传素材会保留在磁盘上。',
@@ -152,6 +156,9 @@ window.__ModuleLoader__.load({
       updateChecking: 'Checking for updates…',
       updateLatest: 'Up to date',
       updateUnknown: 'Update check unavailable',
+      // ── What's new (fourth tab; body comes from the Release notes /update returns) ──
+      catRelease: "What's new",
+      annHead: 'What changed in v{version}',
       // ── Uninstall / update (v1.11.0) ──
       uninstall: 'Uninstall plugin',
       uninstallConfirm:
@@ -255,6 +262,13 @@ window.__ModuleLoader__.load({
 .dsa-set-card:hover .dsa-set-aplay, .dsa-set-card:focus-within .dsa-set-aplay, .dsa-set-aplay[data-on="1"] { display: flex; }
 .dsa-set-aplay:hover { background: var(--dsw-alias-brand-primary); }
 .dsa-set-aplay:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+/* ── 更新公告（Release 正文渲染：抬头 + 小标题 + 要点条目）── */
+.dsa-set-ann { display: flex; flex-direction: column; gap: 6px; max-width: 720px; }
+.dsa-set-ann-head { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.dsa-set-ann-h { font-size: 13px; font-weight: 600; color: var(--dsw-alias-label-primary); }
+.dsa-set-ann-item { position: relative; padding-left: 15px; font-size: 13px; line-height: 1.55; color: var(--dsw-alias-label-secondary); }
+.dsa-set-ann-item::before { content: ''; position: absolute; left: 4px; top: 8px; width: 4px; height: 4px; border-radius: 50%; background: var(--dsw-alias-brand-primary); }
+.dsa-set-ann-text { font-size: 13px; line-height: 1.55; color: var(--dsw-alias-label-secondary); }
 `
 
     /**
@@ -597,7 +611,62 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 「启动动画」页：常驻设置区 + 下方 [MP4|壁纸] 分类切换器与素材列表。
+     * GitHub Release 正文（markdown）→ 「更新公告」要渲染的行。
+     *
+     * 公告内容**不在代码里抄一份**：Release 正文就是更新记录的唯一事实来源，
+     * `/update` 检查更新时顺手把它带回来（不额外发请求），这里只做三件事：
+     *   1. 去掉 markdown 装饰（标题符号、加粗、行内代码、链接、图片）——设置页不渲染富文本；
+     *   2. 丢掉代码块与表格：公告是"这次改了什么"，命令示例属于安装说明；
+     *   3. 碰到「安装 / Install」标题就停 —— 后面是下载链接，不是本次更新内容。
+     * Release 标题行（`开机动画 v1.12.0`）与面板抬头重复，跳过。
+     *
+     * 解析不出内容（离线、还没有 Release、正文为空）返回 []，调用方按
+     * "检查不到更新"显示 —— 公告是锦上添花，不该让设置页看起来像坏了。
+     *
+     * @param {string} [raw] Release 正文。
+     * @returns {{ kind: 'head' | 'item' | 'text', text: string }[]} 渲染行。
+     */
+    function parseReleaseNotes(raw) {
+      /** 去 markdown 装饰，只留可读文字。 */
+      const plain = (text) =>
+        text
+          .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+          .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+          .replace(/`([^`]*)`/g, '$1')
+          .replace(/\*\*([^*]+)\*\*/g, '$1')
+          .replace(/(^|[^*])\*([^*]+)\*/g, '$1$2')
+          .replace(/<[^>]+>/g, '')
+          .trim()
+
+      const lines = []
+      let inFence = false
+      for (const line of String(raw ?? '').split(/\r?\n/)) {
+        const text = line.trim()
+        if (text.startsWith('```')) {
+          inFence = !inFence
+          continue
+        }
+        if (inFence || text === '') continue
+        const heading = /^#{1,6}\s+(.*)$/.exec(text)
+        if (heading !== null) {
+          const title = plain(heading[1])
+          // 注意：**不能用 \b** —— 中文字符不是"词"，`安装` 后面接行尾没有词边界。
+          if (/^(安装|install)/i.test(title)) break
+          if (/^(开机动画|startup animation)\s*v\d/i.test(title)) continue
+          if (title !== '') lines.push({ kind: 'head', text: title })
+          continue
+        }
+        if (text.startsWith('|')) continue // 表格行：公告里不占位置
+        const bullet = /^[-*+]\s+(.*)$/.exec(text) ?? /^\d+[.)]\s+(.*)$/.exec(text)
+        const body = bullet === null ? plain(text) : plain(bullet[1])
+        if (body === '' || /^https?:\/\/\S+$/.test(body)) continue
+        lines.push({ kind: bullet === null ? 'text' : 'item', text: body })
+      }
+      return lines
+    }
+
+    /**
+     * 「启动动画」页：常驻设置区 + 下方 [MP4|壁纸|音频|更新公告] 分类切换器与内容面板。
      * @param {(key: string) => string} t 翻译。
      * @returns {React.ComponentType} 页面组件。
      */
@@ -889,6 +958,8 @@ window.__ModuleLoader__.load({
         const activeAudio = state ? state.audioFile : ''
         const categoryLabel = category === 'mp4' ? t('catMp4') : category === 'wall' ? t('catWall') : t('catAudio')
         const isAudioCat = category === 'audio'
+        // 第四个页签不是素材分类：它没有上传、没有卡片，内容是 /update 带回的 Release 正文。
+        const isReleaseCat = category === 'release'
 
         /**
          * 标题旁的版本小字。
@@ -1173,6 +1244,40 @@ window.__ModuleLoader__.load({
                   ),
         )
 
+        /**
+         * 更新公告面板：渲染 `/update` 带回的 Release 正文。
+         *
+         * 三种安静状态，全用已有的版本检查文案，不新增报错样式：
+         *   - 还在查 → "检查更新中…"；查不到正文（离线/无 Release）→ "检查不到更新"；
+         *   - 查到了 → 抬头标出**是哪一版**（可能比本机新，正是值得看公告的时刻），
+         *     下面按 Release 正文原样分节列要点。
+         */
+        const noteLines = update === null ? [] : parseReleaseNotes(update.notes)
+        const releasePanel = h(
+          'div',
+          { className: 'dsa-set-panel', role: 'tabpanel', 'aria-label': t('catRelease') },
+          updateChecking
+            ? h('div', { className: 'dsa-set-empty' }, t('updateChecking'))
+            : noteLines.length === 0
+              ? h('div', { className: 'dsa-set-empty' }, t('updateUnknown'))
+              : h(
+                  'div',
+                  { className: 'dsa-set-ann' },
+                  h(
+                    'div',
+                    { className: 'dsa-set-ann-head' },
+                    t('annHead').replace('{version}', String(update.latest ?? '')),
+                  ),
+                  noteLines.map((line, index) =>
+                    line.kind === 'head'
+                      ? h('div', { className: 'dsa-set-ann-h', key: index }, line.text)
+                      : line.kind === 'item'
+                        ? h('div', { className: 'dsa-set-ann-item', key: index }, line.text)
+                        : h('div', { className: 'dsa-set-ann-text', key: index }, line.text),
+                  ),
+                ),
+        )
+
         return h(
           'div',
           { className: 'dsa-set-wrap', 'data-busy': busy ? '1' : '0' },
@@ -1324,7 +1429,7 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
-          // ── 分类切换器：[MP4 | 壁纸 | 音频]（三个独立功能的入口，位于设置区下方）──
+          // ── 分类切换器：[MP4 | 壁纸 | 音频 | 更新公告]（素材三类 + 一个信息页）──
           h(
             'div',
             { className: 'dsa-set-tabs', role: 'tablist', 'aria-label': t('title') },
@@ -1332,6 +1437,7 @@ window.__ModuleLoader__.load({
               { id: 'mp4', label: t('catMp4') },
               { id: 'wall', label: t('catWall') },
               { id: 'audio', label: t('catAudio') },
+              { id: 'release', label: t('catRelease') },
             ].map((entry) =>
               h(
                 'button',
@@ -1341,13 +1447,18 @@ window.__ModuleLoader__.load({
                   className: 'dsa-set-tab',
                   role: 'tab',
                   'aria-selected': category === entry.id ? 'true' : 'false',
-                  onClick: () => setCategory(entry.id),
+                  onClick: () => {
+                    // 手动切过页签就放弃"自动对齐到当前素材"：状态晚到一步
+                    // 会把用户正在看的页签切走（尤其是刚点开更新公告时）。
+                    syncedRef.current = true
+                    setCategory(entry.id)
+                  },
                 },
                 entry.label,
               ),
             ),
           ),
-          categoryPanel,
+          isReleaseCat ? releasePanel : categoryPanel,
           // 上传输入随分类切换 accept。
           h('input', {
             ref: fileRef,

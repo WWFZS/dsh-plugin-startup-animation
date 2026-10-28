@@ -180,6 +180,11 @@ export async function checkForUpdate(options) {
         signal: AbortSignal.timeout(6000),
       })
       let tag = null
+      // Release 正文：设置页「更新公告」的内容源。**不在代码里另抄一份更新记录** ——
+      // 发布说明只在 GitHub Release 上写一次，这里顺手把它带回来（同一次请求，
+      // 不多打一个接口），客户端去掉 markdown 装饰后直接渲染。
+      // 4000 字符是上界：公告是摘要，正文再长也不该把设置页撑成一整页。
+      let notes = ''
       // `answered` 区分"仓库真的还没有 Release"和"请求根本没被正常应答"：
       // 前者是正常状态（新仓库），后者是故障（限流/代理/格式变化）。
       // 两者对用户都只显示"检查不到"，但原因不同，日志和排查靠它。
@@ -188,6 +193,7 @@ export async function checkForUpdate(options) {
         answered = true
         const body = await releaseRes.json()
         tag = typeof body?.tag_name === 'string' ? body.tag_name : null
+        if (typeof body?.body === 'string') notes = body.body.slice(0, 4000)
       } else {
         // 404 = 还没有 Release（正常）；其它状态码说明请求本身有问题。
         if (releaseRes.status === 404) answered = true
@@ -222,6 +228,8 @@ export async function checkForUpdate(options) {
           // 只有"比当前新"才算有更新：本地版本更高（开发中）不该被降级提示。
           updateAvailable: cmp > 0,
           releasesUrl: `${options.repoUrl}/releases`,
+          // 更新公告（只在真的读到 Release 时才有；回退 tags 那条路没有正文）。
+          notes,
         }
       }
     } catch (error) {
