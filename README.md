@@ -28,7 +28,7 @@
 `webServer.register` 提供素材与管理路由。**运行时不依赖任何 npm 包**，浏览器半边只从宿主的
 模块表 `require('react')`，装好即用、无需构建。
 
-开箱自带 **6 段视频 / 7 张壁纸 / 9 段语音**，也支持上传你自己的 MP4 / WebM / GIF /
+开箱自带 **7 段视频 / 7 张壁纸 / 9 段语音**，也支持上传你自己的 MP4 / WebM / GIF /
 PNG / JPG / MP3。素材在设置页里点卡片即用，展示时长可以在 **3–30 秒**之间调；声音有两个
 彼此独立的开关——视频自己的音轨，以及单独的开机音频。
 
@@ -53,6 +53,20 @@ PNG / JPG / MP3。素材在设置页里点卡片即用，展示时长可以在 *
 **壁纸素材库** —— 同样点卡片即生效，来源标记同上：
 
 <img src="docs/library-wallpapers.jpg" width="520" height="268" alt="壁纸素材库">
+
+**实际效果** —— 内置素材选中之后，Harness 启动时看到的就是这些（动图无声；带语音的三段，声音要在设置页里直接预览）：
+
+**《薰衣草花语-等你爱我》** · 24 秒 · 1080p · 带语音
+
+<img src="docs/preview-lavender.gif" width="420" alt="薰衣草花语-等你爱我">
+
+**《剑一》** · 14 秒 · 1080p · 带语音
+
+<img src="docs/preview-jianyi.gif" width="420" alt="剑一">
+
+**《dsh-大肥鱼》** · 8 秒 · 720p · 带语音
+
+<img src="docs/preview-fish.gif" width="420" alt="dsh-大肥鱼">
 
 ## 安装
 
@@ -180,7 +194,7 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 
 | 类型 | 格式 | 说明 |
 |---|---|---|
-| 视频 | `mp4` `m4v` `webm` `ogv` `ogg` | 等待期间循环播放。内置为 1080p / 8–16s / faststart（`dsh-大肥鱼` 为 720p）。 |
+| 视频 | `mp4` `m4v` `webm` `ogv` `ogg` | 等待期间循环播放。内置为 1080p / 8–24s / faststart（`dsh-大肥鱼` 为 720p）。 |
 | 图片 | `gif` `apng` `webp` `png` `jpg` `jpeg` | `gif`/`apng`/`webp` 会动；静图带缓慢呼吸缩放。 |
 | 音频 | `mp3` `wav` `m4a` `aac` `flac` `opus` | 仅用于开机音频。 |
 
@@ -190,8 +204,8 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 
 以下全部随包分发，在列表里直接可选：
 
-- **MP4** —— 6 段，全部为 H.264 faststart（可直接流式播放，每段 1.6–6.9 MB）。
-  `dsh-大肥鱼` 与 `剑一` 带语音音轨（打开「视频带声播放」即可听到），另外四段无音轨
+- **MP4** —— 7 段，全部为 H.264 faststart（可直接流式播放，每段 1.6–6.2 MB）。
+  `dsh-大肥鱼`、`剑一`、`薰衣草花语-等你爱我` 带语音音轨（打开「视频带声播放」即可听到），另外四段无音轨
 - **壁纸** —— 7 张，附带预生成的 480px 缩略图供列表使用
 - **音频** —— 9 段语音
 
