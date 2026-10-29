@@ -27,22 +27,36 @@ const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const mp4Dir = path.join(packageRoot, 'builtin', 'MP4')
 const SUFFIX = '.web.mp4'
 const MAX_LONG_EDGE = 1920
-/** 内置素材只做 8 秒：展示时长可调 3–30 秒，更长是靠循环铺满的，压那么长纯属白占体积。 */
+/** 内置素材默认只做 8 秒：展示时长可调 3–30 秒，更长是靠循环铺满的，压那么长纯属白占体积。 */
 const MAX_SECONDS = 8
+
+/**
+ * 个别素材越过默认上限。
+ *
+ * 1.12.4 起展示时长能设到 30 秒，"长素材"不再只是浪费 —— 有的素材本身就是一条完整叙事
+ * （《550C》16 秒、《剑一》14 秒），截到 8 秒会把结尾的落版切掉。按素材名单独放宽，
+ * 不动全局上限，免得哪天有人塞个 4K 母版进来把包撑爆。
+ */
+const SECONDS_OVERRIDE = new Map([
+  ['550C-赛博控制台', 16],
+  ['剑一', 14],
+])
 const force = process.argv.includes('--force')
 
 /**
  * 哪些内置视频要**保留音轨**。
  *
  * 默认去音轨：开机动画是装饰画面，"视频声音"本来就不是它的职责，去掉能省一大截体积。
- * 但有的素材本身就是在说话（"欢迎回来"这类），去掉音轨等于把内容删了 ——
+ * 但有的素材本身就是在说话（带对白/旁白的那种），去掉音轨等于把内容删了 ——
  * 这类必须保留。按文件名列在这里，重跑构建时不会被无声抹掉。
  */
-const KEEP_AUDIO = new Set(['dsh-大肥鱼', '欢迎回来'])
+const KEEP_AUDIO = new Set(['dsh-大肥鱼', '剑一'])
 
 /** 用 ffmpeg 压一版网页友好的 faststart mp4（按素材决定是否保留音轨）。 */
 function transcode(source, target) {
-  const keepAudio = KEEP_AUDIO.has(path.parse(source).name)
+  const stem = path.parse(source).name
+  const keepAudio = KEEP_AUDIO.has(stem)
+  const limit = SECONDS_OVERRIDE.get(stem) ?? MAX_SECONDS
   execFileSync(
     'ffmpeg',
     [
@@ -51,7 +65,7 @@ function transcode(source, target) {
       '-y',
       '-i', source,
       ...(keepAudio ? ['-c:a', 'aac', '-b:a', '96k'] : ['-an']),
-      '-t', String(MAX_SECONDS),
+      '-t', String(limit),
       '-vf', `scale='if(gt(iw,ih),min(${MAX_LONG_EDGE},iw),-2)':'if(gt(iw,ih),-2,min(${MAX_LONG_EDGE},ih))'`,
       '-c:v', 'libx264',
       '-profile:v', 'high',
