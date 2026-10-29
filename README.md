@@ -29,7 +29,7 @@
 `webServer.register` 提供素材与管理路由。**没有任何 npm 依赖**，浏览器半边只从宿主的
 模块表 `require('react')`，装好即用、无需构建。
 
-开箱自带 **5 段视频 / 7 张壁纸 / 9 段语音**，也支持上传你自己的 MP4 / WebM / GIF /
+开箱自带 **6 段视频 / 7 张壁纸 / 9 段语音**，也支持上传你自己的 MP4 / WebM / GIF /
 PNG / JPG / MP3。声音有两个彼此独立的开关：视频自己的音轨，以及单独的开机音频。
 
 ## 核心特性
@@ -181,7 +181,7 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 
 | 类型 | 格式 | 说明 |
 |---|---|---|
-| 视频 | `mp4` `m4v` `webm` `ogv` `ogg` | 等待期间循环播放。内置为 1080p / 5–8s / faststart（`dsh-大肥鱼` 与 `欢迎回来` 为 720p）。 |
+| 视频 | `mp4` `m4v` `webm` `ogv` `ogg` | 等待期间循环播放。内置为 1080p / 5–16s / faststart（`dsh-大肥鱼` 与 `欢迎回来` 为 720p）。 |
 | 图片 | `gif` `apng` `webp` `png` `jpg` `jpeg` | `gif`/`apng`/`webp` 会动；静图带缓慢呼吸缩放。 |
 | 音频 | `mp3` `wav` `m4a` `aac` `flac` `opus` | 仅用于开机音频。 |
 
@@ -191,8 +191,8 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 
 以下全部随包分发，在列表里直接可选：
 
-- **MP4** —— 5 段，全部为 H.264 faststart（可直接流式播放，每段 1.6–6.6 MB）。
-  `dsh-大肥鱼` 与 `欢迎回来` 带语音音轨（打开「视频带声播放」即可听到），另外三段无音轨
+- **MP4** —— 6 段，全部为 H.264 faststart（可直接流式播放，每段 1.6–6.9 MB）。
+  `dsh-大肥鱼` 与 `欢迎回来` 带语音音轨（打开「视频带声播放」即可听到），另外四段无音轨
 - **壁纸** —— 7 张，附带预生成的 480px 缩略图供列表使用
 - **音频** —— 9 段语音
 
