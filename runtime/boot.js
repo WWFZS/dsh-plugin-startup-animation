@@ -223,7 +223,8 @@
 
     var fadeMs = num(cfg.fadeMs, 600, 100, 6000)
     var skipFadeMs = num(cfg.skipFadeMs, 240, 60, 2000)
-    var minMs = num(cfg.minMs, 900, 0, 10000)
+    // minMs 的上界 = 展示时长上限（设置页 3–30 秒；素材模式的 minMs 就是 durationSec×1000）。
+    var minMs = num(cfg.minMs, 900, 0, 30000)
     var holdMs = num(cfg.holdMs, 20000, 2000, 120000)
     var holdGraceMs = num(cfg.holdGraceMs, 4000, 0, 30000)
     var noFrameMs = num(cfg.noFrameMs, 10000, 1500, 30000)

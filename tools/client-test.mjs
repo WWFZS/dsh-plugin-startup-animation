@@ -329,6 +329,25 @@ await check('"视频带声播放" 写回 sound', async () => {
   assert.deepEqual(JSON.parse(post.init.body), { sound: false })
 })
 
+await check('展示时长滑杆 3–30 秒：拖过顶 → 夹到 30 并写回', async () => {
+  const { render, calls } = await loadClient()
+  const tree = await render()
+  const range = findAll(tree, 'dsa-set-range').find((el) => el.props['aria-label'] === '展示时长')
+  assert.ok(range, '找不到展示时长滑杆')
+  assert.equal(range.props.min, 3, `下界不是 3 秒：${range.props.min}`)
+  assert.equal(range.props.max, 30, `上界不是 30 秒：${range.props.max}`)
+  range.props.onChange({ target: { value: '99' } })
+  // 读数要立刻跟上，否则界面显示的秒数和真正生效的不一致。
+  // 必须在提交之前断言：回包会触发"按状态回读"的 effect，把读数拨回 fixture 的值。
+  const label = texts(await render()).find((text) => /^\d+ 秒$/.test(text))
+  assert.equal(label, '30 秒', `读数没更新：${label}`)
+  // 拖动停手 350ms 才提交一次（防抖），等它落地。
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.ok(post, '拖动滑杆没有发 POST')
+  assert.deepEqual(JSON.parse(post.init.body), { durationSec: 30 }, '越界值没被夹到 30 秒')
+})
+
 console.log('== 开机音频 ==')
 
 await check('音频页签存在；点音频卡片写回 useAudio', async () => {
