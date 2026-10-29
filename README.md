@@ -60,9 +60,21 @@ PNG / JPG / MP3。声音有两个彼此独立的开关：视频自己的音轨�
 
 ## 安装
 
-### 方式一：插件管理器 + 直链（推荐）
+四种方式，任选一种。装好后都在 **设置 → 开机动画** 里配置，首次安装完刷新一次页面即可。
 
-DSH 0.2.1+ 自带插件管理器。这条路**不需要 npm，也不需要 git**。
+### 方式一：搜包名（最简单）
+
+插件已发布到 npm，DSH 0.2.1+ 的插件管理器能直接装。
+
+1. 打开 **设置 → 插件**，点 **添加插件**
+2. **插件名**填 `dsh-plugin-startup-animation`
+3. 点 **安装**，完成后刷新页面
+
+包名也可以在 [npm 页面](https://www.npmjs.com/package/dsh-plugin-startup-animation) 上核对版本。
+
+### 方式二：直链（不走 npm）
+
+GitHub 慢、或想直接从 Release 装时用这条。这条路**不需要 npm，也不需要 git**。
 
 1. 打开 **设置 → 插件**，点 **添加插件**
 2. **插件名**填下面这条地址
@@ -77,22 +89,26 @@ https://github.com/WWFZS/dsh-plugin-startup-animation/releases/latest/download/d
 **文件的绝对路径**填进「插件名」（例如 `C:\Users\你\Downloads\dsh-plugin-startup-animation.tgz`），
 效果一样。
 
-### 方式二：命令行
+### 方式三：命令行
 
 ```sh
+# 从 npm（profile 需要能访问 npm registry）
+dsh plugin --profile <你的 profile> add dsh-plugin-startup-animation
+
+# 或从 GitHub 直链
 dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-startup-animation/releases/latest/download/dsh-plugin-startup-animation.tgz
 ```
 
 本地 `.tgz` 文件或本地目录路径同样可以，把最后一个参数换掉即可。然后重启 `dsh`。
 
-### 方式三：从源码
+### 方式四：从源码
 
 ```sh
 git clone https://github.com/WWFZS/dsh-plugin-startup-animation.git
 dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 ```
 
-> **官方 DSH 桌面版**：请从应用内的 **设置 → 插件** 安装（即方式一）。那个 profile
+> **官方 DSH 桌面版**：请从应用内的 **设置 → 插件** 安装（方式一或方式二）。那个 profile
 > 归应用的插件管理器管，命令行改动无效。
 
 ## 怎么用
