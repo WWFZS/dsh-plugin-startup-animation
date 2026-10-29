@@ -9,7 +9,7 @@
 <a href="https://github.com/WWFZS/dsh-plugin-startup-animation/releases"><img src="https://img.shields.io/github/v/release/WWFZS/dsh-plugin-startup-animation?style=flat-square&label=VERSION&color=4d6bfe" alt="Version"></a>
 <img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
 <img src="https://img.shields.io/badge/依赖-0%20npm%20包-2ea44f?style=flat-square" alt="No deps">
-<img src="https://img.shields.io/badge/体积-27%20MB-6e7681?style=flat-square" alt="Size">
+<img src="https://img.shields.io/badge/体积-30%20MB-6e7681?style=flat-square" alt="Size">
 <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="License">
 <img src="https://img.shields.io/badge/Author-WWFZS-8957e5?style=flat-square" alt="Author">
 
@@ -26,11 +26,12 @@
 你等的永远是应用本身，不是动画。
 
 插件通过内核的两个扩展点接入：`webserver/index-inject` 注入覆盖层与样式，
-`webServer.register` 提供素材与管理路由。**没有任何 npm 依赖**，浏览器半边只从宿主的
+`webServer.register` 提供素材与管理路由。**运行时不依赖任何 npm 包**，浏览器半边只从宿主的
 模块表 `require('react')`，装好即用、无需构建。
 
 开箱自带 **6 段视频 / 7 张壁纸 / 9 段语音**，也支持上传你自己的 MP4 / WebM / GIF /
-PNG / JPG / MP3。声音有两个彼此独立的开关：视频自己的音轨，以及单独的开机音频。
+PNG / JPG / MP3。素材在设置页里点卡片即用，展示时长可以在 **3–30 秒**之间调；声音有两个
+彼此独立的开关——视频自己的音轨，以及单独的开机音频。
 
 ## 核心特性
 
@@ -40,6 +41,8 @@ PNG / JPG / MP3。声音有两个彼此独立的开关：视频自己的音轨�
 - **绝不扣住你** —— 点击、`Esc` / `Enter` / `空格`、或者干等，每条路都能出去
 - **失败即降级** —— 任何一步出错都退回 Harness 原生启动页，不阻塞启动
 - **真实进度条** —— 内核给出启动进度弧就用真实进度，否则走流光
+- **时长自己定** —— 3–30 秒，视频与壁纸共用；点击跳过不受它限制
+- **更新前先看清** —— 设置页的「更新公告」直接显示 Release 说明，不用跳 GitHub
 - **卸载与升级都由你** —— 有新版只提示、你点一下才装；不需要了就卸载
 
 ## 界面预览
@@ -138,8 +141,12 @@ dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 - **已是最新**：只显示 `v1.2.3`（你装的那一版），不打扰你。
 - **有新版**：变成 `v1.2.3 · 更新到 1.2.4` 按钮，点一下**就地更新**（下载 Release 里的
   tgz、替换自己的文件），完成后重启 DSH 即可——不用去 GitHub 手动下包。
+  更新成功后标题立刻变成新版本号，不会继续挂着"更新到 x"。
 - **检查不到**：离线、防火墙拦了、或者 GitHub 不可达时，就只是一枚安静的版本号。
   它**不会变成报错状态**——更新检查是锦上添花，不是插件的依赖。
+
+**不管你是从 npm、直链还是源码装的，一键更新都从 GitHub Release 取包**——那条 tgz 直链是
+唯一的更新来源，所以哪怕当初用 `npm i` 装的，点了更新之后也会切到 Release 版本。
 
 设置页还有一个 **更新公告** 页签：内容就是最新版 Release 的发布说明（同一次更新检查
 顺手带回来，不另发请求），装没装新版都能先看清"这次改了什么"；取不到就安静地显示
@@ -175,7 +182,7 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 ```
 
 `file` 可以写 `builtin/...` 包内相对路径，也可以写你自己素材的绝对路径。
-其余键都有合理默认值，见 [`index.js`](index.js) 的 `DEFAULT_CONFIG`。
+`durationSec` 默认 **5**、范围 3–30；其余键都有合理默认值，见 [`index.js`](index.js) 的 `DEFAULT_CONFIG`。
 
 ## 支持的素材
 
@@ -252,6 +259,7 @@ node tools/client-test.mjs           # 设置页行为测试（React 垫片）
 node tools/boot-css-test.mjs         # 开机动画样式测试（真浏览器）
 node tools/host-smoke.mjs            # 用真实路由处理器跑一遍 HTTP
 node tools/make-thumbs.mjs           # 重新生成列表缩略图（需要 ffmpeg）
+node tools/make-posters.mjs          # 重新生成视频卡片封面（需要浏览器）
 node tools/optimize-builtin.mjs      # 重新生成 faststart 变体（需要 ffmpeg）
 ```
 
