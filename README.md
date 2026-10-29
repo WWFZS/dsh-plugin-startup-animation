@@ -54,12 +54,6 @@ PNG / JPG / MP3。素材在设置页里点卡片即用，展示时长可以在 *
 
 <img src="docs/library-wallpapers.jpg" width="520" height="268" alt="壁纸素材库">
 
-**开机动画效果** —— 内置《欢迎回来》（720p / 8 秒 / 带语音音轨）选中后，Harness 启动时看到的就是这一段：
-
-<img src="docs/preview-welcome.gif" width="440" alt="《欢迎回来》开机动画效果">
-
-完整版（含语音）在 [`builtin/MP4/欢迎回来.web.mp4`](builtin/MP4/欢迎回来.web.mp4)。
-
 ## 安装
 
 四种方式，任选一种。装好后都在 **设置 → 开机动画** 里配置，首次安装完刷新一次页面即可。
@@ -186,7 +180,7 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 
 | 类型 | 格式 | 说明 |
 |---|---|---|
-| 视频 | `mp4` `m4v` `webm` `ogv` `ogg` | 等待期间循环播放。内置为 1080p / 5–16s / faststart（`dsh-大肥鱼` 与 `欢迎回来` 为 720p）。 |
+| 视频 | `mp4` `m4v` `webm` `ogv` `ogg` | 等待期间循环播放。内置为 1080p / 8–16s / faststart（`dsh-大肥鱼` 为 720p）。 |
 | 图片 | `gif` `apng` `webp` `png` `jpg` `jpeg` | `gif`/`apng`/`webp` 会动；静图带缓慢呼吸缩放。 |
 | 音频 | `mp3` `wav` `m4a` `aac` `flac` `opus` | 仅用于开机音频。 |
 
@@ -197,7 +191,7 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 以下全部随包分发，在列表里直接可选：
 
 - **MP4** —— 6 段，全部为 H.264 faststart（可直接流式播放，每段 1.6–6.9 MB）。
-  `dsh-大肥鱼` 与 `欢迎回来` 带语音音轨（打开「视频带声播放」即可听到），另外四段无音轨
+  `dsh-大肥鱼` 与 `剑一` 带语音音轨（打开「视频带声播放」即可听到），另外四段无音轨
 - **壁纸** —— 7 张，附带预生成的 480px 缩略图供列表使用
 - **音频** —— 9 段语音
 

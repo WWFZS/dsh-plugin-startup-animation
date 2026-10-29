@@ -823,7 +823,7 @@ await check('内置视频必须是 H.264（HEVC 在 Chromium 里解不了 → �
   }
 })
 await check('视频卡片的封面不能固定取首帧（淡入素材会全黑）', () => {
-  // 回归：《大肥鱼-欢迎回来》从黑场淡入，t=0.1 平均亮度只有 16（约等于纯黑），
+  // 回归：素材从黑场淡入时 t=0.1 平均亮度只有 16（约等于纯黑），
   // 卡片看起来像"素材坏了"。修法是逐帧采样挑最亮的一帧，而不是钉死一个时间点。
   const src = fs.readFileSync(new URL('./client.js', import.meta.url), 'utf8')
   assert.ok(src.includes('pickCoverTime'), '缺少封面挑帧函数')
