@@ -48,7 +48,7 @@ PNG / JPG / MP3。素材在设置页里点卡片即用，展示时长可以在 *
 
 **视频素材库** —— 卡片点选即用，来源直接标在卡片上（内置 / 上传），当前在用的那张标「使用中」：
 
-<img src="docs/library.jpg" width="520" height="262" alt="视频素材库">
+<img src="docs/library-videos.jpg" width="520" height="262" alt="视频素材库">
 
 **壁纸素材库** —— 同样点卡片即生效，来源标记同上：
 
