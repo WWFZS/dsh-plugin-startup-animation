@@ -8,8 +8,7 @@
 
 <a href="https://github.com/WWFZS/dsh-plugin-startup-animation/releases"><img src="https://img.shields.io/github/v/release/WWFZS/dsh-plugin-startup-animation?style=flat-square&label=VERSION&color=4d6bfe" alt="Version"></a>
 <img src="https://img.shields.io/badge/DSH-0.2.0%2B-4d6bfe?style=flat-square" alt="DSH">
-<img src="https://img.shields.io/badge/依赖-0%20npm%20包-2ea44f?style=flat-square" alt="No deps">
-<img src="https://img.shields.io/badge/体积-30%20MB-6e7681?style=flat-square" alt="Size">
+<img src="https://img.shields.io/badge/运行时-零依赖-2ea44f?style=flat-square" alt="No deps">
 <img src="https://img.shields.io/badge/License-MIT-2ea44f?style=flat-square" alt="License">
 <img src="https://img.shields.io/badge/Author-WWFZS-8957e5?style=flat-square" alt="Author">
 
@@ -138,10 +137,11 @@ dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 
 设置页标题旁有一枚很小的版本号——显示你**实际装上的**版本，直接读包自己的清单。
 
-- **已是最新**：只显示 `v1.2.3`（你装的那一版），不打扰你。
-- **有新版**：变成 `v1.2.3 · 更新到 1.2.4` 按钮，点一下**就地更新**（下载 Release 里的
-  tgz、替换自己的文件），完成后重启 DSH 即可——不用去 GitHub 手动下包。
-  更新成功后标题立刻变成新版本号，不会继续挂着"更新到 x"。
+- **已是最新**：只显示一枚版本号，不打扰你。
+- **有新版**：版本号整块变成一个按钮，形如 `v1.2.3 · 更新到 1.2.4`（左边是现在装的、
+  右边是可更新的），点一下**就地更新**（下载 Release 里的 tgz、替换自己的文件），
+  完成后重启 DSH 即可——不用去 GitHub 手动下包。
+  更新成功后标题立刻换成新版本号，不会继续挂着"更新到 x"。
 - **检查不到**：离线、防火墙拦了、或者 GitHub 不可达时，就只是一枚安静的版本号。
   它**不会变成报错状态**——更新检查是锦上添花，不是插件的依赖。
 
@@ -228,7 +228,7 @@ Harness"来处理：
 | 运行期其它任何意外 | 每条失败路径都回落到原生启动页——覆盖层永远不允许阻塞启动 |
 
 声明的兼容范围（`engines.dsh`，并镜像一份到 `dsh.engines`，让插件管理器和市场从
-任一位置都能读到）是 `>=0.2.0`。插件**没有任何 npm 依赖**，浏览器半边只从宿主的模块表
+任一位置都能读到）是 `>=0.2.0`。插件**运行时不依赖任何 npm 包**，浏览器半边只从宿主的模块表
 `require('react')`——不存在"随包打进了某个会和内核版本脱节的库"这种隐患。
 
 启动日志会同时写明插件版本和（能读到时）宿主内核版本。万一哪次升级把动画弄没了，
@@ -239,7 +239,7 @@ Harness"来处理：
 - DeepSeek Harness **0.2.0+**（Web 界面）
 - Node.js ≥ 22.12.0（跟随 Harness 自带的运行时即可）
 
-插件**没有任何 npm 依赖**，安装时也不需要构建——纯 ESM + 静态素材。
+插件**运行时不依赖任何 npm 包**，安装时也不需要构建——纯 ESM + 静态素材。
 
 ## 卸载
 
