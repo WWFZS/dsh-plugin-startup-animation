@@ -245,7 +245,7 @@ console.log('  ok   内置素材 tombstone + 拒绝再取流')
 // ── 9. 时长 / 开关 ──
 const dur = await postJson({ durationSec: 99 })
 assert.equal(dur.status, 200)
-assert.equal(dur.json().durationSec, 15)
+assert.equal(dur.json().durationSec, 30)
 const bad = await postJson({ durationSec: 'x' })
 assert.equal(bad.status, 400)
 const off = await postJson({ enabled: false })
@@ -323,7 +323,7 @@ console.log('  ok   GET ?cfg=1 只回配置、不扫素材库')
 // ── 15. 配置写入是原子的：不会留下半截 JSON ──
 {
   const settings = path.join(process.env.DSH_HOME, 'startup-animation.json')
-  for (let i = 0; i < 20; i += 1) await postJson({ durationSec: (i % 12) + 3 })
+  for (let i = 0; i < 20; i += 1) await postJson({ durationSec: (i % 28) + 3 })
   const text = fs.readFileSync(settings, 'utf8')
   const parsed = JSON.parse(text)
   assert.ok(parsed.boot, '配置被写坏')

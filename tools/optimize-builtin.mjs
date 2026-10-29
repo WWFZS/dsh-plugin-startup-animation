@@ -27,7 +27,7 @@ const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const mp4Dir = path.join(packageRoot, 'builtin', 'MP4')
 const SUFFIX = '.web.mp4'
 const MAX_LONG_EDGE = 1920
-/** 开机动画展示时长上限是 15 秒（UI 可调 3–15），素材再长就只是白占体积。 */
+/** 内置素材只做 8 秒：展示时长可调 3–30 秒，更长是靠循环铺满的，压那么长纯属白占体积。 */
 const MAX_SECONDS = 8
 const force = process.argv.includes('--force')
 

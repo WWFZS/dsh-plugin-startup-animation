@@ -199,16 +199,23 @@ try {
     writeHomeBootPatch(home, {}, ['file'])
   })
 
-  console.log('== 展示时长（共用主配置，3–15 秒）==')
-  await check('clampDurationSec 夹到 3–15', () => {
+  console.log('== 展示时长（共用主配置，3–30 秒）==')
+  await check('clampDurationSec 夹到 3–30', () => {
     assert.equal(clampDurationSec(2), 3)
     assert.equal(clampDurationSec(-5), 3)
-    assert.equal(clampDurationSec(16), 15)
-    assert.equal(clampDurationSec(99), 15)
+    assert.equal(clampDurationSec(16), 16)
+    assert.equal(clampDurationSec(31), 30)
+    assert.equal(clampDurationSec(999), 30)
     assert.equal(clampDurationSec(7), 7)
     assert.equal(clampDurationSec(4.4), 4)
     assert.equal(clampDurationSec('x'), 5)
     assert.equal(clampDurationSec(undefined), 5)
+  })
+  await check('boot.js 的 minMs 上界跟展示时长走（30000ms）', () => {
+    // 回归：素材模式的 minMs = durationSec×1000，而运行时那道上界曾是 10000 ——
+    // 于是 11 秒以上的设置在真机上只生效到 10 秒，界面却照常显示所选秒数。
+    const boot = fs.readFileSync(new URL('./runtime/boot.js', import.meta.url), 'utf8')
+    assert.ok(boot.includes('num(cfg.minMs, 900, 0, 30000)'), 'boot.js 的 minMs 上界没跟着改到 30000')
   })
   await check('素材模式 minMs = durationSec × 1000（视频与壁纸同一键）', () => {
     const fakePng = path.join(tmp, 'wall.png')
@@ -237,9 +244,9 @@ try {
     assert.equal(r.client.durationSec, 5, '未发布的旧分类键仍在生效')
     writeHomeBootPatch(home, {}, ['videoSec'])
   })
-  await check('status 回显 durationSec', () => {
-    writeHomeBootPatch(home, { durationSec: 15 })
-    assert.equal(manageStatus(opts).durationSec, 15)
+  await check('status 回显 durationSec（含曾经上限之外的 20 秒）', () => {
+    writeHomeBootPatch(home, { durationSec: 20 })
+    assert.equal(manageStatus(opts).durationSec, 20)
     writeHomeBootPatch(home, {}, ['durationSec'])
   })
   await check('status 携带 version / repo / releasesUrl', () => {

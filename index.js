@@ -328,7 +328,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   enabled: true,
   /** 动画素材：'' = 原版标配（不显示动画）；绝对路径或包内相对路径 = 自己的文件。 */
   file: '',
-  /** 展示时长（秒）：MP4 与壁纸素材共用的主配置，用户可调 3–15。 */
+  /** 展示时长（秒）：MP4 与壁纸素材共用的主配置，用户可调 3–30。 */
   durationSec: 5,
   /** 启动画面上的大标题；'' = 运行时用内置文案。 */
   title: 'DeepSeek Harness',
@@ -453,16 +453,16 @@ function pickString(value, fallback) {
 }
 
 /**
- * 展示时长夹取：3–15 秒（含），四舍五入取整；非法值回退默认 5。
+ * 展示时长夹取：3–30 秒（含），四舍五入取整；非法值回退默认 5。
  * @param {unknown} value 原始值。 @param {number} [fallback] 默认值。
- * @returns {number} 3..15 的整数秒。
+ * @returns {number} 3..30 的整数秒。
  */
 export function clampDurationSec(value, fallback = 5) {
   const n = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(n)) return fallback
   const rounded = Math.round(n)
   if (rounded < 3) return 3
-  if (rounded > 15) return 15
+  if (rounded > 30) return 30
   return rounded
 }
 
@@ -628,13 +628,13 @@ export function loadConfig(options) {
     }
   }
 
-  // 共用主配置：MP4 与壁纸素材的最短展示时长 = durationSec（3–15 秒，点击跳过不受它限制）。
+  // 共用主配置：MP4 与壁纸素材的最短展示时长 = durationSec（3–30 秒，点击跳过不受它限制）。
   // 内置 CSS 动画维持短 minMs（够看出动画即可，防止一闪而过）。
   const durationSec = clampDurationSec(raw.durationSec, d.durationSec)
   const minMs =
     mode === 'video' || mode === 'image'
       ? durationSec * 1000
-      : clampNumber(raw.minMs, d.minMs, 0, 10000)
+      : clampNumber(raw.minMs, d.minMs, 0, 30000)
 
   const client = {
     version: VERSION,
@@ -1696,7 +1696,7 @@ export function manageStatus(options) {
     enabled: client.enabled === true,
     sound: client.sound === true,
     mode: client.mode,
-    /** 展示时长（秒，3–15）：MP4 与壁纸共用的主配置。 */
+    /** 展示时长（秒，3–30）：MP4 与壁纸共用的主配置。 */
     durationSec: client.durationSec,
     custom: assetPath !== undefined,
     // 界面上显示的名字用"逻辑名"：内置视频分发的是 *.web.mp4 变体，但对用户来说
@@ -2233,10 +2233,10 @@ export function apply(ctx) {
                     }
                     patch.audioVolume = Math.min(1, Math.max(0, body.audioVolume))
                   }
-                  // 展示时长（秒，共用主配置）：必须是数字，写入前夹到 3–15。
+                  // 展示时长（秒，共用主配置）：必须是数字，写入前夹到 3–30。
                   if (body.durationSec !== undefined) {
                     if (typeof body.durationSec !== 'number' || !Number.isFinite(body.durationSec)) {
-                      reply(res, 400, { ok: false, error: '展示时长必须是 3–15 的数字（秒）' })
+                      reply(res, 400, { ok: false, error: '展示时长必须是 3–30 的数字（秒）' })
                       return
                     }
                     patch.durationSec = clampDurationSec(body.durationSec)

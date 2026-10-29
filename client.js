@@ -2,7 +2,7 @@
  * startup-animation —— 浏览器半边：设置页。
  *
  * **一个** settings.section 条目（侧栏只显示「启动动画」），页面自上而下：
- *   1. 设置区（常驻）：总开关、声音、展示时长（共用主配置，3–15 秒）、当前素材预览 + 恢复默认；
+ *   1. 设置区（常驻）：总开关、声音、展示时长（共用主配置，3–30 秒）、当前素材预览 + 恢复默认；
  *   2. 分类切换器 [MP4 | 壁纸 | 音频 | 更新公告]；
  *   3. 分类区：上传（按文件类型自动归入本分类）+ 该分类素材**卡片网格**（点卡片即用，悬停出删除）。
  *      「更新公告」不是素材分类：它渲染 `/update` 顺手带回的 Release 正文（parseReleaseNotes）。
@@ -789,7 +789,7 @@ window.__ModuleLoader__.load({
 
         // 拖动只改本地读数，停手 350ms 后提交一次 —— 不把每个像素都打成请求。
         const onSlide = (value) => {
-          const next = Math.min(15, Math.max(3, Math.round(Number(value))))
+          const next = Math.min(30, Math.max(3, Math.round(Number(value))))
           setSec(next)
           if (commitRef.current !== null) clearTimeout(commitRef.current)
           commitRef.current = setTimeout(() => {
@@ -1446,7 +1446,7 @@ window.__ModuleLoader__.load({
                 type: 'range',
                 className: 'dsa-set-range',
                 min: 3,
-                max: 15,
+                max: 30,
                 step: 1,
                 value: sec,
                 'aria-label': t('duration'),
