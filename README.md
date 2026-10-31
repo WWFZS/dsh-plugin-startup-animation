@@ -193,8 +193,23 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
   文件名就是动作名
 - 素材已经去掉绿幕和脚下的地面投影，所以它是**悬浮**在界面上的
 
-女仆形象是社区二创作品，授权为 **CC BY-NC-SA 4.0**（禁止商用）；再分发请保留原作者地址
-[PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)。
+#### 形象与授权
+
+宠物形象来自社区二创项目 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，按原作者要求
+完整声明如下：
+
+- **代码**：MIT
+- **素材（动画 / 提示词 / 源视频）**：允许开源使用，**禁止商用**
+- **二次创作约定**：基于本项目的衍生 / 改版 / 换皮作品，在 GitHub 仓库、产品官网等公开
+  渠道上须附上原作者 GitHub 地址 <https://github.com/PC2005-cloud/dsh-pet>
+- **形象出处**：宠物形象为社区二创的 DeepSeek「大肥鱼」（鲸鱼娘），**非 DeepSeek 官方
+  形象**；原型「溟月」出自 B 站 @上善无形，DeepSeek 版（女仆鲸鱼娘）设计出自 B 站
+  @ZipZipPie
+- **形象授权**：[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans)
+  （署名 · 非商业 · 相同方式共享）。声明原文：「大肥鱼是遵守 CC BY-NC-SA 4.0 协议的形象，
+  不可以以任何形式商业化。若您非常喜爱该形象，希望其拥有实体，您可以自行定制。」
+
+噜噜（河马）是本项目自有素材，授权跟随上方「代码：MIT」。
 
 ### 配置文件
 
