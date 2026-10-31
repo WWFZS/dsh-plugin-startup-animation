@@ -57,13 +57,15 @@ const srcDir = (() => {
   return at >= 0 ? process.argv[at + 1] : 'D:/不重要测试文件/lulu_pet/webm'
 })()
 
-/** geq 表达式：把「Y≥SHADOW_Y 且 低饱和」的像素写成纯绿，其余原样。 */
+/** geq 表达式：把「Y≥SHADOW_Y 且 低饱和 且 偏绿」的像素写成纯绿，其余原样。
+ *  最后一条 `lte(R,G)` 很重要：木桶箍是深棕色（sat≈55，R 最大），只按"低饱和"判会
+ *  把它当阴影抠掉，桶身就会裂成上下两截。绿幕上的阴影始终是绿的（G 最大）。 */
 function shadowPainter() {
   const R = 'r(X,Y)'
   const G = 'g(X,Y)'
   const B = 'b(X,Y)'
   const sat = `max(max(${R},${G}),${B})-min(min(${R},${G}),${B})`
-  const cond = `gte(Y,${SHADOW_Y})*lt(${sat},${SAT_MAX})`
+  const cond = `gte(Y,${SHADOW_Y})*lt(${sat},${SAT_MAX})*lte(${R},${G})`
   return `geq=r='if(${cond},0,${R})':g='if(${cond},255,${G})':b='if(${cond},0,${B})'`
 }
 
@@ -75,10 +77,16 @@ const run = (args) =>
     child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg 退出码 ${code}`))))
   })
 
-const outDir = 'builtin/宠物'
+const only = (() => {
+  const at = process.argv.indexOf('--only')
+  return at >= 0 ? process.argv[at + 1] : ''
+})()
+
+const outDir = 'builtin/宠物/噜噜'
 fs.mkdirSync(outDir, { recursive: true })
 
 for (const clip of CLIPS) {
+  if (only && !clip.out.startsWith(only)) continue
   const src = path.join(srcDir, clip.src)
   const out = path.join(outDir, clip.out)
   if (!fs.existsSync(src)) {
