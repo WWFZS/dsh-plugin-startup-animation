@@ -293,6 +293,42 @@ export const MEDIA_DIR_NAME = 'startup-animation-media'
 /** 内置素材库目录名（包内，随插件分发，见 builtin/README 一节的分类结构）。 */
 export const BUILTIN_DIR_NAME = 'builtin'
 
+/**
+ * 宠物动画目录（包内 `builtin/宠物/`）。
+ *
+ * 它和 MP4 / 图片 / 音频并列放在 `builtin/` 下，但**不是启动素材** ——
+ * 不出现在素材库列表里（scanLibrary 跳过），只由宠物浮层取用。
+ * 加动作就是往这个目录丢一个 `.webm`，**不用改代码**：文件名即动作名。
+ */
+export const PET_DIR_NAME = '宠物'
+
+/**
+ * 宠物动作的语义约定：哪一个文件当"待机"、哪一个是"点击回应"、哪一个演"被拖拽"。
+ *
+ * 只是**声明**，不是白名单 —— 目录里其他 `.webm` 一样会出现在动作列表里（按文件名排序）。
+ * 这三个角色缺失时对应行为降级：没有待机 = 用列表第一个；没有点击回应 = 点了没反应；
+ * 没有拖拽悬空 = 拖动时保持当前动作。
+ */
+export const PET_ROLES = Object.freeze({ idle: '待机', click: '点击回应', drag: '拖拽悬空' })
+
+/**
+ * 已知动作的播放方式：`loop: false` = 播一遍就回待机（点击回应、打招呼这类一次性反应）。
+ *
+ * 没在这里声明的动作默认**循环**播放 —— 新加的动作通常是想让它一直演。
+ * 这份清单同时决定**排列顺序**（没声明的按文件名排在后面）。
+ */
+export const PET_CLIPS = Object.freeze([
+  { id: PET_ROLES.idle, loop: true },
+  { id: PET_ROLES.click, loop: false },
+  { id: '害羞捂脸', loop: false },
+  { id: PET_ROLES.drag, loop: true },
+  { id: '原地踏步', loop: true },
+  { id: '吃橘子', loop: false },
+  { id: '挥手打招呼', loop: false },
+  { id: '原地小憩', loop: true },
+  { id: '泡温泉', loop: true },
+])
+
 /** 仓库主页（更新提示与"查看更新"链接的唯一来源）。 */
 export const REPO_URL = 'https://github.com/WWFZS/dsh-plugin-startup-animation'
 
@@ -369,6 +405,14 @@ export const DEFAULT_CONFIG = Object.freeze({
   skipLabel: '',
   /** 声音被浏览器拦下时开关的文案；'' = 运行时按语言选择。 */
   soundLabel: '',
+  // ── 桌面宠物（浮在 DSH 界面上的透明小动物）──
+  /** 是否显示宠物。默认关：装上新版不该突然冒出一只动物。 */
+  petEnabled: false,
+  /** 宠物显示宽度（px）。高度按素材 3:4 自动算。 */
+  petSize: 176,
+  /** 宠物位置：0–100 的百分比，100 = 贴右/贴下。见 client.js 的定位算法。 */
+  petX: 100,
+  petY: 100,
 })
 
 /** 素材扩展名 → 运行时呈现方式。不支持的扩展名只让该素材降级，不影响动画本身。 */
@@ -1149,6 +1193,9 @@ export function scanLibrary(packageRoot, deleted = [], homeDir) {
   const byName = (a, b) => a.name.localeCompare(b.name)
   for (const dir of dirs) {
     if (!dir.isDirectory()) continue
+    // 宠物动画不是启动素材：它们只有三个固定文件，由宠物浮层按 PET_CLIPS 取用。
+    // 列进素材库只会让用户在"MP4"分类里点到一个 3:4 的小动物。
+    if (dir.name === PET_DIR_NAME) continue
     const catDir = path.join(rootDir, dir.name)
     let files
     try {
@@ -1679,6 +1726,70 @@ export function removeUploadedFile(homeDir, value) {
 }
 
 /**
+ * 宠物可用的动作清单：**扫目录**，不是白名单。
+ *
+ * 往 `builtin/宠物/` 丢一个 `睡觉.webm`，设置页的动作列表里就会多一条「睡觉」，
+ * 不需要改代码、不需要重启（每次 manage 都重新扫）。
+ *
+ * 三个约定：
+ *   - 文件名（去扩展名）就是动作 id，也是界面上显示的名字；
+ *   - `PET_CLIPS` 里声明过的动作按声明顺序排在前面，其余按文件名排；
+ *   - 没声明的动作默认循环播放，`loop:false` 的（点击回应）播完回待机。
+ *
+ * 读不到目录就返回空数组 —— 宠物不出现，比整个设置页报错好。
+ *
+ * @param {string} packageRoot 包根。
+ * @returns {Array<{ id: string, name: string, file: string, loop: boolean }>} 可播放的动作。
+ */
+export function listPetClips(packageRoot) {
+  const dir = path.join(packageRoot, BUILTIN_DIR_NAME, PET_DIR_NAME)
+  /** @type {import('node:fs').Dirent[]} */
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const declared = new Map(PET_CLIPS.map((clip, index) => [clip.id, { index, loop: clip.loop !== false }]))
+  /** @type {Array<{ id: string, name: string, file: string, loop: boolean, rank: number }>} */
+  const clips = []
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    const name = entry.name
+    if (path.extname(name).toLowerCase() !== '.webm') continue
+    let stat
+    try {
+      stat = fs.statSync(path.join(dir, name))
+    } catch {
+      continue
+    }
+    if (!stat.isFile() || stat.size <= 0) continue
+    const id = name.slice(0, -'.webm'.length)
+    if (id === '') continue
+    const known = declared.get(id)
+    clips.push({
+      id,
+      name: id,
+      file: `${BUILTIN_DIR_NAME}/${PET_DIR_NAME}/${name}`,
+      loop: known === undefined ? true : known.loop,
+      rank: known === undefined ? PET_CLIPS.length : known.index,
+    })
+  }
+  clips.sort((a, b) => (a.rank === b.rank ? a.id.localeCompare(b.id, 'zh') : a.rank - b.rank))
+  return clips.map(({ rank, ...clip }) => clip)
+}
+
+/**
+ * 从动作清单里取一个语义角色实际指向的动作 id。
+ * @param {Array<{ id: string }>} clips 动作清单。
+ * @param {string} wanted 期望的动作 id。
+ * @returns {string} 存在则返回它，否则 `''`（客户端据此降级）。
+ */
+function pickClip(clips, wanted) {
+  return clips.some((clip) => clip.id === wanted) ? wanted : ''
+}
+
+/**
  * 当前管理状态（界面上"上传/开关/恢复/素材库"的回显）。
  * @param {{ packageRoot: string, homeDir?: string, route: string }} options 位置。
  * @returns {Record<string, unknown>} 状态对象。
@@ -1686,6 +1797,8 @@ export function removeUploadedFile(homeDir, value) {
 export function manageStatus(options) {
   // 一次 loadConfig 就够：`raw` 与 `sources` 已经在里面读好了。
   const { client, assetPath, warnings, raw } = loadConfig(options)
+  // 动作清单只扫一次：pet 里三处语义 + 列表都从它来（扫目录要 stat 每个文件）。
+  const petClips = listPetClips(options.packageRoot)
   const fileRaw = typeof raw.file === 'string' ? raw.file : ''
   const audioFileRaw = typeof raw.audioFile === 'string' ? raw.audioFile : ''
   const deleted = Array.isArray(raw.deleted)
@@ -1724,6 +1837,25 @@ export function manageStatus(options) {
     /** 素材库：内置 + 上传合并，上传按扩展名自动归入 MP4/图片/音频分类；已排除 tombstone。 */
     library: scanLibrary(options.packageRoot, deleted, options.homeDir),
     limitBytes: MEDIA_LIMIT_BYTES,
+    /**
+     * 桌面宠物域：开关 / 大小 / 位置 / 动作列表。
+     *
+     * `clips[].file` 是包内相对路径，客户端拼成 `ASSET?path=…` 取流 —— 复用既有的
+     * 素材路由（它有 Range、ETag、逃逸防护），不为宠物再开一条发文件的通道。
+     *
+     * `idle` / `click` / `drag` 是**语义**：哪个动作当待机、点击时播哪个、拖动时播哪个。
+     * 由宿主决定、客户端照用，这样改文件名不用动前端。
+     */
+    pet: {
+      enabled: raw.petEnabled === true,
+      size: clampNumber(raw.petSize, DEFAULT_CONFIG.petSize, 100, 320),
+      x: clampNumber(raw.petX, DEFAULT_CONFIG.petX, 0, 100),
+      y: clampNumber(raw.petY, DEFAULT_CONFIG.petY, 0, 100),
+      idle: pickClip(petClips, PET_ROLES.idle) || (petClips[0] === undefined ? '' : petClips[0].id),
+      click: pickClip(petClips, PET_ROLES.click),
+      drag: pickClip(petClips, PET_ROLES.drag),
+      clips: petClips,
+    },
     /**
      * 开机动画运行时的完整配置（boot.js 每次页面加载实时读取它 —— 桌面注入表是宿主
      * 启动时的一次性快照，配置改动必须走实时通道才能"刷新即生效"）。
@@ -2246,8 +2378,27 @@ export function apply(ctx) {
                     }
                     patch.durationSec = clampDurationSec(body.durationSec)
                   }
+                  // ── 宠物域：开关 / 大小 / 位置 ──
+                  // 大小与位置照旧"服务端夹取不给商用"：越界的值就地夹好，不报错 ——
+                  // 拖到屏幕边缘时客户端算出的百分比偶尔会是 100.4 这种数。
+                  if (typeof body.petEnabled === 'boolean') patch.petEnabled = body.petEnabled
+                  if (body.petSize !== undefined) {
+                    if (typeof body.petSize !== 'number' || !Number.isFinite(body.petSize)) {
+                      reply(res, 400, { ok: false, error: '宠物大小必须是 100–320 的数字（px）' })
+                      return
+                    }
+                    patch.petSize = clampNumber(body.petSize, DEFAULT_CONFIG.petSize, 100, 320)
+                  }
+                  for (const key of ['petX', 'petY']) {
+                    if (body[key] === undefined) continue
+                    if (typeof body[key] !== 'number' || !Number.isFinite(body[key])) {
+                      reply(res, 400, { ok: false, error: '宠物位置必须是 0–100 的数字' })
+                      return
+                    }
+                    patch[key] = clampNumber(body[key], DEFAULT_CONFIG[key], 0, 100)
+                  }
                   if (Object.keys(patch).length === 0) {
-                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "use", "useAudio" or "forget"' })
+                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "petEnabled", "petSize", "petX", "petY", "use", "useAudio" or "forget"' })
                     return
                   }
                   try {
