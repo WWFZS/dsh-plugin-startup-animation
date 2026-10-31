@@ -33,6 +33,8 @@ const srcDir = path.resolve(arg('src', 'D:/不重要测试文件/pet_assets/dsh-
 const outDir = path.resolve(arg('out', 'builtin/宠物/女仆'))
 const packId = arg('id', 'maid')
 const packName = arg('name', '女仆')
+/** 只保留 N 段（0 = 全要）。角色动作（待机/拖拽/点击/转向/走动）永远保留。 */
+const limit = Number(arg('limit', '0')) || 0
 
 /** slots 里的分类键 → pet.json 的分类（id 用 ascii，name 给界面）。顺序即界面顺序。 */
 const CATEGORIES = [
@@ -60,7 +62,7 @@ const run = (args) =>
 
 const manifest = JSON.parse(fs.readFileSync(path.join(srcDir, 'manifest.json'), 'utf8'))
 const byName = new Map(manifest.animations.map((a) => [a.name, a]))
-const slotClips = (slot) =>
+const slotNames = (slot) =>
   manifest.animations.filter((a) => a.slots.includes(slot)).map((a) => a.name)
 const bySlot = (slot) => {
   const hit = manifest.animations.find((a) => a.slots.includes(slot))
@@ -69,13 +71,42 @@ const bySlot = (slot) => {
 
 fs.mkdirSync(outDir, { recursive: true })
 
-const clips = []
-const targets = []
-for (const a of manifest.animations) {
-  const out = path.join(outDir, `${a.name}.webm`)
-  targets.push({ name: a.name, src: path.join(srcDir, a.file), out })
-  clips.push(a.name)
+/**
+ * 选哪些段：角色动作（待机/拖拽/点击/转向/走动）先占位，其余按 manifest 顺序补到 limit。
+ *
+ * 为什么不直接切前 N 段：manifest 是按名字排序的，前 55 段里没有待机、拖拽和点击回应
+ * （它们排在「待」「被」「点」），照切会让宠物没有待机循环、点它也没反应。
+ */
+const roleNames = new Set(
+  [bySlot('idle'), bySlot('drag'), ...slotNames('turn'), ...slotNames('clicks'), ...slotNames('moves')].filter(Boolean),
+)
+const ordered = manifest.animations.map((a) => a.name)
+let clips = ordered
+if (limit > 0 && limit < ordered.length) {
+  const keep = new Set(roleNames)
+  for (const name of ordered) {
+    if (keep.size >= limit) break
+    keep.add(name)
+  }
+  clips = ordered.filter((name) => keep.has(name))
 }
+
+// 上一次导出的旧素材（比如之前是全 109 段）要清掉，否则包会带着没被 pet.json 引用的文件。
+for (const file of fs.readdirSync(outDir)) {
+  if (!file.endsWith('.webm')) continue
+  if (clips.includes(file.slice(0, -'.webm'.length))) continue
+  fs.rmSync(path.join(outDir, file))
+}
+
+const targets = clips.map((name) => ({
+  name,
+  src: path.join(srcDir, byName.get(name).file),
+  out: path.join(outDir, `${name}.webm`),
+}))
+
+const chosen = new Set(clips)
+/** 只留选中段；分类里没选中的不展示，也不留空卡。 */
+const slotClips = (slot) => slotNames(slot).filter((name) => chosen.has(name))
 
 let done = 0
 for (const t of targets) {
@@ -135,6 +166,14 @@ if (extras.length) {
   else {
     await cover(extras[0], 'cat-other.webp')
     categories.push({ id: 'other', name: '其他', cover: 'cat-other.webp', clips: extras })
+  }
+}
+
+// 换过分类后可能留下没人引用的 cat-*.webp，顺手清掉。
+const usedCovers = new Set(categories.map((c) => c.cover))
+for (const file of fs.readdirSync(outDir)) {
+  if (file.startsWith('cat-') && file.endsWith('.webp') && !usedCovers.has(file)) {
+    fs.rmSync(path.join(outDir, file))
   }
 }
 
