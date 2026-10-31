@@ -91,9 +91,16 @@ window.__ModuleLoader__.load({
       // ── 宠物（第三个页签；浮层与设置区的文案）──
       catPet: '宠物',
       petEnable: '显示桌面宠物',
-      petNote: '宠物浮在界面右下角：拖动换位置，松手会记住；点一下它有反应。',
+      petNote: '宠物浮在界面右下角：拖动换位置，松手会记住；点一下它会回应，右键按分类点播。',
       petSize: '宠物大小',
-      petAction: '动作列表',
+      petAction: '动作',
+      petPick: '宠物',
+      petUnit: '个动作',
+      petRandom: '随机一个',
+      petSearch: '搜索动作',
+      petNoMatch: '没有匹配的动作',
+      petNow: '正在演',
+      petCredit: '素材',
       petLoop: '循环',
       petOnce: '单次',
       petReset: '归位',
@@ -176,9 +183,16 @@ window.__ModuleLoader__.load({
       // ── Pet (third tab; overlay + settings copy) ──
       catPet: 'Pet',
       petEnable: 'Show desktop pet',
-      petNote: 'The pet floats in the bottom-right corner: drag it to move, it remembers where you left it, click it for a reaction.',
+      petNote: 'The pet floats in the bottom-right corner: drag it to move, click it for a reaction, right-click to play an action by category.',
       petSize: 'Pet size',
       petAction: 'Actions',
+      petPick: 'Pet',
+      petUnit: 'actions',
+      petRandom: 'Play a random one',
+      petSearch: 'Search actions',
+      petNoMatch: 'No matching action',
+      petNow: 'Now playing',
+      petCredit: 'Art by',
       petLoop: 'loop',
       petOnce: 'once',
       petReset: 'Reset position',
@@ -272,6 +286,39 @@ window.__ModuleLoader__.load({
 .dsa-set-act:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
 .dsa-set-act-name { font-size: 13px; line-height: 1.4; }
 .dsa-set-act-kind { font-size: 11.5px; line-height: 1.2; color: var(--dsw-alias-label-tertiary); }
+/* 宠物卡：封面 + 名字 + 动作数，一张卡代表一只宠物。 */
+.dsa-set-pets { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; margin-top: 12px; }
+.dsa-set-pet { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); font: inherit; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+.dsa-set-pet:hover { background: var(--dsw-alias-bg-layer-2); }
+.dsa-set-pet:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dsa-set-pet[data-on="1"] { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
+.dsa-set-pet:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
+.dsa-set-pet-cover { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); display: block; }
+.dsa-set-pet-name { font-size: 13px; line-height: 1.4; }
+.dsa-set-pet-count { font-size: 11.5px; line-height: 1.2; color: var(--dsw-alias-label-tertiary); }
+/* 分类卡：动作多的包按分类挑，点一下随机演这个分类里的一个。 */
+.dsa-set-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; margin-top: 12px; }
+.dsa-set-cat { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); font: inherit; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+.dsa-set-cat:hover { background: var(--dsw-alias-bg-layer-2); }
+.dsa-set-cat:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dsa-set-cat[data-on="1"] { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
+.dsa-set-cat:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
+.dsa-set-cat-cover { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); display: block; }
+.dsa-set-cat-name { font-size: 13px; line-height: 1.4; }
+.dsa-set-cat-count { font-size: 11.5px; line-height: 1.2; color: var(--dsw-alias-label-tertiary); }
+/* 搜索 + 结果 chip：一百多个动作时按名字找，命中的列成一行短标签。 */
+.dsa-set-search { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.dsa-set-input { font: inherit; font-size: 13px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; padding: 7px 10px; width: 100%; max-width: 320px; }
+.dsa-set-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dsa-set-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.dsa-set-chip { font: inherit; font-size: 12.5px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; padding: 6px 10px; cursor: pointer; }
+.dsa-set-chip:hover { background: var(--dsw-alias-bg-layer-2); }
+.dsa-set-chip:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dsa-set-chip[data-on="1"] { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
+.dsa-set-chip:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
+.dsa-set-now { margin-top: 10px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); }
+.dsa-set-credit { margin-top: 4px; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.dsa-set-credit a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .dsa-set-empty { font-size: 12.5px; color: var(--dsw-alias-label-tertiary); padding: 10px 0; }
 /* ── 当前素材预览（设置区素材行）── */
 .dsa-set-cur { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -759,24 +806,20 @@ window.__ModuleLoader__.load({
     // 宠物浮层
     // ──────────────────────────────────────────────────────────────
 
-    /**
-     * 素材的宽高比（高 ÷ 宽）：480×648。
-     *
-     * 必须和 `tools/make-pet-assets.mjs` 的 `CROP` 一致 —— 素材是裁好再发的，
-     * 客户端只能按这个比例算高度（没有别的地方知道真实尺寸）。换裁剪窗口时两处一起改。
-     */
-    const PET_ASPECT = 648 / 480
-    /** 轮播里两个动作之间的定格时长：动作演完一遍停住，隔这么久再演下一个。 */
-    const PET_GAP_MS = 3000
+    /** 待机时两次随机动作之间的间隔（毫秒）：太密像抽风，太疏像静止。 */
+    const PET_IDLE_MIN_MS = 15000
+    const PET_IDLE_MAX_MS = 35000
+    /** 动作演完到回待机的停顿：直接跳回待机会在最后一帧上"啪"地一闪。 */
+    const PET_RETURN_MS = 550
 
     /** 浮层样式。挂 body 的常驻元素，不走组件局部样式，单独注入一份 <style>。 */
     const PET_STYLE = `
 .dsa-pet { position: fixed; left: 0; top: 0; z-index: 999999; pointer-events: none; }
 .dsa-pet[data-on="0"] { display: none; }
-.dsa-pet-stage { position: relative; display: grid; pointer-events: auto; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; transform-origin: 50% 88%; transition: transform 210ms cubic-bezier(.22, 1.4, .36, 1); }
+.dsa-pet-stage { position: relative; width: 100%; pointer-events: auto; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; transform-origin: 50% 88%; transition: transform 210ms cubic-bezier(.22, 1.4, .36, 1); }
 .dsa-pet-stage[data-drag="1"] { cursor: grabbing; transition: none; }
-/* 三段动画叠在同一格：切换只改 opacity，不增删 DOM —— 重建 video 要重新解码，会明显闪。 */
-.dsa-pet-video { grid-area: 1 / 1; width: 100%; height: auto; display: block; opacity: 0; transition: opacity 140ms linear; pointer-events: none; }
+/* 两只 video 叠在同一格交替：切换只改 opacity。一次只挂两段素材 —— 109 段全建元素会一口气解码几十 MB。 */
+.dsa-pet-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 160ms linear; pointer-events: none; }
 .dsa-pet-video[data-on="1"] { opacity: 1; }
 /* 右键菜单：跟随应用深浅色（同一份文档，--dsw-alias-* 全局可用）。 */
 .dsa-pet-menu { position: fixed; z-index: 1000000; min-width: 150px; max-height: 62vh; overflow: auto; overscroll-behavior: contain; padding: 6px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.35)); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16); }
@@ -785,6 +828,7 @@ window.__ModuleLoader__.load({
 .dsa-pet-menu-item:hover { background: var(--dsw-alias-bg-layer-2, rgba(128, 128, 128, 0.12)); }
 .dsa-pet-menu-item[data-on="1"] { color: var(--dsw-alias-brand-primary, #4b6bfb); }
 .dsa-pet-menu-sep { height: 1px; margin: 5px 6px; background: var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.25)); }
+.dsa-pet-menu-count { color: var(--dsw-alias-label-tertiary, #999); font-size: 11px; margin-left: 4px; }
 `
 
     /**
@@ -794,12 +838,15 @@ window.__ModuleLoader__.load({
      * 渲染树没有关系（关掉设置页宠物还在）。原生 DOM 让"进设置页才创建、退出就
      * 销毁"这类错误不可能发生，也省掉一次 createRoot。
      *
+     * 节奏：待机动作循环；每隔 15–35 秒随机演一个分类里的动作，演完回待机；
+     * 左键随机回应、拖拽时循环"拖拽悬空"、右键按分类点播。
+     *
      * 位置口径：`x/y` 是 0–100 的百分比，表示"在可移动区间里的比例"
      * （0 = 贴左/贴上，100 = 贴右/贴下），所以窗口缩放后宠物仍然贴着同一角，
      * 也不会跑到屏幕外。像素位置 = 百分比 × (视口 − 宠物尺寸)。
      *
      * @param {{ onPersist: (patch: object) => void, t: (key: string) => string }} options 位置落盘回调 + 菜单文案。
-     * @returns {{ load: () => Promise<void>, sync: (pet: object) => void, play: (id: string) => void, report: () => void, reset: () => void, destroy: () => void }} 浮层控制器。
+     * @returns {{ load: () => Promise<void>, sync: (pet: object) => void, play: (id: string) => void, playCategory: (id: string) => void, random: () => void, report: () => void, reset: () => void, destroy: () => void }} 浮层控制器。
      */
     function createPetOverlay(options) {
       const onPersist = options.onPersist
@@ -810,23 +857,25 @@ window.__ModuleLoader__.load({
       let host = null
       /** @type {HTMLDivElement | null} */
       let stage = null
-      /** @type {Map<string, HTMLVideoElement>} */
-      const videos = new Map()
-      /** 已构建的清单指纹：只有动作清单变了才重建 video。 */
+      /** @type {HTMLVideoElement[]} 两个槽位：一个在演，一个在预载下一段。 */
+      const videos = []
+      let active = 0
+      /** 已构建的包指纹：换宠物（或素材数变了）才重置 DOM。 */
       let builtKey = ''
       /** 当前配置快照（位置字段只在 load/reset 时采纳，见 sync 的注释）。 */
-      let pet = { enabled: false, size: 176, x: 100, y: 100, idle: '', click: '', drag: '', clips: [] }
-      let current = ''
+      let pet = { enabled: false, size: 176, x: 100, y: 100, pack: '', packs: [] }
+      /** @type {any} 当前宠物包（宿主给的完整结构）。 */
+      let pack = null
+      let currentId = ''
+      let mode = 'idle'
+      /** 随机待机计时器（0 = 没排）。 */
+      let ambienceTimer = 0
+      /** "演完了回待机"的计时器。 */
+      let returnTimer = 0
+      let lastRandomId = ''
       /** @type {{ id: number, dx: number, dy: number, startX: number, startY: number, moved: boolean } | null} */
       let drag = null
       let frame = 0
-      // ── 轮播状态机：动作按清单顺序演，演完一遍定格 PET_GAP_MS 再下一个 ──
-      /** 轮播位置（clips 的下标）。手动点播会把位置挪到那个动作上，播完从它下一个继续。 */
-      let carouselIndex = 0
-      /** 定格计时器（0 = 没有在定格）。 */
-      let gapTimer = 0
-      /** 当前动作播完（ended）之后要去哪：轮播/点播都会排一个回调进去。 */
-      let afterEnded = null
       /** @type {HTMLDivElement | null} 右键菜单（同一时刻至多一个）。 */
       let menu = null
 
@@ -839,13 +888,72 @@ window.__ModuleLoader__.load({
         document.head.appendChild(styleEl)
       }
 
+      const clipById = (id) => {
+        if (pack === null) return null
+        return pack.clips.find((clip) => clip.id === id) ?? null
+      }
+      const idleId = () => {
+        if (pack === null) return ''
+        if (clipById(pack.roles.idle) !== null) return pack.roles.idle
+        return pack.clips.length > 0 ? pack.clips[0].id : ''
+      }
+      const clipsOf = (ids) => (Array.isArray(ids) ? ids.map(clipById).filter((clip) => clip !== null) : [])
+      /** 参与随机待机的动作：分类里有、但不是"事件"类（余额/工作/睡觉随机出现会很怪）。 */
+      const ambientClips = () => {
+        if (pack === null) return []
+        const eventIds = ['balance', 'whisper', 'work', 'sleep', 'other']
+        const wanted = Array.isArray(pack.ambient) && pack.ambient.length > 0
+          ? pack.ambient
+          : pack.categories.map((category) => category.id).filter((id) => !eventIds.includes(id))
+        const clips = pack.categories
+          .filter((category) => wanted.includes(category.id))
+          .flatMap((category) => clipsOf(category.clips))
+        if (clips.length > 0) return clips
+        return pack.clips.filter((clip) => clip.id !== idleId() && clip.id !== pack.roles.drag)
+      }
+      /** 随机取一个，尽量不连着演同一个。 */
+      const randomClip = (clips) => {
+        if (clips.length === 0) return null
+        const pool = clips.length > 1 ? clips.filter((clip) => clip.id !== lastRandomId) : clips
+        const picked = pool[Math.floor(Math.random() * pool.length)] ?? clips[0]
+        lastRandomId = picked.id
+        return picked
+      }
+
+      const clearAmbience = () => {
+        if (ambienceTimer !== 0) {
+          window.clearTimeout(ambienceTimer)
+          ambienceTimer = 0
+        }
+      }
+      const clearReturn = () => {
+        if (returnTimer !== 0) {
+          window.clearTimeout(returnTimer)
+          returnTimer = 0
+        }
+      }
+
       /**
-       * 按当前清单建 DOM。只建一次 —— 清单没变就不动，避免每次状态回包都重新解码。
+       * 按当前宠物包准备 DOM：宿主、舞台、两只 video。
+       *
+       * 只建一次。换宠物时会清掉 video 的 src，但**保留元素** —— 重建元素意味着
+       * 重新申请解码器，切换宠物时会白屏一下。
        */
       const build = () => {
-        const key = pet.clips.map((clip) => `${clip.id}:${clip.file}`).join('|')
-        if (key === builtKey) return
+        const next = pet.packs.find((item) => item.id === pet.pack) ?? pet.packs[0] ?? null
+        const key = next === null ? '' : `${next.id}:${next.clips.length}:${next.canvas.join('x')}`
+        if (key === builtKey && next === pack) return
         builtKey = key
+        pack = next
+        clearAmbience()
+        clearReturn()
+        currentId = ''
+        mode = 'idle'
+        lastRandomId = ''
+        if (pack === null) {
+          if (host !== null) host.dataset.on = '0'
+          return
+        }
         ensureStyle()
         if (host === null) {
           host = document.createElement('div')
@@ -855,40 +963,40 @@ window.__ModuleLoader__.load({
           stage.className = 'dsa-pet-stage'
           host.appendChild(stage)
           document.body.appendChild(host)
+          for (let index = 0; index < 2; index += 1) {
+            const video = document.createElement('video')
+            video.className = 'dsa-pet-video'
+            video.muted = true
+            video.playsInline = true
+            video.preload = 'none'
+            video.setAttribute('aria-hidden', 'true')
+            // 只有"主动演的一次性动作"需要 ended；循环的待机/拖拽不会触发它。
+            video.addEventListener('ended', () => {
+              if (mode !== 'action' || videos[active] !== video) return
+              scheduleReturn()
+            })
+            stage.appendChild(video)
+            videos.push(video)
+          }
+          bindStage()
         }
-        if (stage === null) return
-        // 换素材（未来支持多套宠物时）才需要清空；同一清单重复调用在上面就返回了。
-        for (const [, el] of videos) el.remove()
-        videos.clear()
-        current = ''
-        for (const clip of pet.clips) {
-          const video = document.createElement('video')
-          video.className = 'dsa-pet-video'
-          video.src = `${ASSET}?path=${encodeURIComponent(clip.file)}`
-          video.muted = true
-          video.loop = clip.loop === true
-          video.playsInline = true
-          video.preload = 'auto'
-          video.setAttribute('aria-hidden', 'true')
-          video.dataset.clip = clip.id
-          // 所有动作统一在 ended 里接"播完之后"的回调：轮播接"定格后下一个"，
-          // 点播接"定格后从下一个继续"。循环素材在轮播/点播时会被临时改成单遍。
-          video.addEventListener('ended', () => {
-            if (current !== clip.id) return
-            const after = afterEnded
-            afterEnded = null
-            if (after !== null) after()
-          })
-          stage.appendChild(video)
-          videos.set(clip.id, video)
+        if (stage !== null) {
+          stage.style.aspectRatio = `${pack.canvas[0]} / ${pack.canvas[1]}`
         }
+        for (const video of videos) {
+          video.dataset.on = '0'
+          video.pause()
+          video.removeAttribute('src')
+          video.load()
+        }
+        active = 0
       }
 
       /** 把百分比位置换算成像素并应用（窗口尺寸变了就重算）。 */
       const layout = () => {
-        if (host === null) return
+        if (host === null || pack === null) return
         const width = pet.size
-        const height = Math.round(width * PET_ASPECT)
+        const height = Math.round((width * pack.canvas[1]) / pack.canvas[0])
         const maxLeft = Math.max(0, window.innerWidth - width)
         const maxTop = Math.max(0, window.innerHeight - height)
         host.style.width = `${width}px`
@@ -898,7 +1006,7 @@ window.__ModuleLoader__.load({
 
       /** 暂停所有视频（关掉宠物时调用：不在后台白烧解码）。 */
       const pauseAll = () => {
-        for (const [, video] of videos) {
+        for (const video of videos) {
           try {
             video.pause()
           } catch {
@@ -908,44 +1016,125 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * 切到某个动作。
-       * @param {string} id 动作 id（即素材文件名去扩展名，见宿主返回的 pet.clips）。
+       * 演一个动作。
+       * @param {string} id 动作 id（素材文件名去扩展名）。
+       * @param {boolean} loop 是否循环。
+       * @param {boolean} once 是否在演完后回待机（一次性动作）。
        */
-      const show = (id) => {
-        const video = videos.get(id)
-        // 动作缺失（用户只放了部分素材）就退回待机，不留一个空白框。
-        if (video === undefined) {
-          if (id !== pet.idle) show(pet.idle)
+      const show = (id, loop, once) => {
+        const clip = clipById(id)
+        if (clip === null || videos.length < 2) {
+          if (!once) return
+          if (mode !== 'idle') startIdle()
           return
         }
-        // 注意这里**不能**因为"已经在演这个动作"就早退：show 兼着"重播一遍"的职责
-        // （轮播/点播都要从头演）。早退会让"点播当前正在演的动作"变成什么都不发生，
-        // 那一轮排好的"演完接下一个"也就永远不会触发 —— 宠物就此卡住。
-        current = id
-        for (const [key, el] of videos) {
-          if (key === id) continue
-          el.dataset.on = '0'
-          // 淡出跑完再暂停：立刻 pause 会让上一段定在最后一帧，交叉时看得见。
-          window.setTimeout(() => {
-            if (current !== key) {
-              try {
-                el.pause()
-              } catch {
-                /* 已停 */
-              }
-            }
-          }, 160)
+        const prev = active
+        active = 1 - prev
+        const incoming = videos[active]
+        const outgoing = videos[prev]
+        const url = `${ASSET}?path=${encodeURIComponent(clip.file)}`
+        if (incoming.getAttribute('src') !== url) {
+          incoming.src = url
+          incoming.preload = 'auto'
         }
-        video.dataset.on = '1'
+        incoming.loop = loop
+        incoming.dataset.on = '1'
+        outgoing.dataset.on = '0'
         try {
-          video.currentTime = 0
+          incoming.currentTime = 0
         } catch {
           /* 还没元数据，play 之后自己从头播 */
         }
-        const played = video.play()
+        const played = incoming.play()
         if (played && typeof played.catch === 'function') played.catch(() => {})
-        // 告诉设置页"现在在演哪一段"，动作列表据此高亮（宠物也可能自己切，比如回应播完）。
-        window.dispatchEvent(new CustomEvent('dsa:pet-state', { detail: id }))
+        // 淡出跑完再暂停：立刻 pause 会让上一段定在最后一帧，交叉时看得见。
+        window.setTimeout(() => {
+          if (videos[active] !== outgoing) {
+            try {
+              outgoing.pause()
+            } catch {
+              /* 已停 */
+            }
+          }
+        }, 200)
+        currentId = id
+        mode = once ? 'action' : loop ? 'loop' : 'action'
+        // 告诉设置页"现在在演哪一段"（宠物自己切的时候也要高亮到对的位置）。
+        window.dispatchEvent(
+          new CustomEvent('dsa:pet-state', { detail: { id, name: clip.name, pack: pack.id, loop } }),
+        )
+      }
+
+      /** 回待机：循环 idle 动作，并重新排下一次随机。 */
+      const startIdle = () => {
+        if (!pet.enabled || pack === null) return
+        clearReturn()
+        clearAmbience()
+        mode = 'idle'
+        const id = idleId()
+        if (id === '') return
+        show(id, true, false)
+        scheduleAmbience()
+      }
+
+      /** 演一个一次性动作，演完回待机。 */
+      const playAction = (id) => {
+        if (!pet.enabled || pack === null) return
+        const clip = clipById(id)
+        if (clip === null) {
+          startIdle()
+          return
+        }
+        clearAmbience()
+        clearReturn()
+        show(id, false, true)
+      }
+
+      /** 一次性动作演完（ended）后隔一小会儿回待机。 */
+      function scheduleReturn() {
+        clearReturn()
+        returnTimer = window.setTimeout(() => {
+          returnTimer = 0
+          if (pet.enabled && mode === 'action') startIdle()
+        }, PET_RETURN_MS)
+      }
+
+      /** 排下一次随机动作；已经在演一次性动作时不排（回待机时会重排）。 */
+      function scheduleAmbience() {
+        clearAmbience()
+        if (!pet.enabled || pack === null) return
+        const delay = PET_IDLE_MIN_MS + Math.random() * (PET_IDLE_MAX_MS - PET_IDLE_MIN_MS)
+        ambienceTimer = window.setTimeout(() => {
+          ambienceTimer = 0
+          if (!pet.enabled || mode !== 'idle') return
+          const clip = randomClip(ambientClips())
+          if (clip !== null) playAction(clip.id)
+          else scheduleAmbience()
+        }, delay)
+      }
+
+      /** 设置页"随机一个"：立刻插播。 */
+      const random = () => {
+        if (!pet.enabled || pack === null) return
+        const clip = randomClip(ambientClips())
+        if (clip !== null) playAction(clip.id)
+      }
+
+      /** 按分类随机点播（右键菜单与设置页的分类卡）。 */
+      const playCategory = (categoryId) => {
+        if (!pet.enabled || pack === null) return
+        const category = pack.categories.find((item) => item.id === categoryId)
+        if (category === undefined) return
+        const clip = randomClip(clipsOf(category.clips))
+        if (clip !== null) playAction(clip.id)
+      }
+
+      /** 左键点击：随机一个回应动作；没有回应角色就随机一个待机动作。 */
+      const playClick = () => {
+        if (!pet.enabled || pack === null) return
+        const clicks = clipsOf(pack.roles.clicks)
+        const clip = randomClip(clicks.length > 0 ? clicks : ambientClips())
+        if (clip !== null) playAction(clip.id)
       }
 
       /**
@@ -955,82 +1144,13 @@ window.__ModuleLoader__.load({
        * 等用户翻到宠物页签时，高亮会是空的。让设置页主动问一声，两边状态就对齐了。
        */
       const report = () => {
-        if (current !== '') window.dispatchEvent(new CustomEvent('dsa:pet-state', { detail: current }))
-      }
-
-      // ── 轮播 / 点播 ──
-      //
-      // 节奏：每个动作演**一遍**（循环素材临时关掉 loop），end 后定格在最后一帧
-      // PET_GAP_MS，再演下一个；到表尾绕回第一个。手动点播（右键菜单 / 左键点击）
-      // 是插队：演完从"那个动作的下一个"继续轮播。
-
-      /** 清掉定格计时器。 */
-      const clearGap = () => {
-        if (gapTimer !== 0) {
-          window.clearTimeout(gapTimer)
-          gapTimer = 0
-        }
-      }
-
-      /** 轮播彻底停下（关宠物 / 拖拽接管时用）。 */
-      const stopSequence = () => {
-        clearGap()
-        afterEnded = null
-      }
-
-      /**
-       * 播一个动作**一遍**，播完把控制权交给 `after`。
-       * 与 show 的区别：临时关掉 loop，让 ended 事件能告诉我们"演完了"。
-       */
-      const playOnce = (id, after) => {
-        const video = videos.get(id)
-        if (video === undefined) {
-          // 动作缺失（清单和素材不同步）就跳过它，节奏不能断。
-          after()
-          return
-        }
-        clearGap()
-        afterEnded = after
-        video.loop = false
-        show(id)
-      }
-
-      /** 从序列的第 index 个开始轮播（越界自动绕回）。 */
-      const playCarouselAt = (index) => {
-        const count = pet.clips.length
-        if (!pet.enabled || count === 0) return
-        carouselIndex = ((index % count) + count) % count
-        playOnce(pet.clips[carouselIndex].id, () => {
-          gapTimer = window.setTimeout(() => playCarouselAt(carouselIndex + 1), PET_GAP_MS)
-        })
-      }
-
-      /**
-       * 手动点播：演 `id` 一遍，定格后从**它的下一个**继续轮播。
-       * 右键菜单和左键点击都走这里 —— 对轮播来说是同一种"插队"。
-       */
-      const playManual = (id) => {
-        const at = pet.clips.findIndex((clip) => clip.id === id)
-        if (at < 0) return
-        // 轮播位置要跟着挪到点播的那个动作上：不然中途被打断（拖拽）再恢复，
-        // 会从旧位置接着演，而不是从"点播动作的下一个"接着演。
-        carouselIndex = at
-        playOnce(id, () => {
-          gapTimer = window.setTimeout(() => playCarouselAt(at + 1), PET_GAP_MS)
-        })
-      }
-
-      /**
-       * 恢复轮播：**立刻**演下一个。
-       *
-       * 为什么不等那 3 秒间隔：间隔是"两个动作之间"的节奏，而这里是**用户主动打断**
-       * 之后回来（拖拽松手）。再等 3 秒，画面就停在被打断动作的最后一帧上不动 ——
-       * 看着像卡住了。间隔留给轮播本身，打断后立刻接上。
-       */
-      const resumeCarousel = () => {
-        clearGap()
-        afterEnded = null
-        playCarouselAt(carouselIndex + 1)
+        if (currentId === '' || pack === null) return
+        const clip = clipById(currentId)
+        window.dispatchEvent(
+          new CustomEvent('dsa:pet-state', {
+            detail: { id: currentId, name: clip === null ? currentId : clip.name, pack: pack.id, loop: mode !== 'action' },
+          }),
+        )
       }
 
       // ── 右键菜单 ──
@@ -1048,12 +1168,17 @@ window.__ModuleLoader__.load({
         if (menu !== null && event.target instanceof Node && !menu.contains(event.target)) closeMenu()
       }
 
-      const menuItem = (label, onClick, on) => {
+      const menuItem = (label, onClick, count) => {
         const item = document.createElement('button')
         item.type = 'button'
         item.className = 'dsa-pet-menu-item'
         item.textContent = label
-        item.dataset.on = on ? '1' : '0'
+        if (typeof count === 'number') {
+          const badge = document.createElement('span')
+          badge.className = 'dsa-pet-menu-count'
+          badge.textContent = String(count)
+          item.appendChild(badge)
+        }
         item.addEventListener('click', () => {
           closeMenu()
           onClick()
@@ -1061,26 +1186,29 @@ window.__ModuleLoader__.load({
         return item
       }
 
-      /** 右键菜单：「动作」列表 + 归位 + 隐藏。列表来自 pet.clips，加动作自动出现。 */
+      /**
+       * 右键菜单：**按分类**点播，不是 109 条平铺。
+       *
+       * 109 个动作的菜单会顶出屏幕，也没人从一百条里找；分类 + 「随机一个」够用，
+       * 想指定某个动作去设置页搜。
+       */
       const openMenu = (x, y) => {
+        if (pack === null) return
         closeMenu()
         ensureStyle()
         menu = document.createElement('div')
         menu.className = 'dsa-pet-menu'
         const head = document.createElement('div')
         head.className = 'dsa-pet-menu-head'
-        head.textContent = options.t('petMenuActions')
+        head.textContent = t('petMenuActions')
         menu.appendChild(head)
-        for (const clip of pet.clips) {
-          menu.appendChild(menuItem(clip.name, () => playManual(clip.id), current === clip.id))
+        for (const category of pack.categories) {
+          menu.appendChild(menuItem(category.name, () => playCategory(category.id), category.clips.length))
         }
+        menu.appendChild(menuItem(t('petRandom'), random))
         menu.appendChild(Object.assign(document.createElement('div'), { className: 'dsa-pet-menu-sep' }))
-        menu.appendChild(
-          menuItem(options.t('petReset'), () => {
-            reset()
-          }, false),
-        )
-        menu.appendChild(menuItem(options.t('petHide'), hideSelf, false))
+        menu.appendChild(menuItem(t('petReset'), reset))
+        menu.appendChild(menuItem(t('petHide'), hideSelf))
         document.body.appendChild(menu)
         // 贴着鼠标展开，但不许出屏。
         const rect = menu.getBoundingClientRect()
@@ -1093,15 +1221,16 @@ window.__ModuleLoader__.load({
 
       /** 菜单里的"隐藏"：等于设置页那个总开关，落盘后浮层会随 sync 自己收起来。 */
       const hideSelf = () => {
-        stopSequence()
+        clearAmbience()
+        clearReturn()
         onPersist({ petEnabled: false })
       }
 
       /** 把当前像素位置写回百分比并落盘（拖动结束时调用）。 */
       const commitPosition = () => {
-        if (host === null) return
+        if (host === null || pack === null) return
         const width = pet.size
-        const height = Math.round(width * PET_ASPECT)
+        const height = Math.round((width * pack.canvas[1]) / pack.canvas[0])
         const maxLeft = Math.max(1, window.innerWidth - width)
         const maxTop = Math.max(1, window.innerHeight - height)
         const left = Number.parseFloat(host.style.left) || 0
@@ -1113,7 +1242,7 @@ window.__ModuleLoader__.load({
 
       /** 拖动开始：接管指针、切到拖拽动作。 */
       const onPointerDown = (event) => {
-        if (event.button !== 0 || host === null || !pet.enabled) return
+        if (event.button !== 0 || host === null || !pet.enabled || pack === null) return
         closeMenu()
         const rect = host.getBoundingClientRect()
         drag = {
@@ -1130,25 +1259,25 @@ window.__ModuleLoader__.load({
         } catch {
           /* 某些浏览器对非活动指针会抛，拖拽仍可用 */
         }
-        // 拖拽接管轮播：被拎着的时候循环演"拖拽悬空"（没有这个角色就保持当前动作）。
-        stopSequence()
-        if (pet.drag !== '') {
-          const dragVideo = videos.get(pet.drag)
-          if (dragVideo !== undefined) dragVideo.loop = true
-          show(pet.drag)
+        // 拖拽接管节奏：被拎着的时候循环演"拖拽悬空"（没有这个角色就保持当前动作）。
+        clearAmbience()
+        clearReturn()
+        if (clipById(pack.roles.drag) !== null) {
+          mode = 'drag'
+          show(pack.roles.drag, true, false)
         }
         event.preventDefault()
       }
 
       const onPointerMove = (event) => {
-        if (drag === null || event.pointerId !== drag.id || host === null) return
+        if (drag === null || event.pointerId !== drag.id || host === null || pack === null) return
         const dx = event.clientX - drag.startX
         const dy = event.clientY - drag.startY
         // 4px 门槛：点击时手会抖一两像素，不该被当成拖拽。
         if (!drag.moved && Math.hypot(dx, dy) < 4) return
         drag.moved = true
         const width = pet.size
-        const height = Math.round(width * PET_ASPECT)
+        const height = Math.round((width * pack.canvas[1]) / pack.canvas[0])
         const maxLeft = Math.max(0, window.innerWidth - width)
         const maxTop = Math.max(0, window.innerHeight - height)
         const left = Math.max(0, Math.min(maxLeft, event.clientX - drag.dx))
@@ -1174,23 +1303,9 @@ window.__ModuleLoader__.load({
         }
         if (moved) {
           commitPosition()
-          // 拖拽结束：把"拖拽悬空"定格在当前帧，隔一会儿从轮播的下一个接着演。
-          if (pet.drag !== '') {
-            const dragVideo = videos.get(pet.drag)
-            if (dragVideo !== undefined) {
-              try {
-                dragVideo.pause()
-              } catch {
-                /* 已停 */
-              }
-            }
-          }
-          resumeCarousel()
-        } else if (pet.click !== '') {
-          // 没位移 = 一次点击：插播"点击回应"，演完从它的下一个继续轮播。
-          playManual(pet.click)
+          startIdle()
         } else {
-          resumeCarousel()
+          playClick()
         }
       }
 
@@ -1202,14 +1317,13 @@ window.__ModuleLoader__.load({
         })
       }
 
-      const bind = () => {
-        if (stage === null || stage.dataset.bound === '1') return
-        stage.dataset.bound = '1'
+      /** 舞台事件只绑一次（host 建好后）。 */
+      function bindStage() {
+        if (stage === null) return
         stage.addEventListener('pointerdown', onPointerDown)
         stage.addEventListener('pointermove', onPointerMove)
         stage.addEventListener('pointerup', onPointerUp)
         stage.addEventListener('pointercancel', onPointerUp)
-        // 右键：动作菜单。浏览器默认菜单拦掉。
         stage.addEventListener('contextmenu', (event) => {
           if (!pet.enabled) return
           event.preventDefault()
@@ -1231,7 +1345,7 @@ window.__ModuleLoader__.load({
           .catch(() => {})
 
       /**
-       * 应用一份新配置（开关 / 大小 / 动作清单）。
+       * 应用一份新配置（开关 / 大小 / 当前宠物 / 宠物包）。
        *
        * **不采纳 x/y**：位置由本浮层独占（拖动后自己写盘）。设置页每次写别的字段都会
        * 拿到一份状态回包，如果那份回包里的旧坐标也被应用，宠物会被拽回上一次保存的位置。
@@ -1242,26 +1356,25 @@ window.__ModuleLoader__.load({
         if (!next || typeof next !== 'object') return
         pet.enabled = next.enabled === true
         if (typeof next.size === 'number' && Number.isFinite(next.size)) pet.size = next.size
-        if (Array.isArray(next.clips) && next.clips.length > 0) pet.clips = next.clips
-        // 三个语义角色由宿主给：待机 / 点击时播哪个 / 拖动时播哪个。
-        for (const role of ['idle', 'click', 'drag']) {
-          if (typeof next[role] === 'string') pet[role] = next[role]
-        }
-        // 关着的时候**不建 DOM**：九段素材加起来 4 MB，没开宠物就不该占用户的带宽
-        // 和内存。打开时才建，那一次开销是用户自己按出来的。
+        if (typeof next.pack === 'string') pet.pack = next.pack
+        if (Array.isArray(next.packs)) pet.packs = next.packs
+        // 关着的时候**不建 DOM**：宠物素材加起来几十 MB，没开就不该占带宽和内存。
         if (!pet.enabled) {
-          stopSequence()
+          clearAmbience()
+          clearReturn()
           closeMenu()
           pauseAll()
-          current = ''
+          currentId = ''
+          mode = 'idle'
           if (host !== null) host.dataset.on = '0'
           return
         }
         build()
-        bind()
+        if (pack === null) return
         layout()
         if (host !== null) host.dataset.on = '1'
-        if (current === '') playCarouselAt(carouselIndex)
+        // 正在演就接着演；从关到开、或换了宠物，才重新起待机。
+        if (currentId === '' || clipById(currentId) === null) startIdle()
       }
 
       /** 归位：回到右下角并落盘。 */
@@ -1276,22 +1389,23 @@ window.__ModuleLoader__.load({
         window.removeEventListener('resize', onResize)
         if (frame !== 0) window.cancelAnimationFrame(frame)
         frame = 0
-        stopSequence()
+        clearAmbience()
+        clearReturn()
         closeMenu()
         pauseAll()
-        videos.clear()
+        videos.length = 0
         if (host !== null) host.remove()
         if (styleEl !== null) styleEl.remove()
         host = null
         stage = null
         styleEl = null
+        pack = null
         builtKey = ''
       }
 
-      // play = 手动点播：设置页的动作卡和右键菜单都走这条 —— 演一遍然后从下一个继续轮播。
-      return { load, sync, play: playManual, report, reset, destroy }
+      // play = 指定动作：设置页的动作卡和搜索都走这条 —— 演一遍然后回待机。
+      return { load, sync, play: playAction, playCategory, random, report, reset, destroy }
     }
-
     /**
      * 「启动动画」页：常驻设置区 + 下方 [MP4|壁纸|音频|宠物|更新公告] 分类切换器与内容面板。
      * @param {(key: string) => string} t 翻译。
@@ -1323,6 +1437,9 @@ window.__ModuleLoader__.load({
         const petSizeRef = React.useRef(null)
         /** 宠物此刻在演哪个动作 —— 由浮层回报，用来高亮动作列表（它自己也会切，比如回应播完）。 */
         const [activeClip, setActiveClip] = React.useState('')
+        /** 大宠物包（动作多）的搜索词；换宠物时清空。 */
+        const [petQuery, setPetQuery] = React.useState('')
+        const petPackId = state && state.pet && typeof state.pet.pack === 'string' ? state.pet.pack : ''
         // ── 卸载 / 更新（v1.11.0）──
         // 自管状态：宿主在 profile 里有没有装我们、有没有选中、装的是什么形态。
         const [selfState, setSelfState] = React.useState(null)
@@ -1344,12 +1461,20 @@ window.__ModuleLoader__.load({
 
         // 反过来：浮层切了动作就回报一声，列表跟着高亮。
         React.useEffect(() => {
-          const onState = (event) => setActiveClip(typeof event.detail === 'string' ? event.detail : '')
+          const onState = (event) => {
+            const detail = event.detail
+            setActiveClip(detail && typeof detail === 'object' ? String(detail.id || '') : String(detail || ''))
+          }
           window.addEventListener('dsa:pet-state', onState)
           // 先挂监听再问：宠物在页面加载时就开播了，那会儿没人听。
           window.dispatchEvent(new CustomEvent('dsa:pet-query'))
           return () => window.removeEventListener('dsa:pet-state', onState)
         }, [])
+
+        // 换宠物后搜索词没有意义了（旧宠物的动作名对新宠物多半是空结果）。
+        React.useEffect(() => {
+          setPetQuery('')
+        }, [petPackId])
 
         // 首次拿到状态时，把分类切换器对齐到当前使用的素材（只做一次，之后尊重手动切换）。
         React.useEffect(() => {
@@ -1437,9 +1562,11 @@ window.__ModuleLoader__.load({
           postJson(send, { petEnabled: !state.pet.enabled }, t('petSaved'))
         }
 
-        /** 动作预览：让浮层立刻播一段（不写配置，纯预览）。宠物没开就先打开它 —— 用户按了按钮就是要看。 */
-        const previewPet = (id) => {
-          const fire = () => window.dispatchEvent(new CustomEvent('dsa:pet-play', { detail: id }))
+        /**
+         * 预览的统一入口：宠物没开就先打开它 —— 用户按了按钮就是要看。
+         * @param {() => void} fire 真正发事件的回调（打开成功后延迟一点再发，等浮层建好 DOM）。
+         */
+        const withPetEnabled = (fire) => {
           if (state && state.pet && !state.pet.enabled) {
             void postJson(send, { petEnabled: true }, t('petSaved')).then((payload) => {
               if (!payload || !payload.ok) return
@@ -1451,6 +1578,22 @@ window.__ModuleLoader__.load({
             return
           }
           fire()
+        }
+
+        /** 指定动作：演一遍回待机（不写配置，纯预览）。 */
+        const previewPet = (id) => withPetEnabled(() => window.dispatchEvent(new CustomEvent('dsa:pet-play', { detail: id })))
+
+        /** 分类卡：让浮层在这个分类里随机挑一个。 */
+        const previewPetCategory = (id) =>
+          withPetEnabled(() => window.dispatchEvent(new CustomEvent('dsa:pet-category', { detail: id })))
+
+        /** 「随机一个」：从全体待机动作里抽。 */
+        const previewPetRandom = () => withPetEnabled(() => window.dispatchEvent(new CustomEvent('dsa:pet-random')))
+
+        /** 换宠物：包 id 落盘，浮层随状态回包重建（开关状态不变）。 */
+        const choosePack = (id) => {
+          if (!state || !state.pet || state.pet.pack === id) return
+          postJson(send, { petPack: id }, t('petSaved'))
         }
 
         /** 试听/停止一条音频（列表内点击，不影响开机配置）。 */        const togglePlay = (file) => {
@@ -1979,13 +2122,22 @@ window.__ModuleLoader__.load({
         )
 
         /**
-         * 宠物面板：开关 + 大小 + 动作列表。
+         * 宠物面板：开关 + 大小 + 宠物选择 + 动作区。
          *
          * 动作**不写死**：清单来自宿主扫描 `builtin/宠物/`，丢一个新 webm 进去就多一条。
-         * 每格写着名字和「循环 / 单次」，正在演的那格描边高亮（浮层切动作时会回报）。
+         * 动作少的包直接平铺；动作多的（女仆 109 段）按分类展示，配搜索和「随机一个」——
+         * 铺一百多个格子没人看得下去。
          */
         const pet = state && state.pet && typeof state.pet === 'object' ? state.pet : null
-        const petClips = pet && Array.isArray(pet.clips) ? pet.clips : []
+        const petPacks = pet && Array.isArray(pet.packs) ? pet.packs : []
+        const petPack = petPacks.find((item) => item.id === pet.pack) || petPacks[0] || null
+        const petClips = petPack && Array.isArray(petPack.clips) ? petPack.clips : []
+        const petCats = petPack && Array.isArray(petPack.categories) ? petPack.categories : []
+        const petMany = petClips.length > 12
+        const petKeyword = petQuery.trim()
+        const petHits = petKeyword === '' ? [] : petClips.filter((clip) => clip.name.includes(petKeyword)).slice(0, 8)
+        const petNow = petClips.find((clip) => clip.id === activeClip) || null
+        const petAsset = (file) => `${ASSET}?path=${encodeURIComponent(file)}`
         const petSwitch = h(
           'button',
           {
@@ -2009,6 +2161,53 @@ window.__ModuleLoader__.load({
           },
           t('petReset'),
         )
+        const petRandomBtn = h(
+          'button',
+          {
+            type: 'button',
+            className: 'dsa-set-btn',
+            disabled: busy || pet === null,
+            onClick: previewPetRandom,
+          },
+          t('petRandom'),
+        )
+        /** 一个宠物 = 一张卡（封面 + 名字 + 动作数），换它就换整套素材。 */
+        const petPackCard = (item) =>
+          h(
+            'button',
+            {
+              key: item.id,
+              type: 'button',
+              className: 'dsa-set-pet',
+              'data-on': petPack && petPack.id === item.id ? '1' : '0',
+              'aria-pressed': petPack && petPack.id === item.id ? 'true' : 'false',
+              disabled: busy || pet === null,
+              onClick: () => choosePack(item.id),
+            },
+            item.cover
+              ? h('img', { className: 'dsa-set-pet-cover', src: petAsset(item.cover), alt: '', loading: 'lazy' })
+              : h('div', { className: 'dsa-set-pet-cover' }),
+            h('span', { className: 'dsa-set-pet-name' }, item.name),
+            h('span', { className: 'dsa-set-pet-count' }, `${item.count} ${t('petUnit')}`),
+          )
+        /** 一个分类 = 一张卡；按下去浮层在这个分类里随机挑一个，省得一个个点。 */
+        const petCatCard = (cat) =>
+          h(
+            'button',
+            {
+              key: cat.id,
+              type: 'button',
+              className: 'dsa-set-cat',
+              'data-on': activeClip !== '' && Array.isArray(cat.clips) && cat.clips.includes(activeClip) ? '1' : '0',
+              disabled: busy || pet === null,
+              onClick: () => previewPetCategory(cat.id),
+            },
+            cat.cover
+              ? h('img', { className: 'dsa-set-cat-cover', src: petAsset(cat.cover), alt: '', loading: 'lazy' })
+              : h('div', { className: 'dsa-set-cat-cover' }),
+            h('span', { className: 'dsa-set-cat-name' }, cat.name),
+            h('span', { className: 'dsa-set-cat-count' }, `${cat.clips.length} ${t('petUnit')}`),
+          )
         /** 一个动作 = 一个格子。宠物没开也能按（会先打开它），按了就该看到反应。 */
         const petClipCard = (clip) =>
           h(
@@ -2023,8 +2222,44 @@ window.__ModuleLoader__.load({
               onClick: () => previewPet(clip.id),
             },
             h('span', { className: 'dsa-set-act-name' }, clip.name),
-            h('span', { className: 'dsa-set-act-kind' }, clip.loop === false ? t('petOnce') : t('petLoop')),
           )
+        const petResults =
+          petKeyword === ''
+            ? null
+            : h(
+                'div',
+                { className: 'dsa-set-chips' },
+                petHits.length === 0
+                  ? h('span', { className: 'dsa-set-empty' }, t('petNoMatch'))
+                  : petHits.map((clip) =>
+                      h(
+                        'button',
+                        {
+                          key: clip.id,
+                          type: 'button',
+                          className: 'dsa-set-chip',
+                          'data-on': activeClip === clip.id ? '1' : '0',
+                          disabled: busy || pet === null,
+                          onClick: () => previewPet(clip.id),
+                        },
+                        clip.name,
+                      ),
+                    ),
+              )
+        const petCredit =
+          petPack && petPack.credit
+            ? h(
+                'div',
+                { className: 'dsa-set-credit' },
+                `${t('petCredit')} `,
+                h(
+                  'a',
+                  { href: petPack.credit.url, target: '_blank', rel: 'noreferrer noopener' },
+                  petPack.credit.name || petPack.credit.author || petPack.credit.url,
+                ),
+                petPack.credit.license ? ` · ${petPack.credit.license}` : '',
+              )
+            : null
         const petPanel = h(
           'div',
           { className: 'dsa-set-panel', role: 'tabpanel', 'aria-label': t('catPet') },
@@ -2058,15 +2293,42 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dsa-set-stack' },
+            h('div', { className: 'dsa-set-stack-head' }, h('div', { className: 'dsa-set-label' }, t('petPick'))),
+            petPacks.length === 0
+              ? h('div', { className: 'dsa-set-empty' }, t('petEmpty'))
+              : h('div', { className: 'dsa-set-pets' }, petPacks.map(petPackCard)),
+          ),
+          h(
+            'div',
+            { className: 'dsa-set-stack' },
             h(
               'div',
               { className: 'dsa-set-stack-head' },
               h('div', { className: 'dsa-set-label' }, t('petAction')),
-              h('div', { className: 'dsa-set-right' }, petResetBtn),
+              h('div', { className: 'dsa-set-right' }, petMany ? petRandomBtn : null, petResetBtn),
             ),
             petClips.length === 0
               ? h('div', { className: 'dsa-set-empty' }, t('petEmpty'))
-              : h('div', { className: 'dsa-set-acts' }, petClips.map(petClipCard)),
+              : petMany
+                ? h(
+                    'div',
+                    { className: 'dsa-set-search' },
+                    h('input', {
+                      type: 'search',
+                      className: 'dsa-set-input',
+                      value: petQuery,
+                      placeholder: t('petSearch'),
+                      'aria-label': t('petSearch'),
+                      onChange: (event) => setPetQuery(event.target.value),
+                    }),
+                    petResults,
+                    petResults === null
+                      ? h('div', { className: 'dsa-set-cats' }, petCats.map(petCatCard))
+                      : null,
+                  )
+                : h('div', { className: 'dsa-set-acts' }, petClips.map(petClipCard)),
+            petNow ? h('div', { className: 'dsa-set-now' }, `${t('petNow')} ${petNow.name}`) : null,
+            petCredit,
           ),
         )
 
@@ -2311,11 +2573,15 @@ window.__ModuleLoader__.load({
           })
           const onPetSync = (event) => petLayer.sync(event.detail)
           const onPetPlay = (event) => petLayer.play(String(event.detail || ''))
+          const onPetCategory = (event) => petLayer.playCategory(String(event.detail || ''))
+          const onPetRandom = () => petLayer.random()
           const onPetReset = () => petLayer.reset()
           // 设置页翻到宠物页签时会问一句"现在在演哪个"，好把动作列表的高亮对上。
           const onPetQuery = () => petLayer.report()
           window.addEventListener('dsa:pet-sync', onPetSync)
           window.addEventListener('dsa:pet-play', onPetPlay)
+          window.addEventListener('dsa:pet-category', onPetCategory)
+          window.addEventListener('dsa:pet-random', onPetRandom)
           window.addEventListener('dsa:pet-reset', onPetReset)
           window.addEventListener('dsa:pet-query', onPetQuery)
           void petLayer.load()
@@ -2323,6 +2589,8 @@ window.__ModuleLoader__.load({
           return () => {
             window.removeEventListener('dsa:pet-sync', onPetSync)
             window.removeEventListener('dsa:pet-play', onPetPlay)
+            window.removeEventListener('dsa:pet-category', onPetCategory)
+            window.removeEventListener('dsa:pet-random', onPetRandom)
             window.removeEventListener('dsa:pet-reset', onPetReset)
             window.removeEventListener('dsa:pet-query', onPetQuery)
             try {

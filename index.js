@@ -294,40 +294,186 @@ export const MEDIA_DIR_NAME = 'startup-animation-media'
 export const BUILTIN_DIR_NAME = 'builtin'
 
 /**
- * 宠物动画目录（包内 `builtin/宠物/`）。
+ * 宠物目录（包内 `builtin/宠物/`）。
  *
  * 它和 MP4 / 图片 / 音频并列放在 `builtin/` 下，但**不是启动素材** ——
  * 不出现在素材库列表里（scanLibrary 跳过），只由宠物浮层取用。
- * 加动作就是往这个目录丢一个 `.webm`，**不用改代码**：文件名即动作名。
+ *
+ * 目录结构是「一包一只宠物」：
+ *
+ *     builtin/宠物/河马/pet.json + 待机.webm + …
+ *     builtin/宠物/女仆/pet.json + 待机呼吸休闲.webm + …（109 段）
+ *
+ * `pet.json` 声明语义（哪个文件待机、点击回应、分类），动作本身还是**扫目录**：
+ * 往里丢一个 `.webm` 就能在设置页搜索到，不用改代码。
  */
 export const PET_DIR_NAME = '宠物'
 
-/**
- * 宠物动作的语义约定：哪一个文件当"待机"、哪一个是"点击回应"、哪一个演"被拖拽"。
- *
- * 只是**声明**，不是白名单 —— 目录里其他 `.webm` 一样会出现在动作列表里（按文件名排序）。
- * 这三个角色缺失时对应行为降级：没有待机 = 用列表第一个；没有点击回应 = 点了没反应；
- * 没有拖拽悬空 = 拖动时保持当前动作。
- */
-export const PET_ROLES = Object.freeze({ idle: '待机', click: '点击回应', drag: '拖拽悬空' })
+/** 每个宠物包里的声明文件。没有它这个子目录不算宠物包。 */
+export const PET_PACK_FILE = 'pet.json'
 
 /**
- * 已知动作的播放方式：`loop: false` = 播一遍就回待机（点击回应、打招呼这类一次性反应）。
+ * 宠物包清单：一包 = 一个 `builtin/宠物/<目录>/pet.json`。
  *
- * 没在这里声明的动作默认**循环**播放 —— 新加的动作通常是想让它一直演。
- * 这份清单同时决定**排列顺序**（没声明的按文件名排在后面）。
+ * 返回的对象直接喂给客户端的浮层与设置页，所以这里把「文件路径、语义角色、
+ * 分类、封面」一次整理好，前端不再拼路径、不再猜文件名。
+ *
+ * 约定：
+ *   - 动作 id = 文件名（去 `.webm`），显示名也是它；
+ *   - `roles.idle` / `roles.drag` 循环播放，其余动作播一遍回待机；
+ *   - `categories[].clips` 里没提到的 webm 自动归入「其他」，不会从界面上消失；
+ *   - 读不到、`pet.json` 坏掉的包直接跳过 —— 一只宠物不出现，好过整个设置页报错。
+ *
+ * @param {string} packageRoot 包根。
+ * @returns {Array<Record<string, any>>} 宠物包（按 id 排序）。
  */
-export const PET_CLIPS = Object.freeze([
-  { id: PET_ROLES.idle, loop: true },
-  { id: PET_ROLES.click, loop: false },
-  { id: '害羞捂脸', loop: false },
-  { id: PET_ROLES.drag, loop: true },
-  { id: '原地踏步', loop: true },
-  { id: '吃橘子', loop: false },
-  { id: '挥手打招呼', loop: false },
-  { id: '原地小憩', loop: true },
-  { id: '泡温泉', loop: true },
-])
+export function listPetPacks(packageRoot) {
+  /** @type {import('node:fs').Dirent[]} */
+  let entries
+  try {
+    entries = fs.readdirSync(path.join(packageRoot, BUILTIN_DIR_NAME, PET_DIR_NAME), { withFileTypes: true })
+  } catch {
+    return []
+  }
+  const packs = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const pack = readPetPack(packageRoot, entry.name)
+    if (pack !== null) packs.push(pack)
+  }
+  packs.sort((a, b) => a.id.localeCompare(b.id, 'en'))
+  return packs
+}
+
+/**
+ * 读一个宠物包目录。
+ * @param {string} packageRoot 包根。
+ * @param {string} dirName `builtin/宠物/` 下的目录名。
+ * @returns {Record<string, any> | null} 读不到返回 null。
+ */
+export function readPetPack(packageRoot, dirName) {
+  const relDir = `${BUILTIN_DIR_NAME}/${PET_DIR_NAME}/${dirName}`
+  const absDir = path.join(packageRoot, BUILTIN_DIR_NAME, PET_DIR_NAME, dirName)
+  /** @type {any} */
+  let meta
+  try {
+    meta = JSON.parse(fs.readFileSync(path.join(absDir, PET_PACK_FILE), 'utf8'))
+  } catch {
+    return null
+  }
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return null
+
+  /** 目录里真实存在的动作：id → 包内相对路径。 */
+  const files = new Map()
+  try {
+    for (const entry of fs.readdirSync(absDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue
+      const ext = path.extname(entry.name).toLowerCase()
+      if (ext !== '.webm') continue
+      const id = entry.name.slice(0, -ext.length)
+      if (id === '') continue
+      const stat = fs.statSync(path.join(absDir, entry.name))
+      if (!stat.isFile() || stat.size <= 0) continue
+      files.set(id, `${relDir}/${entry.name}`)
+    }
+  } catch {
+    return null
+  }
+  if (files.size === 0) return null
+
+  const asList = (/** @type {unknown} */ value) =>
+    Array.isArray(value)
+      ? value.filter((item) => typeof item === 'string' && item !== '')
+      : typeof value === 'string' && value !== ''
+        ? [value]
+        : []
+  const existing = (/** @type {unknown} */ value) => asList(value).filter((name) => files.has(name))
+  const fileOf = (/** @type {string} */ name) => {
+    const abs = path.join(absDir, name)
+    try {
+      return fs.statSync(abs).isFile() ? `${relDir}/${name}` : ''
+    } catch {
+      return ''
+    }
+  }
+
+  const rawRoles = meta.roles !== null && typeof meta.roles === 'object' ? meta.roles : {}
+  const roles = {
+    idle: existing(rawRoles.idle)[0] ?? existing(meta.idle)[0] ?? '',
+    drag: existing(rawRoles.drag)[0] ?? existing(meta.drag)[0] ?? '',
+    clicks: existing(rawRoles.clicks ?? meta.clicks),
+    turn: existing(rawRoles.turn ?? meta.turn),
+    moves: existing(rawRoles.moves ?? meta.moves),
+  }
+
+  /** 动作顺序：待机、拖拽、点击回应、转向、移动、分类…、其他。 */
+  const order = []
+  const seen = new Set()
+  const push = (/** @type {string} */ id) => {
+    if (id === '' || seen.has(id) || !files.has(id)) return
+    seen.add(id)
+    order.push(id)
+  }
+  push(roles.idle)
+  push(roles.drag)
+  for (const id of roles.clicks) push(id)
+  for (const id of roles.turn) push(id)
+  for (const id of roles.moves) push(id)
+
+  const categories = []
+  const rawCategories = Array.isArray(meta.categories) ? meta.categories : []
+  for (const rawCategory of rawCategories) {
+    if (rawCategory === null || typeof rawCategory !== 'object') continue
+    const clipIds = existing(rawCategory.clips)
+    if (clipIds.length === 0) continue
+    for (const id of clipIds) push(id)
+    const id = typeof rawCategory.id === 'string' && rawCategory.id !== '' ? rawCategory.id : `cat-${categories.length}`
+    categories.push({
+      id,
+      name: typeof rawCategory.name === 'string' && rawCategory.name !== '' ? rawCategory.name : id,
+      cover: typeof rawCategory.cover === 'string' ? fileOf(rawCategory.cover) : '',
+      clips: clipIds,
+    })
+  }
+
+  const extras = [...files.keys()].filter((id) => !seen.has(id))
+  for (const id of extras) push(id)
+  if (extras.length > 0) {
+    categories.push({ id: 'other', name: '其他', cover: '', clips: extras })
+  }
+
+  const ambient = (Array.isArray(meta.ambient) ? meta.ambient : [])
+    .filter((id) => categories.some((category) => category.id === id && !['balance', 'whisper', 'work', 'sleep', 'other'].includes(id)))
+  const [width, height] = Array.isArray(meta.canvas) ? meta.canvas : []
+  const cover = typeof meta.cover === 'string' ? fileOf(meta.cover) : ''
+  const credit = meta.credit !== null && typeof meta.credit === 'object' ? meta.credit : null
+
+  return {
+    id: typeof meta.id === 'string' && meta.id !== '' ? meta.id : dirName,
+    name: typeof meta.name === 'string' && meta.name !== '' ? meta.name : dirName,
+    description: typeof meta.description === 'string' ? meta.description : '',
+    credit:
+      credit === null
+        ? null
+        : {
+            author: typeof credit.author === 'string' ? credit.author : '',
+            name: typeof credit.name === 'string' ? credit.name : '',
+            url: typeof credit.url === 'string' ? credit.url : '',
+            license: typeof credit.license === 'string' ? credit.license : '',
+          },
+    canvas: [
+      Number.isFinite(width) && width > 0 ? width : 480,
+      Number.isFinite(height) && height > 0 ? height : 648,
+    ],
+    cover,
+    roles,
+    /** 参与随机待机的分类；为空时客户端退化为「全部非事件分类」。 */
+    ambient,
+    categories,
+    clips: order.map((id) => ({ id, name: id, file: files.get(id), loop: id === roles.idle || id === roles.drag })),
+    count: order.length,
+  }
+}
 
 /** 仓库主页（更新提示与"查看更新"链接的唯一来源）。 */
 export const REPO_URL = 'https://github.com/WWFZS/dsh-plugin-startup-animation'
@@ -413,6 +559,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   /** 宠物位置：0–100 的百分比，100 = 贴右/贴下。见 client.js 的定位算法。 */
   petX: 100,
   petY: 100,
+  /** 当前宠物的包 id（`builtin/宠物/<目录>/pet.json` 的 id）；'' = 第一个包。 */
+  petPack: '',
 })
 
 /** 素材扩展名 → 运行时呈现方式。不支持的扩展名只让该素材降级，不影响动画本身。 */
@@ -1726,70 +1874,6 @@ export function removeUploadedFile(homeDir, value) {
 }
 
 /**
- * 宠物可用的动作清单：**扫目录**，不是白名单。
- *
- * 往 `builtin/宠物/` 丢一个 `睡觉.webm`，设置页的动作列表里就会多一条「睡觉」，
- * 不需要改代码、不需要重启（每次 manage 都重新扫）。
- *
- * 三个约定：
- *   - 文件名（去扩展名）就是动作 id，也是界面上显示的名字；
- *   - `PET_CLIPS` 里声明过的动作按声明顺序排在前面，其余按文件名排；
- *   - 没声明的动作默认循环播放，`loop:false` 的（点击回应）播完回待机。
- *
- * 读不到目录就返回空数组 —— 宠物不出现，比整个设置页报错好。
- *
- * @param {string} packageRoot 包根。
- * @returns {Array<{ id: string, name: string, file: string, loop: boolean }>} 可播放的动作。
- */
-export function listPetClips(packageRoot) {
-  const dir = path.join(packageRoot, BUILTIN_DIR_NAME, PET_DIR_NAME)
-  /** @type {import('node:fs').Dirent[]} */
-  let entries
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return []
-  }
-  const declared = new Map(PET_CLIPS.map((clip, index) => [clip.id, { index, loop: clip.loop !== false }]))
-  /** @type {Array<{ id: string, name: string, file: string, loop: boolean, rank: number }>} */
-  const clips = []
-  for (const entry of entries) {
-    if (!entry.isFile()) continue
-    const name = entry.name
-    if (path.extname(name).toLowerCase() !== '.webm') continue
-    let stat
-    try {
-      stat = fs.statSync(path.join(dir, name))
-    } catch {
-      continue
-    }
-    if (!stat.isFile() || stat.size <= 0) continue
-    const id = name.slice(0, -'.webm'.length)
-    if (id === '') continue
-    const known = declared.get(id)
-    clips.push({
-      id,
-      name: id,
-      file: `${BUILTIN_DIR_NAME}/${PET_DIR_NAME}/${name}`,
-      loop: known === undefined ? true : known.loop,
-      rank: known === undefined ? PET_CLIPS.length : known.index,
-    })
-  }
-  clips.sort((a, b) => (a.rank === b.rank ? a.id.localeCompare(b.id, 'zh') : a.rank - b.rank))
-  return clips.map(({ rank, ...clip }) => clip)
-}
-
-/**
- * 从动作清单里取一个语义角色实际指向的动作 id。
- * @param {Array<{ id: string }>} clips 动作清单。
- * @param {string} wanted 期望的动作 id。
- * @returns {string} 存在则返回它，否则 `''`（客户端据此降级）。
- */
-function pickClip(clips, wanted) {
-  return clips.some((clip) => clip.id === wanted) ? wanted : ''
-}
-
-/**
  * 当前管理状态（界面上"上传/开关/恢复/素材库"的回显）。
  * @param {{ packageRoot: string, homeDir?: string, route: string }} options 位置。
  * @returns {Record<string, unknown>} 状态对象。
@@ -1797,8 +1881,10 @@ function pickClip(clips, wanted) {
 export function manageStatus(options) {
   // 一次 loadConfig 就够：`raw` 与 `sources` 已经在里面读好了。
   const { client, assetPath, warnings, raw } = loadConfig(options)
-  // 动作清单只扫一次：pet 里三处语义 + 列表都从它来（扫目录要 stat 每个文件）。
-  const petClips = listPetClips(options.packageRoot)
+  // 宠物包只扫一次：设置页的宠物卡、浮层的动作表都从它来（每个动作要 stat）。
+  const petPacks = listPetPacks(options.packageRoot)
+  const wantedPack = typeof raw.petPack === 'string' ? raw.petPack : ''
+  const activePack = petPacks.find((pack) => pack.id === wantedPack) ?? petPacks[0] ?? null
   const fileRaw = typeof raw.file === 'string' ? raw.file : ''
   const audioFileRaw = typeof raw.audioFile === 'string' ? raw.audioFile : ''
   const deleted = Array.isArray(raw.deleted)
@@ -1838,23 +1924,23 @@ export function manageStatus(options) {
     library: scanLibrary(options.packageRoot, deleted, options.homeDir),
     limitBytes: MEDIA_LIMIT_BYTES,
     /**
-     * 桌面宠物域：开关 / 大小 / 位置 / 动作列表。
+     * 桌面宠物域：开关 / 大小 / 位置 / 当前宠物 / 可用宠物包。
      *
      * `clips[].file` 是包内相对路径，客户端拼成 `ASSET?path=…` 取流 —— 复用既有的
      * 素材路由（它有 Range、ETag、逃逸防护），不为宠物再开一条发文件的通道。
+     * 封面同理（`cover` 是图片路径），缩略图不会额外做一份。
      *
-     * `idle` / `click` / `drag` 是**语义**：哪个动作当待机、点击时播哪个、拖动时播哪个。
-     * 由宿主决定、客户端照用，这样改文件名不用动前端。
+     * 包内 `roles` 是**语义**：哪个动作待机、点击时随机播哪几个、拖动时播哪个，
+     * 由宿主读 `pet.json` 决定，客户端照用 —— 换一套素材不用动前端。
      */
     pet: {
       enabled: raw.petEnabled === true,
       size: clampNumber(raw.petSize, DEFAULT_CONFIG.petSize, 100, 320),
       x: clampNumber(raw.petX, DEFAULT_CONFIG.petX, 0, 100),
       y: clampNumber(raw.petY, DEFAULT_CONFIG.petY, 0, 100),
-      idle: pickClip(petClips, PET_ROLES.idle) || (petClips[0] === undefined ? '' : petClips[0].id),
-      click: pickClip(petClips, PET_ROLES.click),
-      drag: pickClip(petClips, PET_ROLES.drag),
-      clips: petClips,
+      /** 当前宠物的包 id；没有包时 `''`（客户端不建浮层）。 */
+      pack: activePack === null ? '' : activePack.id,
+      packs: petPacks,
     },
     /**
      * 开机动画运行时的完整配置（boot.js 每次页面加载实时读取它 —— 桌面注入表是宿主
@@ -2397,8 +2483,20 @@ export function apply(ctx) {
                     }
                     patch[key] = clampNumber(body[key], DEFAULT_CONFIG[key], 0, 100)
                   }
+                  // 换宠物：必须是当前安装里真实存在的包 id，否则下次 manage 会静默回落到第一个。
+                  if (body.petPack !== undefined) {
+                    if (typeof body.petPack !== 'string') {
+                      reply(res, 400, { ok: false, error: '宠物选择必须是宠物包 id' })
+                      return
+                    }
+                    if (body.petPack !== '' && !listPetPacks(packageRoot).some((pack) => pack.id === body.petPack)) {
+                      reply(res, 400, { ok: false, error: `没有这个宠物包：${body.petPack}` })
+                      return
+                    }
+                    patch.petPack = body.petPack
+                  }
                   if (Object.keys(patch).length === 0) {
-                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "petEnabled", "petSize", "petX", "petY", "use", "useAudio" or "forget"' })
+                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "petEnabled", "petSize", "petX", "petY", "petPack", "use", "useAudio" or "forget"' })
                     return
                   }
                   try {

@@ -1,0 +1,19 @@
+{
+  "id": "hippo",
+  "name": "河马",
+  "description": "橙色小河马，9 段动作",
+  "canvas": [480, 648],
+  "cover": "cover.webp",
+  "roles": {
+    "idle": "待机",
+    "drag": "拖拽悬空",
+    "clicks": ["点击回应"],
+    "turn": [],
+    "moves": []
+  },
+  "ambient": ["interact", "chill"],
+  "categories": [
+    { "id": "interact", "name": "互动", "cover": "cat-interact.webp", "clips": ["点击回应", "害羞捂脸", "挥手打招呼"] },
+    { "id": "chill", "name": "休闲", "cover": "cat-chill.webp", "clips": ["吃橘子", "原地踏步", "原地小憩", "泡温泉"] }
+  ]
+}
