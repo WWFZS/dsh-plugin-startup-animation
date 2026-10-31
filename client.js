@@ -277,13 +277,14 @@ window.__ModuleLoader__.load({
 .dsa-set-sec { font-size: 13px; color: var(--dsw-alias-label-primary); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
 .dsa-set-range { width: 180px; accent-color: var(--dsw-alias-brand-primary); cursor: pointer; }
 .dsa-set-range:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
-/* 动作列表：一格一个动作，名字 + 播放方式；正在演的那个描边高亮。 */
-.dsa-set-acts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
-.dsa-set-act { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); font: inherit; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+/* 动作列表：一格一个动作，缩略图 + 名字；正在演的那个描边高亮。 */
+.dsa-set-acts { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; margin-top: 12px; }
+.dsa-set-act { display: flex; flex-direction: column; gap: 6px; align-items: stretch; padding: 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); font: inherit; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
 .dsa-set-act:hover { background: var(--dsw-alias-bg-layer-2); }
 .dsa-set-act:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dsa-set-act[data-on="1"] { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
 .dsa-set-act:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
+.dsa-set-act-thumb { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); display: block; }
 .dsa-set-act-name { font-size: 13px; line-height: 1.4; }
 .dsa-set-act-kind { font-size: 11.5px; line-height: 1.2; color: var(--dsw-alias-label-tertiary); }
 /* 宠物卡：封面 + 名字 + 动作数，一张卡代表一只宠物。 */
@@ -311,7 +312,8 @@ window.__ModuleLoader__.load({
 .dsa-set-input { font: inherit; font-size: 13px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; padding: 7px 10px; width: 100%; max-width: 320px; }
 .dsa-set-input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dsa-set-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.dsa-set-chip { font: inherit; font-size: 12.5px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; padding: 6px 10px; cursor: pointer; }
+.dsa-set-chip { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 12.5px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; padding: 5px 10px; cursor: pointer; }
+.dsa-set-chip-thumb { width: 22px; height: 22px; margin-left: -4px; object-fit: contain; border-radius: 50%; background: var(--dsw-alias-bg-layer-2); display: block; }
 .dsa-set-chip:hover { background: var(--dsw-alias-bg-layer-2); }
 .dsa-set-chip:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dsa-set-chip[data-on="1"] { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
@@ -2221,6 +2223,9 @@ window.__ModuleLoader__.load({
               disabled: busy || pet === null,
               onClick: () => previewPet(clip.id),
             },
+            clip.thumb
+              ? h('img', { className: 'dsa-set-act-thumb', src: petAsset(clip.thumb), alt: '', loading: 'lazy' })
+              : null,
             h('span', { className: 'dsa-set-act-name' }, clip.name),
           )
         const petResults =
@@ -2242,6 +2247,9 @@ window.__ModuleLoader__.load({
                           disabled: busy || pet === null,
                           onClick: () => previewPet(clip.id),
                         },
+                        clip.thumb
+                          ? h('img', { className: 'dsa-set-chip-thumb', src: petAsset(clip.thumb), alt: '', loading: 'lazy' })
+                          : null,
                         clip.name,
                       ),
                     ),

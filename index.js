@@ -301,7 +301,7 @@ export const BUILTIN_DIR_NAME = 'builtin'
  *
  * 目录结构是「一包一只宠物」：
  *
- *     builtin/宠物/河马/pet.json + 待机.webm + …
+ *     builtin/宠物/噜噜/pet.json + 待机.webm + thumbs/待机.webp + …
  *     builtin/宠物/女仆/pet.json + 待机呼吸休闲.webm + …（55 段）
  *
  * `pet.json` 声明语义（哪个文件待机、点击回应、分类），动作本身还是**扫目录**：
@@ -380,6 +380,17 @@ export function readPetPack(packageRoot, dirName) {
     return null
   }
   if (files.size === 0) return null
+
+  /** 动作缩略图：`thumbs/<动作>.webp`，由 tools/make-pet-thumbs.mjs 生成；没有就不显示。 */
+  const thumbs = new Set()
+  try {
+    for (const entry of fs.readdirSync(path.join(absDir, 'thumbs'), { withFileTypes: true })) {
+      if (!entry.isFile() || path.extname(entry.name).toLowerCase() !== '.webp') continue
+      thumbs.add(entry.name.slice(0, -'.webp'.length))
+    }
+  } catch {
+    /* 没做缩略图的包照样能用 */
+  }
 
   const asList = (/** @type {unknown} */ value) =>
     Array.isArray(value)
@@ -470,7 +481,13 @@ export function readPetPack(packageRoot, dirName) {
     /** 参与随机待机的分类；为空时客户端退化为「全部非事件分类」。 */
     ambient,
     categories,
-    clips: order.map((id) => ({ id, name: id, file: files.get(id), loop: id === roles.idle || id === roles.drag })),
+    clips: order.map((id) => ({
+      id,
+      name: id,
+      file: files.get(id),
+      thumb: thumbs.has(id) ? `${relDir}/thumbs/${id}.webp` : '',
+      loop: id === roles.idle || id === roles.drag,
+    })),
     count: order.length,
   }
 }

@@ -203,3 +203,4 @@ const pet = {
 fs.writeFileSync(path.join(outDir, 'pet.json'), `${JSON.stringify(pet, null, 2)}\n`)
 const total = clips.reduce((sum, name) => sum + fs.statSync(path.join(outDir, `${name}.webm`)).size, 0)
 console.log(`\n${clips.length} 段 / ${(total / 1048576).toFixed(1)} MB / ${categories.length} 个分类 → ${path.relative(process.cwd(), outDir)}`)
+console.log(`下一步（动作格缩略图 + 封面）：node tools/make-pet-thumbs.mjs "${path.relative(process.cwd(), outDir)}"`)

@@ -1,7 +1,7 @@
 {
-  "id": "hippo",
-  "name": "河马",
-  "description": "橙色小河马，9 段动作",
+  "id": "lulu",
+  "name": "噜噜",
+  "description": "橙色小水豚，9 段动作",
   "canvas": [480, 648],
   "cover": "cover.webp",
   "roles": {
