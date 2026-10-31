@@ -41,6 +41,7 @@ const SECONDS_OVERRIDE = new Map([
   ['550C-赛博控制台', 16],
   ['剑一', 14],
   ['薰衣草花语-等你爱我', 24],
+  ['少司缘', 16],
 ])
 const force = process.argv.includes('--force')
 
@@ -51,7 +52,7 @@ const force = process.argv.includes('--force')
  * 但有的素材本身就是在说话（带对白/旁白的那种），去掉音轨等于把内容删了 ——
  * 这类必须保留。按文件名列在这里，重跑构建时不会被无声抹掉。
  */
-const KEEP_AUDIO = new Set(['dsh-大肥鱼', '剑一', '薰衣草花语-等你爱我'])
+const KEEP_AUDIO = new Set(['dsh-大肥鱼', '剑一', '薰衣草花语-等你爱我', '少司缘'])
 
 /** 用 ffmpeg 压一版网页友好的 faststart mp4（按素材决定是否保留音轨）。 */
 function transcode(source, target) {
