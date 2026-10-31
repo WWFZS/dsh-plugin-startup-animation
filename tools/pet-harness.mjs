@@ -19,17 +19,16 @@ import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { PET_ROLES, listPetClips } from '../index.js'
+import { listPetPacks } from '../index.js'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const port = Number(process.argv[2] || 8792)
 
 /**
- * 动作清单**直接问宿主**（同一个 listPetClips），不在这里抄一份。
+ * 宠物包**直接问宿主**（同一个 listPetPacks），不在这里抄一份。
  * 抄一份的下场是：目录加了动作，测试台还显示旧的三个，白白怀疑代码。
  */
-const clips = listPetClips(root)
-const roleId = (want) => (clips.some((clip) => clip.id === want) ? want : '')
+const packs = listPetPacks(root)
 
 /** 假的管理状态：只保留浮层关心的字段。 */
 const state = {
@@ -38,10 +37,8 @@ const state = {
     size: 176,
     x: 100,
     y: 100,
-    idle: roleId(PET_ROLES.idle) || (clips[0] === undefined ? '' : clips[0].id),
-    click: roleId(PET_ROLES.click),
-    drag: roleId(PET_ROLES.drag),
-    clips,
+    pack: packs[0] === undefined ? '' : packs[0].id,
+    packs,
   },
 }
 
@@ -86,6 +83,7 @@ const PAGE = `<!doctype html>
 const types = {
   '.js': 'text/javascript; charset=utf-8',
   '.webm': 'video/webm',
+  '.webp': 'image/webp',
   '.mp4': 'video/mp4',
   '.json': 'application/json; charset=utf-8',
 }
@@ -117,7 +115,7 @@ http
           }
           // 配置键（petX / petEnabled…）→ 回包字段（x / enabled…），和宿主的 manage
           // 状态形状对齐：这样刷新页面还能读回上次拖到的位置，验持久化才有意义。
-          const FIELDS = { petEnabled: 'enabled', petSize: 'size', petX: 'x', petY: 'y' }
+          const FIELDS = { petEnabled: 'enabled', petSize: 'size', petX: 'x', petY: 'y', petPack: 'pack' }
           for (const [key, field] of Object.entries(FIELDS)) {
             if (body[key] !== undefined) state.pet[field] = body[key]
           }

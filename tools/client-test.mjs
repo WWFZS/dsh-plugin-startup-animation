@@ -216,18 +216,26 @@ async function loadClient(options = {}) {
       }
     },
     document: {
-      createElement: () => ({
-        style: {},
-        dataset: {},
-        classList: { add() {}, remove() {} },
-        setAttribute() {},
-        appendChild() {},
-        remove() {},
-        addEventListener() {},
-        removeEventListener() {},
-        play: () => Promise.resolve(),
-        pause() {},
-      }),
+      createElement: () => {
+        const attrs = {}
+        return {
+          style: {},
+          dataset: {},
+          classList: { add() {}, remove() {} },
+          setAttribute(name, value) {
+            attrs[name] = String(value)
+          },
+          getAttribute(name) {
+            return name in attrs ? attrs[name] : null
+          },
+          appendChild() {},
+          remove() {},
+          addEventListener() {},
+          removeEventListener() {},
+          play: () => Promise.resolve(),
+          pause() {},
+        }
+      },
       head: { appendChild() {} },
       body: { appendChild() {} },
     },
@@ -598,13 +606,53 @@ await check('内置素材删除 → 只写 forget，不真删', async () => {
 
 console.log('== 宠物 ==')
 
+/** 一个动作（宿主的真实形状：id/name/file/loop）。 */
+const petClip = (id, loop = false) => ({ id, name: id, file: `builtin/宠物/河马/${id}.webm`, loop })
+
+/** 小包：4 个动作，应该平铺成动作格。 */
+const HIPPO_PACK = {
+  id: 'hippo',
+  name: '河马',
+  description: '一只河马',
+  credit: null,
+  canvas: [480, 648],
+  cover: 'builtin/宠物/河马/cover.webp',
+  roles: { idle: '待机', drag: '', clicks: ['点击回应'], turn: [], moves: [] },
+  ambient: ['interact', 'chill'],
+  categories: [
+    { id: 'interact', name: '互动', cover: 'builtin/宠物/河马/cat-interact.webp', clips: ['点击回应', '害羞捂脸'] },
+    { id: 'chill', name: '休闲', cover: 'builtin/宠物/河马/cat-chill.webp', clips: ['吃橘子', '待机'] },
+  ],
+  clips: [petClip('待机', true), petClip('点击回应'), petClip('害羞捂脸'), petClip('吃橘子')],
+  count: 4,
+}
+
+/** 大包：109 个动作，应该按分类展示 + 搜索，不铺动作格。 */
+const MAID_CLIPS = Array.from({ length: 109 }, (_, i) => petClip(`动作${String(i + 1).padStart(3, '0')}`))
+const MAID_PACK = {
+  id: 'maid',
+  name: '女仆',
+  description: '一只女仆',
+  credit: {
+    author: 'PC2005-cloud',
+    name: 'dsh-pet',
+    url: 'https://github.com/PC2005-cloud/dsh-pet',
+    license: 'CC BY-NC-SA 4.0',
+  },
+  canvas: [360, 360],
+  cover: 'builtin/宠物/女仆/cover.webp',
+  roles: { idle: '动作058', drag: '', clicks: ['动作077'], turn: [], moves: [] },
+  ambient: ['play', 'food'],
+  categories: [
+    { id: 'play', name: '玩耍', cover: 'builtin/宠物/女仆/cat-play.webp', clips: MAID_CLIPS.slice(0, 60).map((clip) => clip.id) },
+    { id: 'food', name: '吃什么', cover: 'builtin/宠物/女仆/cat-food.webp', clips: MAID_CLIPS.slice(60).map((clip) => clip.id) },
+  ],
+  clips: MAID_CLIPS,
+  count: 109,
+}
+
 /** 带宠物域的 manage 状态（宿主的真实回包形状）。 */
-const DEFAULT_CLIPS = [
-  { id: '待机', name: '待机', file: 'builtin/宠物/待机.webm', loop: true },
-  { id: '点击回应', name: '点击回应', file: 'builtin/宠物/点击回应.webm', loop: false },
-  { id: '拖拽悬空', name: '拖拽悬空', file: 'builtin/宠物/拖拽悬空.webm', loop: true },
-]
-const petStatus = (pet) => ({
+const petStatus = (packs = [HIPPO_PACK], pack = 'hippo', over = {}) => ({
   ok: true,
   enabled: true,
   durationSec: 8,
@@ -617,16 +665,7 @@ const petStatus = (pet) => ({
   limitBytes: 1e9,
   library: [],
   cfg: {},
-  pet: pet ?? {
-    enabled: false,
-    size: 176,
-    x: 100,
-    y: 100,
-    idle: '待机',
-    click: '点击回应',
-    drag: '拖拽悬空',
-    clips: DEFAULT_CLIPS,
-  },
+  pet: { enabled: false, size: 176, x: 100, y: 100, pack, packs, ...over },
 })
 
 /** 切到宠物页签并返回这一轮渲染的树。 */
@@ -645,58 +684,141 @@ await check('页签顺序：MP4 / 壁纸 / 音频 / 宠物 / 更新公告', asyn
   assert.deepEqual(labels, ['MP4', '壁纸', '音频', '宠物', '更新公告'], `页签顺序不对：${labels.join(' / ')}`)
 })
 
-await check('宠物页签：开关 + 大小 + 动作列表', async () => {
+await check('宠物页签：开关 + 大小 + 宠物卡 + 动作区', async () => {
   const { render } = await loadClient({ status: petStatus() })
   const petTree = await openPetTab(render)
   const all = texts(petTree)
   assert.ok(all.includes('显示桌面宠物'), '没有宠物开关')
   assert.ok(all.includes('宠物大小'), '没有大小滑杆')
-  assert.ok(all.includes('动作列表'), '没有动作列表标题')
+  assert.ok(all.includes('宠物'), '没有宠物选择标题')
+  assert.ok(all.includes('动作'), '没有动作区标题')
   const range = findByProp(petTree, 'type').find(
     (el) => el.props.type === 'range' && el.props['aria-label'] === '宠物大小',
   )
   assert.ok(range, '找不到宠物大小滑杆')
   assert.equal(range.props.min, 100, '下界不是 100px')
   assert.equal(range.props.max, 320, '上界不是 320px')
+  const packs = findAll(petTree, 'dsa-set-pet')
+  assert.equal(packs.length, 1, `宠物卡数量不对：${packs.length}`)
+  assert.ok(texts(packs[0]).includes('河马'), '宠物卡上没有名字')
+  assert.ok(texts(packs[0]).includes('4 个动作'), `宠物卡上没有动作数：${texts(packs[0]).join('|')}`)
 })
 
-await check('动作列表来自 clips：丢一个动作进去就多一格', async () => {
-  const clips = [...DEFAULT_CLIPS, { id: '睡觉', name: '睡觉', file: 'builtin/宠物/睡觉.webm', loop: true }]
-  const { render } = await loadClient({
-    status: petStatus({ enabled: true, size: 176, x: 100, y: 100, idle: '待机', click: '点击回应', drag: '拖拽悬空', clips }),
-  })
+await check('小包动作直接平铺：丢一个动作进去就多一格', async () => {
+  const clip = petClip('睡觉', true)
+  const pack = { ...HIPPO_PACK, clips: [...HIPPO_PACK.clips, clip], count: 5 }
+  const { render } = await loadClient({ status: petStatus([pack]) })
   const petTree = await openPetTab(render)
   const cards = findAll(petTree, 'dsa-set-act')
-  assert.equal(cards.length, 4, `动作格数不对：${cards.length}`)
+  assert.equal(cards.length, 5, `动作格数不对：${cards.length}`)
   const names = cards.map((card) => texts(card)[0])
-  assert.deepEqual(names, ['待机', '点击回应', '拖拽悬空', '睡觉'], `动作名不对：${names.join(' / ')}`)
-  // 播放方式跟着 clips.loop 走：点击回应是单次，其余是循环。
-  assert.deepEqual(cards.map((card) => texts(card)[1]), ['循环', '单次', '循环', '循环'])
+  assert.deepEqual(names, ['待机', '点击回应', '害羞捂脸', '吃橘子', '睡觉'], `动作名不对：${names.join(' / ')}`)
 })
 
 await check('点动作格 → 通知浮层播这个名字对应的动作', async () => {
-  const { render, calls } = await loadClient({ status: petStatus({ enabled: true, size: 176, x: 100, y: 100, idle: '待机', click: '点击回应', drag: '拖拽悬空', clips: DEFAULT_CLIPS }) })
+  const { render, calls } = await loadClient({ status: petStatus([HIPPO_PACK], 'hippo', { enabled: true }) })
   const petTree = await openPetTab(render)
-  const card = findAll(petTree, 'dsa-set-act').find((el) => texts(el).includes('拖拽悬空'))
-  assert.ok(card, '找不到「拖拽悬空」')
+  const card = findAll(petTree, 'dsa-set-act').find((el) => texts(el).includes('害羞捂脸'))
+  assert.ok(card, '找不到「害羞捂脸」')
   card.props.onClick()
   const play = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-play')
   assert.ok(play, '没有通知浮层播放')
-  assert.equal(play.detail, '拖拽悬空', `播的动作不对：${play.detail}`)
+  assert.equal(play.detail, '害羞捂脸', `播的动作不对：${play.detail}`)
 })
 
 await check('浮层回报当前动作 → 对应那格高亮', async () => {
-  const { render, context } = await loadClient({
-    status: petStatus({ enabled: true, size: 176, x: 100, y: 100, idle: '待机', click: '点击回应', drag: '拖拽悬空', clips: DEFAULT_CLIPS }),
-  })
+  const { render, context } = await loadClient({ status: petStatus([HIPPO_PACK], 'hippo', { enabled: true }) })
   let petTree = await openPetTab(render)
-  // 模拟浮层切到「点击回应」。
-  context.window.dispatchEvent(new context.CustomEvent('dsa:pet-state', { detail: '点击回应' }))
+  // 浮层回报的是对象（v1.14.0 起带名字与包名）。
+  context.window.dispatchEvent(
+    new context.CustomEvent('dsa:pet-state', { detail: { id: '点击回应', name: '点击回应', pack: 'hippo', loop: false } }),
+  )
   petTree = await render()
-  const cards = findAll(petTree, 'dsa-set-act')
-  const on = cards.find((card) => card.props['data-on'] === '1')
+  const on = findAll(petTree, 'dsa-set-act').find((card) => card.props['data-on'] === '1')
   assert.ok(on, '没有高亮任何动作')
   assert.equal(texts(on)[0], '点击回应', `高亮错了：${texts(on)[0]}`)
+})
+
+await check('大包不铺动作格：分类卡 + 搜索 + 随机一个', async () => {
+  const { render } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const petTree = await openPetTab(render)
+  assert.equal(findAll(petTree, 'dsa-set-act').length, 0, '109 个动作不该平铺')
+  const cats = findAll(petTree, 'dsa-set-cat')
+  assert.equal(cats.length, 2, `分类卡数量不对：${cats.length}`)
+  const names = cats.map((cat) => texts(cat)[0])
+  assert.deepEqual(names, ['玩耍', '吃什么'], `分类不对：${names.join(' / ')}`)
+  const search = findAll(petTree, 'dsa-set-input')[0]
+  assert.ok(search, '没有搜索框')
+  assert.equal(search.props.placeholder, '搜索动作', '搜索框占位文案不对')
+  assert.ok(texts(petTree).includes('随机一个'), '没有「随机一个」按钮')
+})
+
+await check('大包搜索：最多 8 条命中，点 chip 播放', async () => {
+  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  let petTree = await openPetTab(render)
+  findAll(petTree, 'dsa-set-input')[0].props.onChange({ target: { value: '动作10' } })
+  petTree = await render()
+  const chips = findAll(petTree, 'dsa-set-chip')
+  assert.equal(chips.length, 8, `命中没截到 8 条：${chips.length}`)
+  assert.equal(texts(chips[0])[0], '动作100', `第一条不对：${texts(chips[0])[0]}`)
+  assert.equal(findAll(petTree, 'dsa-set-cat').length, 0, '搜索结果里不该再显示分类卡')
+  chips[0].props.onClick()
+  const play = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-play')
+  assert.equal(play && play.detail, '动作100', 'chip 没有触发播放')
+})
+
+await check('搜索无命中 → 说一句没有匹配的动作', async () => {
+  const { render } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  let petTree = await openPetTab(render)
+  findAll(petTree, 'dsa-set-input')[0].props.onChange({ target: { value: '不存在' } })
+  petTree = await render()
+  assert.equal(findAll(petTree, 'dsa-set-chip').length, 0, '不该有 chip')
+  assert.ok(texts(petTree).includes('没有匹配的动作'), '没有空结果提示')
+})
+
+await check('点分类卡 → 通知浮层在这个分类里随机演一个', async () => {
+  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const petTree = await openPetTab(render)
+  findAll(petTree, 'dsa-set-cat')
+    .find((cat) => texts(cat).includes('吃什么'))
+    .props.onClick()
+  const play = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-category')
+  assert.ok(play, '没有通知浮层按分类播放')
+  assert.equal(play.detail, 'food')
+})
+
+await check('「随机一个」→ 通知浮层随机演', async () => {
+  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const petTree = await openPetTab(render)
+  const btn = findByProp(petTree, 'className').find((el) => el.props.className === 'dsa-set-btn' && texts(el).includes('随机一个'))
+  assert.ok(btn, '找不到「随机一个」按钮')
+  btn.props.onClick()
+  assert.ok(
+    calls.some((call) => call.type === 'event' && call.name === 'dsa:pet-random'),
+    '没有通知浮层随机播放',
+  )
+})
+
+await check('换宠物 → 写回 petPack，卡片高亮跟着走', async () => {
+  const { render, calls } = await loadClient({ status: petStatus([HIPPO_PACK, MAID_PACK], 'hippo', { enabled: true }) })
+  const petTree = await openPetTab(render)
+  const cards = findAll(petTree, 'dsa-set-pet')
+  assert.equal(cards.length, 2, `宠物卡数量不对：${cards.length}`)
+  const maid = cards.find((card) => texts(card).includes('女仆'))
+  assert.ok(maid, '找不到女仆卡')
+  maid.props.onClick()
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.deepEqual(JSON.parse(post.init.body), { petPack: 'maid' })
+})
+
+await check('素材署名：带原作者链接', async () => {
+  const { render } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const petTree = await openPetTab(render)
+  const credit = findAll(petTree, 'dsa-set-credit')[0]
+  assert.ok(credit, '没有署名行')
+  const link = findByProp(credit, 'href')[0]
+  assert.equal(link.props.href, 'https://github.com/PC2005-cloud/dsh-pet', '没有链回原作者')
+  assert.ok(texts(credit).join(' ').includes('CC BY-NC-SA 4.0'), '没有写许可证')
 })
 
 await check('打开宠物开关 → 写回 petEnabled:true', async () => {
