@@ -633,8 +633,8 @@ const LULU_PACK = {
   count: 4,
 }
 
-/** 大包：55 个动作，应该按分类展示 + 搜索，不铺动作格。 */
-const MAID_CLIPS = Array.from({ length: 55 }, (_, i) => petClip(`动作${String(i + 1).padStart(3, '0')}`))
+/** 大包：109 个动作，应该按分类展示 + 搜索，不铺动作格。 */
+const MAID_CLIPS = Array.from({ length: 109 }, (_, i) => petClip(`动作${String(i + 1).padStart(3, '0')}`))
 const MAID_PACK = {
   id: 'maid',
   name: '女仆',
@@ -650,11 +650,11 @@ const MAID_PACK = {
   roles: { idle: '动作001', drag: '', clicks: ['动作002'], turn: [], moves: [] },
   ambient: ['play', 'food'],
   categories: [
-    { id: 'play', name: '玩耍', cover: 'builtin/宠物/女仆/cat-play.webp', clips: MAID_CLIPS.slice(0, 40).map((clip) => clip.id) },
-    { id: 'food', name: '吃什么', cover: 'builtin/宠物/女仆/cat-food.webp', clips: MAID_CLIPS.slice(40).map((clip) => clip.id) },
+    { id: 'play', name: '玩耍', cover: 'builtin/宠物/女仆/cat-play.webp', clips: MAID_CLIPS.slice(0, 60).map((clip) => clip.id) },
+    { id: 'food', name: '吃什么', cover: 'builtin/宠物/女仆/cat-food.webp', clips: MAID_CLIPS.slice(60).map((clip) => clip.id) },
   ],
   clips: MAID_CLIPS,
-  count: 55,
+  count: 109,
 }
 
 /** 带宠物域的 manage 状态（宿主的真实回包形状）。 */
@@ -752,7 +752,7 @@ await check('浮层回报当前动作 → 对应那格高亮', async () => {
 await check('大包不铺动作格：分类卡 + 搜索 + 随机一个', async () => {
   const { render } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
   const petTree = await openPetTab(render)
-  assert.equal(findAll(petTree, 'dsa-set-act').length, 0, '55 个动作不该平铺')
+  assert.equal(findAll(petTree, 'dsa-set-act').length, 0, '109 个动作不该平铺')
   const cats = findAll(petTree, 'dsa-set-cat')
   assert.equal(cats.length, 2, `分类卡数量不对：${cats.length}`)
   const names = cats.map((cat) => texts(cat)[0])
