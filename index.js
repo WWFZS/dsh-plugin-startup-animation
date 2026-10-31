@@ -302,7 +302,7 @@ export const BUILTIN_DIR_NAME = 'builtin'
  * 目录结构是「一包一只宠物」：
  *
  *     builtin/宠物/河马/pet.json + 待机.webm + …
- *     builtin/宠物/女仆/pet.json + 待机呼吸休闲.webm + …（109 段）
+ *     builtin/宠物/女仆/pet.json + 待机呼吸休闲.webm + …（55 段）
  *
  * `pet.json` 声明语义（哪个文件待机、点击回应、分类），动作本身还是**扫目录**：
  * 往里丢一个 `.webm` 就能在设置页搜索到，不用改代码。

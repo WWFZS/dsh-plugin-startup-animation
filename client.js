@@ -818,7 +818,7 @@ window.__ModuleLoader__.load({
 .dsa-pet[data-on="0"] { display: none; }
 .dsa-pet-stage { position: relative; width: 100%; pointer-events: auto; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; transform-origin: 50% 88%; transition: transform 210ms cubic-bezier(.22, 1.4, .36, 1); }
 .dsa-pet-stage[data-drag="1"] { cursor: grabbing; transition: none; }
-/* 两只 video 叠在同一格交替：切换只改 opacity。一次只挂两段素材 —— 109 段全建元素会一口气解码几十 MB。 */
+/* 两只 video 叠在同一格交替：切换只改 opacity。一次只挂两段素材 —— 全建元素会一口气解码几十 MB。 */
 .dsa-pet-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 160ms linear; pointer-events: none; }
 .dsa-pet-video[data-on="1"] { opacity: 1; }
 /* 右键菜单：跟随应用深浅色（同一份文档，--dsw-alias-* 全局可用）。 */
@@ -1187,9 +1187,9 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * 右键菜单：**按分类**点播，不是 109 条平铺。
+       * 右键菜单：**按分类**点播，不是几十条平铺。
        *
-       * 109 个动作的菜单会顶出屏幕，也没人从一百条里找；分类 + 「随机一个」够用，
+       * 几十个动作的菜单会顶出屏幕，也没人从几十条里一条条找；分类 + 「随机一个」够用，
        * 想指定某个动作去设置页搜。
        */
       const openMenu = (x, y) => {
@@ -2125,7 +2125,7 @@ window.__ModuleLoader__.load({
          * 宠物面板：开关 + 大小 + 宠物选择 + 动作区。
          *
          * 动作**不写死**：清单来自宿主扫描 `builtin/宠物/`，丢一个新 webm 进去就多一条。
-         * 动作少的包直接平铺；动作多的（女仆 109 段）按分类展示，配搜索和「随机一个」——
+         * 动作少的包直接平铺；动作多的（女仆 55 段）按分类展示，配搜索和「随机一个」——
          * 铺一百多个格子没人看得下去。
          */
         const pet = state && state.pet && typeof state.pet === 'object' ? state.pet : null
