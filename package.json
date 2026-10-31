@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-startup-animation",
-  "version": "1.12.7",
+  "version": "1.13.0",
   "type": "module",
   "description": "Animated full-screen startup screen shown while DeepSeek Harness boots — click to skip. Ships a built-in MP4/wallpaper/audio library and accepts your own files. 开机动画 / 启动动画：启动 Harness 时显示全屏动画，随包内置视频、壁纸与开机音频，也可以用自己的素材。",
   "license": "MIT",
@@ -56,7 +56,8 @@
     "screenshots.json",
     "LICENSE",
     "builtin/图片/**/*",
-    "builtin/音频/**/*"
+    "builtin/音频/**/*",
+    "builtin/宠物/**/*"
   ],
   "scripts": {
     "test": "node selftest.mjs && node tools/boot-runtime.mjs && node tools/client-test.mjs && node lib/self-manage-test.mjs && node lib/e2e-uninstall.mjs && node tools/boot-css-test.mjs && node tools/host-smoke.mjs",

@@ -21,6 +21,7 @@ const types = {
   '.jpg': 'image/jpeg',
   '.png': 'image/png',
   '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
   '.mp3': 'audio/mpeg',
   '.json': 'application/json',
 }

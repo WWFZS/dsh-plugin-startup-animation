@@ -151,6 +151,8 @@ function findByProp(node, prop) {
 async function loadClient(options = {}) {
   const React = createReact()
   const calls = []
+  /** window 事件监听（宠物浮层 ↔ 设置页的那条桥）。 */
+  const listeners = []
   const status = options.status ?? {
     ok: true,
     version: '1.10.0',
@@ -186,8 +188,49 @@ async function loadClient(options = {}) {
       },
       location: { reload: () => calls.push({ type: 'reload' }) },
       open: (...args) => calls.push({ type: 'open', args }),
+      innerWidth: 1280,
+      innerHeight: 800,
+      // 真实窗口上这两个就是全局函数的别名，垫片里补上（宠物浮层切动画时会用）。
+      setTimeout: (fn, ms) => setTimeout(fn, ms),
+      requestAnimationFrame: (fn) => setTimeout(() => fn(0), 16),
+      cancelAnimationFrame: (id) => clearTimeout(id),
+      // 宠物浮层用 window 事件和设置页通信（两边不在同一棵渲染树上）。
+      // 这里记下事件名，测试就能断言"点动作按钮 → 发了一条 dsa:pet-play"。
+      addEventListener: (name, fn) => {
+        listeners.push({ name, fn })
+      },
+      removeEventListener: (name) => {
+        const at = listeners.findIndex((entry) => entry.name === name)
+        if (at >= 0) listeners.splice(at, 1)
+      },
+      dispatchEvent: (event) => {
+        calls.push({ type: 'event', name: event.type, detail: event.detail })
+        for (const entry of listeners) if (entry.name === event.type) entry.fn(event)
+        return true
+      },
     },
-    document: { createElement: () => ({ style: {}, classList: { add() {} }, setAttribute() {} }) },
+    CustomEvent: class {
+      constructor(type, init) {
+        this.type = type
+        this.detail = init && init.detail
+      }
+    },
+    document: {
+      createElement: () => ({
+        style: {},
+        dataset: {},
+        classList: { add() {}, remove() {} },
+        setAttribute() {},
+        appendChild() {},
+        remove() {},
+        addEventListener() {},
+        removeEventListener() {},
+        play: () => Promise.resolve(),
+        pause() {},
+      }),
+      head: { appendChild() {} },
+      body: { appendChild() {} },
+    },
     fetch: (url, init) => {
       const path = String(url)
       calls.push({ type: 'fetch', url: path, init })
@@ -551,6 +594,144 @@ await check('内置素材删除 → 只写 forget，不真删', async () => {
   findAll(tree, 'dsa-set-card-del')[0].props.onClick({ stopPropagation() {} })
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
   assert.deepEqual(JSON.parse(post.init.body), { forget: 'builtin/MP4/内置.mp4' })
+})
+
+console.log('== 宠物 ==')
+
+/** 带宠物域的 manage 状态（宿主的真实回包形状）。 */
+const DEFAULT_CLIPS = [
+  { id: '待机', name: '待机', file: 'builtin/宠物/待机.webm', loop: true },
+  { id: '点击回应', name: '点击回应', file: 'builtin/宠物/点击回应.webm', loop: false },
+  { id: '拖拽悬空', name: '拖拽悬空', file: 'builtin/宠物/拖拽悬空.webm', loop: true },
+]
+const petStatus = (pet) => ({
+  ok: true,
+  enabled: true,
+  durationSec: 8,
+  mode: 'css',
+  custom: false,
+  name: '',
+  file: '',
+  audioFile: '',
+  audioBuiltin: false,
+  limitBytes: 1e9,
+  library: [],
+  cfg: {},
+  pet: pet ?? {
+    enabled: false,
+    size: 176,
+    x: 100,
+    y: 100,
+    idle: '待机',
+    click: '点击回应',
+    drag: '拖拽悬空',
+    clips: DEFAULT_CLIPS,
+  },
+})
+
+/** 切到宠物页签并返回这一轮渲染的树。 */
+const openPetTab = async (render) => {
+  const tree = await render()
+  findAll(tree, 'dsa-set-tab')
+    .find((tab) => tab.children[0] === '宠物')
+    .props.onClick()
+  return render()
+}
+
+await check('页签顺序：MP4 / 壁纸 / 音频 / 宠物 / 更新公告', async () => {
+  const { render } = await loadClient({ status: petStatus() })
+  const tree = await render()
+  const labels = findAll(tree, 'dsa-set-tab').map((tab) => tab.children[0])
+  assert.deepEqual(labels, ['MP4', '壁纸', '音频', '宠物', '更新公告'], `页签顺序不对：${labels.join(' / ')}`)
+})
+
+await check('宠物页签：开关 + 大小 + 动作列表', async () => {
+  const { render } = await loadClient({ status: petStatus() })
+  const petTree = await openPetTab(render)
+  const all = texts(petTree)
+  assert.ok(all.includes('显示桌面宠物'), '没有宠物开关')
+  assert.ok(all.includes('宠物大小'), '没有大小滑杆')
+  assert.ok(all.includes('动作列表'), '没有动作列表标题')
+  const range = findByProp(petTree, 'type').find(
+    (el) => el.props.type === 'range' && el.props['aria-label'] === '宠物大小',
+  )
+  assert.ok(range, '找不到宠物大小滑杆')
+  assert.equal(range.props.min, 100, '下界不是 100px')
+  assert.equal(range.props.max, 320, '上界不是 320px')
+})
+
+await check('动作列表来自 clips：丢一个动作进去就多一格', async () => {
+  const clips = [...DEFAULT_CLIPS, { id: '睡觉', name: '睡觉', file: 'builtin/宠物/睡觉.webm', loop: true }]
+  const { render } = await loadClient({
+    status: petStatus({ enabled: true, size: 176, x: 100, y: 100, idle: '待机', click: '点击回应', drag: '拖拽悬空', clips }),
+  })
+  const petTree = await openPetTab(render)
+  const cards = findAll(petTree, 'dsa-set-act')
+  assert.equal(cards.length, 4, `动作格数不对：${cards.length}`)
+  const names = cards.map((card) => texts(card)[0])
+  assert.deepEqual(names, ['待机', '点击回应', '拖拽悬空', '睡觉'], `动作名不对：${names.join(' / ')}`)
+  // 播放方式跟着 clips.loop 走：点击回应是单次，其余是循环。
+  assert.deepEqual(cards.map((card) => texts(card)[1]), ['循环', '单次', '循环', '循环'])
+})
+
+await check('点动作格 → 通知浮层播这个名字对应的动作', async () => {
+  const { render, calls } = await loadClient({ status: petStatus({ enabled: true, size: 176, x: 100, y: 100, idle: '待机', click: '点击回应', drag: '拖拽悬空', clips: DEFAULT_CLIPS }) })
+  const petTree = await openPetTab(render)
+  const card = findAll(petTree, 'dsa-set-act').find((el) => texts(el).includes('拖拽悬空'))
+  assert.ok(card, '找不到「拖拽悬空」')
+  card.props.onClick()
+  const play = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-play')
+  assert.ok(play, '没有通知浮层播放')
+  assert.equal(play.detail, '拖拽悬空', `播的动作不对：${play.detail}`)
+})
+
+await check('浮层回报当前动作 → 对应那格高亮', async () => {
+  const { render, context } = await loadClient({
+    status: petStatus({ enabled: true, size: 176, x: 100, y: 100, idle: '待机', click: '点击回应', drag: '拖拽悬空', clips: DEFAULT_CLIPS }),
+  })
+  let petTree = await openPetTab(render)
+  // 模拟浮层切到「点击回应」。
+  context.window.dispatchEvent(new context.CustomEvent('dsa:pet-state', { detail: '点击回应' }))
+  petTree = await render()
+  const cards = findAll(petTree, 'dsa-set-act')
+  const on = cards.find((card) => card.props['data-on'] === '1')
+  assert.ok(on, '没有高亮任何动作')
+  assert.equal(texts(on)[0], '点击回应', `高亮错了：${texts(on)[0]}`)
+})
+
+await check('打开宠物开关 → 写回 petEnabled:true', async () => {
+  const { render, calls } = await loadClient({ status: petStatus() })
+  const petTree = await openPetTab(render)
+  const toggle = findAll(petTree, 'dsa-set-switch').find((el) => el.props['aria-label'] === '显示桌面宠物')
+  assert.ok(toggle, '找不到宠物开关')
+  toggle.props.onClick()
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.deepEqual(JSON.parse(post.init.body), { petEnabled: true })
+})
+
+await check('宠物没开就点动作 → 先打开宠物，再通知浮层播放', async () => {
+  const { render, calls } = await loadClient({ status: petStatus() })
+  const petTree = await openPetTab(render)
+  findAll(petTree, 'dsa-set-act')
+    .find((card) => texts(card).includes('点击回应'))
+    .props.onClick()
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.deepEqual(JSON.parse(post.init.body), { petEnabled: true }, '没有先把宠物打开')
+  // 打开之后再发播放事件（等状态落地），否则浮层还没显示，动作白播。
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  const play = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-play')
+  assert.ok(play, '没有通知浮层播放')
+  assert.equal(play.detail, '点击回应', `播的动作不对：${play.detail}`)
+})
+
+await check('宠物大小越界 → 夹到 320 再写回', async () => {
+  const { render, calls } = await loadClient({ status: petStatus() })
+  const petTree = await openPetTab(render)
+  const range = findByProp(petTree, 'aria-label').find((el) => el.props['aria-label'] === '宠物大小')
+  range.props.onChange({ target: { value: '9999' } })
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.deepEqual(JSON.parse(post.init.body), { petSize: 320 }, '越界值没被夹到 320')
 })
 
 console.log('== 恢复默认与版本 ==')
