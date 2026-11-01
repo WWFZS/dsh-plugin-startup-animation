@@ -59,19 +59,30 @@ const srcDir = (() => {
   return at >= 0 ? process.argv[at + 1] : 'D:/不重要测试文件/lulu_pet/webm'
 })()
 
-/** geq 表达式：把「Y≥SHADOW_Y 且 低饱和 且 偏绿」的像素写成纯绿，其余原样。
- *  最后一条 `lte(R,G)` 很重要：木桶箍是深棕色（sat≈55，R 最大），只按"低饱和"判会
- *  把它当阴影抠掉，桶身就会裂成上下两截。绿幕上的阴影始终是绿的（G 最大）。 */
+/** geq 表达式：把「Y≥SHADOW_Y 且 低饱和 且 明显偏绿」的像素写成纯绿，其余原样。
+ *
+ *  两条边界条件都是踩出来的：
+ *  - `gt(G-R,12)` 而不是 `lte(R,G)`：白色/灰色的道具（比如"玩电脑"的笔记本）R≈G，
+ *    用 `lte(R,G)` 会把它们一并当成地面投影染绿抠掉，道具就"缺一块"。
+ *  - 木桶箍是深棕色（sat≈55，R 最大），`G-R` 为负，同样不会被误伤。
+ *  绿幕上的阴影始终是绿的，G 比 R 高出 20–40，卡 12 够分辨。 */
 function shadowPainter() {
   const R = 'r(X,Y)'
   const G = 'g(X,Y)'
   const B = 'b(X,Y)'
   const sat = `max(max(${R},${G}),${B})-min(min(${R},${G}),${B})`
-  const cond = `gte(Y,${SHADOW_Y})*lt(${sat},${SAT_MAX})*lte(${R},${G})`
+  const cond = `gte(Y,${SHADOW_Y})*lt(${sat},${SAT_MAX})*gt(${G}-${R},12)`
   return `geq=r='if(${cond},0,${R})':g='if(${cond},255,${G})':b='if(${cond},0,${B})'`
 }
 
-const vf = [CROP, 'format=yuva420p', shadowPainter(), CHROMAKEY, DESPILL].join(',')
+/**
+ * 滤镜链。
+ *
+ * **geq 前后必须夹一层 rgba**：yuva420p 是有限范围（16–235），在那里直接按 0–255
+ * 读写 RGB 会被当成 full range，整帧被拉亮 —— 表现就是"脸发光、眼睛发白"。
+ * 转成 rgba（full range）再 geq，色阶才对得上；算完再转回 yuva420p 走抠像编码。
+ */
+const vf = [CROP, 'format=rgba', shadowPainter(), 'format=yuva420p', CHROMAKEY, DESPILL].join(',')
 
 const run = (args) =>
   new Promise((resolve, reject) => {
