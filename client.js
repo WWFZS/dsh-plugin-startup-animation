@@ -818,13 +818,13 @@ window.__ModuleLoader__.load({
      * 甩抛物理：松手后按手部速度飞出去，撞视口边缘反弹，衰减到停下。
      *
      * 四个数值都是手调的手感，不是物理常数：
-     * - `SPEED_KEEP` 每秒保留多少速度（0.12 ≈ 一秒后剩一成），决定"能飞多远"；
-     * - `BOUNCE` 撞墙后保留多少速度（越小越"闷"，越大越"弹"）；
+     * - `SPEED_KEEP` 每秒保留多少速度，决定"能飞多远、弹几下"；
+     * - `BOUNCE` 撞墙后保留多少速度（0.82 ≈ 撞五次还剩三成，弹得很"活"）；
      * - `STOP` 低于这个速度（px/ms）就算停了，避免无限拖一条零头在飘；
      * - `MAX` 速度上限，防止一次抽搐把宠物甩到屏幕另一头。
      */
-    const PET_SPEED_KEEP = 0.12
-    const PET_BOUNCE = 0.55
+    const PET_SPEED_KEEP = 0.16
+    const PET_BOUNCE = 0.82
     const PET_STOP_SPEED = 0.06
     const PET_MAX_SPEED = 4
     /** 取样窗口：只拿最近这段的手部位移算速度 —— 松手前停住不动就不该起飞。 */
@@ -1305,7 +1305,7 @@ window.__ModuleLoader__.load({
       /** 撞墙那一下的挤压：给个明确的"弹到了"的反馈，飞行结束自己会清掉。 */
       const bump = () => {
         if (stage === null) return
-        stage.style.transform = 'scale(0.92, 1.08)'
+        stage.style.transform = 'scale(0.88, 1.12)'
         window.setTimeout(() => {
           if (stage !== null && flight !== null) stage.style.transform = ''
         }, 140)
