@@ -1561,11 +1561,16 @@ window.__ModuleLoader__.load({
         if (currentId === '' || clipById(currentId) === null) startIdle()
       }
 
-      /** 全局大小变了：重算高度与可移动范围（所有实例一起变）。 */
+      /** 全局大小变了：重算高度与可移动范围（所有实例一起变）。一帧最多排一次布局。 */
+      let sizeFrame = 0
       const setSize = (size) => {
         if (typeof size !== 'number' || !Number.isFinite(size) || size === pet.size) return
         pet.size = size
-        layout()
+        if (sizeFrame !== 0) return
+        sizeFrame = window.requestAnimationFrame(() => {
+          sizeFrame = 0
+          layout()
+        })
       }
 
       /** 归位：回到右下角并落盘。 */
@@ -1580,6 +1585,8 @@ window.__ModuleLoader__.load({
         window.removeEventListener('resize', onResize)
         if (frame !== 0) window.cancelAnimationFrame(frame)
         frame = 0
+        if (sizeFrame !== 0) window.cancelAnimationFrame(sizeFrame)
+        sizeFrame = 0
         clearAmbience()
         clearReturn()
         closeMenu()
@@ -1631,7 +1638,9 @@ window.__ModuleLoader__.load({
       const sync = (next) => {
         if (!next || typeof next !== 'object') return
         pet.enabled = next.enabled === true
-        if (typeof next.size === 'number' && Number.isFinite(next.size)) pet.size = next.size
+        // **不采纳 size**：大小由设置页的滑杆独占（拖的时候一路推 `dsa:pet-size`）。
+        // 每次回包都应用一次旧值的话，拖着滑杆的宠物会被拽回上一个尺寸 —— 看着就是卡。
+        // 首次真值由 load() 灌进来（见下）。
         if (Array.isArray(next.pets)) pet.pets = next.pets
         // 总开关关着、或一个宠物包都没有：不建 DOM（素材几十 MB，不该占带宽和内存）。
         if (!pet.enabled || pet.pets.length === 0) {
@@ -1671,9 +1680,20 @@ window.__ModuleLoader__.load({
           .then((res) => res.json())
           .then((payload) => {
             if (!payload || !payload.ok || !payload.pet) return
+            // 首次的大小从这里灌进来；之后只认滑杆推的事件。
+            if (typeof payload.pet.size === 'number' && Number.isFinite(payload.pet.size)) {
+              pet.size = payload.pet.size
+            }
             sync(payload.pet)
           })
           .catch(() => {})
+
+      /** 设置页拖滑杆时实时推过来的大小：所有实例一起变，**不落盘**。 */
+      const setSize = (size) => {
+        if (typeof size !== 'number' || !Number.isFinite(size)) return
+        pet.size = size
+        for (const instance of instances.values()) instance.setSize(size)
+      }
 
       /** 对某一只动手；包不在场（还没开/已关）就什么都不做。 */
       const withInstance = (packId, run) => {
@@ -1687,6 +1707,8 @@ window.__ModuleLoader__.load({
         play: (packId, id) => withInstance(packId, (instance) => instance.play(id)),
         playCategory: (packId, id) => withInstance(packId, (instance) => instance.playCategory(id)),
         random: (packId) => withInstance(packId, (instance) => instance.random()),
+        /** 滑杆实时推过来的大小：所有实例一起变（不落盘，落盘走原来的防抖 POST）。 */
+        setSize,
         /** 每只自己报一次，设置页按 pack 挑它关心的那条。 */
         report: () => {
           for (const instance of instances.values()) instance.report()
@@ -1751,7 +1773,16 @@ window.__ModuleLoader__.load({
         React.useEffect(() => {
           if (state && typeof state.durationSec === 'number') setSec(state.durationSec)
           if (state && typeof state.audioVolume === 'number') setAvol(Math.round(state.audioVolume * 100))
-          if (state && state.pet && typeof state.pet.size === 'number') setPetSize(state.pet.size)
+        }, [state])
+
+        // 宠物大小只**初始化一次**：之后这个值由滑杆独占。
+        // 每次回包都回写的话，拖着滑杆时旧值会把滑杆拽回去 —— 那就是"卡顿"的一半来源。
+        const petSizeInited = React.useRef(false)
+        React.useEffect(() => {
+          if (petSizeInited.current || !state || !state.pet) return
+          if (typeof state.pet.size !== 'number') return
+          petSizeInited.current = true
+          setPetSize(state.pet.size)
         }, [state])
 
         // 设置页里的改动（开关 / 大小）要立刻反映到浮层上：两边不在同一棵渲染树上，
@@ -1855,10 +1886,14 @@ window.__ModuleLoader__.load({
           }, 350)
         }
 
-        // 宠物大小：同展示时长的防抖方式（停手 350ms 提交一次）。
+        // 宠物大小：滑杆每动一格都**立刻**推给浮层（不落盘），停手 350ms 再提交一次。
+        //
+        // 为什么不能等回包再变：拖滑杆时宠物要是不跟手，手感就是"卡"——用户看到的是
+        // 一个 350ms 的静止 + 一次跳变。落盘与显示解耦，拖起来才是连续的。
         const onPetSize = (value) => {
           const next = Math.min(320, Math.max(100, Math.round(Number(value))))
           setPetSize(next)
+          window.dispatchEvent(new CustomEvent('dsa:pet-size', { detail: next }))
           if (petSizeRef.current !== null) clearTimeout(petSizeRef.current)
           petSizeRef.current = setTimeout(() => {
             petSizeRef.current = null
@@ -2963,6 +2998,8 @@ window.__ModuleLoader__.load({
             petLayer.random(detail === null || typeof detail !== 'object' ? '' : String(detail.pack || ''))
           }
           const onPetReset = () => petLayer.reset()
+          // 滑杆每动一格就推一次；浮层只改视觉，落盘另有 350ms 防抖。
+          const onPetSize = (event) => petLayer.setSize(Number(event.detail))
           // 设置页翻到宠物页签时会问一句"现在在演哪个"，好把动作列表的高亮对上。
           const onPetQuery = () => petLayer.report()
           window.addEventListener('dsa:pet-sync', onPetSync)
@@ -2970,6 +3007,7 @@ window.__ModuleLoader__.load({
           window.addEventListener('dsa:pet-category', onPetCategory)
           window.addEventListener('dsa:pet-random', onPetRandom)
           window.addEventListener('dsa:pet-reset', onPetReset)
+          window.addEventListener('dsa:pet-size', onPetSize)
           window.addEventListener('dsa:pet-query', onPetQuery)
           void petLayer.load()
 
@@ -2979,6 +3017,7 @@ window.__ModuleLoader__.load({
             window.removeEventListener('dsa:pet-category', onPetCategory)
             window.removeEventListener('dsa:pet-random', onPetRandom)
             window.removeEventListener('dsa:pet-reset', onPetReset)
+            window.removeEventListener('dsa:pet-size', onPetSize)
             window.removeEventListener('dsa:pet-query', onPetQuery)
             try {
               petLayer.destroy()

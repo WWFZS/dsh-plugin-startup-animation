@@ -900,6 +900,23 @@ await check('宠物没开就点动作 → 先打开宠物，再通知浮层播�
   assert.equal(play.detail && play.detail.pack, 'lulu', '播放事件没说播哪一只')
 })
 
+await check('拖大小滑杆 → 立刻推给浮层，落盘走防抖', async () => {
+  const { render, calls } = await loadClient({ status: petStatus() })
+  const petTree = await openPetTab(render)
+  const range = findByProp(petTree, 'type').find(
+    (el) => el.props.type === 'range' && el.props['aria-label'] === '宠物大小',
+  )
+  range.props.onChange({ target: { value: '260' } })
+  const size = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-size')
+  assert.ok(size, '拖滑杆没有实时推给浮层（宠物会等回包才变，看着卡）')
+  assert.equal(size.detail, 260, `推的尺寸不对：${size.detail}`)
+  assert.equal(
+    calls.filter((call) => call.type === 'fetch' && call.init?.method === 'POST').length,
+    0,
+    '滑杆还没停手就不该落盘',
+  )
+})
+
 await check('宠物大小越界 → 夹到 320 再写回', async () => {
   const { render, calls } = await loadClient({ status: petStatus() })
   const petTree = await openPetTab(render)
