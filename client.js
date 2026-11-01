@@ -8,7 +8,7 @@
  *      「更新公告」不是素材分类：它渲染 `/update` 顺手带回的 Release 正文（parseReleaseNotes）。
  *      「宠物」也不是素材分类：它是宠物开关 / 大小 / 动作预览，真身是页面右下角那只浮层。
  *
- * 宠物浮层（createPetOverlay）在 apply 阶段挂到 document.body 上，与设置页渲染树无关：
+ * 宠物浮层（createPetLayer）在 apply 阶段挂到 document.body 上，与设置页渲染树无关：
  * 关掉设置页它也还在，靠 window 事件（dsa:pet-sync / -play / -reset）和设置页通信。
  *
  * 素材**只在** MP4 / 壁纸卡片里选用：上传只入库不生效，点卡片才写入配置。
@@ -91,10 +91,12 @@ window.__ModuleLoader__.load({
       // ── 宠物（第三个页签；浮层与设置区的文案）──
       catPet: '宠物',
       petEnable: '显示桌面宠物',
-      petNote: '宠物浮在界面右下角：拖动换位置，松手会记住；点一下它会回应，右键按分类点播。',
+      petEnableAll: '显示所有宠物',
+      petNote: '每只宠物各自浮在界面上：拖动换位置、松手会记住，甩出去会撞边弹回来；点一下它会回应，右键按分类点播。开关在每张卡的右上角，可以同时开好几只。',
       petSize: '宠物大小',
       petAction: '动作',
       petPick: '宠物',
+      petPickHint: '点卡片选一只看它的动作；右上角开关决定它显不显示。',
       petUnit: '个动作',
       petRandom: '随机一个',
       petSearch: '搜索动作',
@@ -183,10 +185,12 @@ window.__ModuleLoader__.load({
       // ── Pet (third tab; overlay + settings copy) ──
       catPet: 'Pet',
       petEnable: 'Show desktop pet',
-      petNote: 'The pet floats in the bottom-right corner: drag it to move, click it for a reaction, right-click to play an action by category.',
+      petEnableAll: 'Show all pets',
+      petNote: 'Each pet floats on its own: drag to move, fling to bounce off the edges, click for a reaction, right-click to play an action by category. The switch on each card decides whether that pet shows up — several can be on at once.',
       petSize: 'Pet size',
       petAction: 'Actions',
-      petPick: 'Pet',
+      petPick: 'Pets',
+      petPickHint: 'Click a card to browse its actions; the switch in its corner decides whether it shows.',
       petUnit: 'actions',
       petRandom: 'Play a random one',
       petSearch: 'Search actions',
@@ -287,16 +291,23 @@ window.__ModuleLoader__.load({
 .dsa-set-act-thumb { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); display: block; }
 .dsa-set-act-name { font-size: 13px; line-height: 1.4; }
 .dsa-set-act-kind { font-size: 11.5px; line-height: 1.2; color: var(--dsw-alias-label-tertiary); }
-/* 宠物卡：封面 + 名字 + 动作数，一张卡代表一只宠物。 */
+/* 宠物卡：封面 + 名字 + 动作数 + 开关。外壳是容器，里面"选中"和"开关"各是一个按钮。 */
 .dsa-set-pets { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; margin-top: 12px; }
-.dsa-set-pet { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); font: inherit; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+.dsa-set-pet { position: relative; border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); transition: border-color 120ms ease, background 120ms ease; }
 .dsa-set-pet:hover { background: var(--dsw-alias-bg-layer-2); }
-.dsa-set-pet:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
-.dsa-set-pet[data-on="1"] { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
-.dsa-set-pet:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
+/* 选中的那只：描边主色。开着的卡用实线、关着的不抢眼（视觉上先分清"在不在显示"）。 */
+.dsa-set-pet[data-on="1"] { border-color: var(--dsw-alias-brand-primary); }
+.dsa-set-pet[data-live="0"] { opacity: 0.62; }
+.dsa-set-pet-hit { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 8px; background: none; border: 0; border-radius: 10px; font: inherit; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; }
+.dsa-set-pet-hit:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dsa-set-pet-hit:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
+/* 开关压在封面右上角，不占卡片高度 */
+.dsa-set-pet-switch { position: absolute; top: 8px; right: 8px; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); }
 .dsa-set-pet-cover { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 8px; background: var(--dsw-alias-bg-layer-2); display: block; }
 .dsa-set-pet-name { font-size: 13px; line-height: 1.4; }
 .dsa-set-pet-count { font-size: 11.5px; line-height: 1.2; color: var(--dsw-alias-label-tertiary); }
+/* 行标题右侧的一句小提示（多宠物时用来解释"点卡=看，开关=显示"） */
+.dsa-set-hint { font-size: 11.5px; color: var(--dsw-alias-label-tertiary); }
 /* 分类卡：动作多的包按分类挑，点一下随机演这个分类里的一个。 */
 .dsa-set-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; margin-top: 12px; }
 .dsa-set-cat { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); font: inherit; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
@@ -808,11 +819,26 @@ window.__ModuleLoader__.load({
     // 宠物浮层
     // ──────────────────────────────────────────────────────────────
 
-    /** 待机时两次随机动作之间的间隔（毫秒）：太密像抽风，太疏像静止。 */
-    const PET_IDLE_MIN_MS = 15000
-    const PET_IDLE_MAX_MS = 35000
+    /** 待机多久演一个小动作：固定 15 秒，**动作本身随机挑**（这样每只宠物的节奏一致）。 */
+    const PET_IDLE_MS = 15000
     /** 动作演完到回待机的停顿：直接跳回待机会在最后一帧上"啪"地一闪。 */
     const PET_RETURN_MS = 550
+
+    /**
+     * 甩抛物理：松手后按手部速度飞出去，撞视口边缘反弹，衰减到停下。
+     *
+     * 四个数值都是手调的手感，不是物理常数：
+     * - `SPEED_KEEP` 每秒保留多少速度，决定"能飞多远、弹几下"；
+     * - `BOUNCE` 撞墙后保留多少速度（0.82 ≈ 撞五次还剩三成，弹得很"活"）；
+     * - `STOP` 低于这个速度（px/ms）就算停了，避免无限拖一条零头在飘；
+     * - `MAX` 速度上限，防止一次抽搐把宠物甩到屏幕另一头。
+     */
+    const PET_SPEED_KEEP = 0.16
+    const PET_BOUNCE = 0.82
+    const PET_STOP_SPEED = 0.06
+    const PET_MAX_SPEED = 4
+    /** 取样窗口：只拿最近这段的手部位移算速度 —— 松手前停住不动就不该起飞。 */
+    const PET_VELOCITY_WINDOW_MS = 100
 
     /** 浮层样式。挂 body 的常驻元素，不走组件局部样式，单独注入一份 <style>。 */
     const PET_STYLE = `
@@ -830,15 +856,21 @@ window.__ModuleLoader__.load({
 .dsa-pet-menu-item:hover { background: var(--dsw-alias-bg-layer-2, rgba(128, 128, 128, 0.12)); }
 .dsa-pet-menu-item[data-on="1"] { color: var(--dsw-alias-brand-primary, #4b6bfb); }
 .dsa-pet-menu-sep { height: 1px; margin: 5px 6px; background: var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.25)); }
+/* 二级菜单的返回行：看起来像标题，点一下回上一级 */
+.dsa-pet-menu-back { display: block; width: 100%; text-align: left; font: inherit; font-size: 11.5px; color: var(--dsw-alias-label-secondary, #666); background: none; border: 0; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.25)); padding: 4px 8px 6px; margin-bottom: 3px; cursor: pointer; white-space: nowrap; }
+.dsa-pet-menu-back:hover { color: var(--dsw-alias-label-primary, #333); }
 .dsa-pet-menu-count { color: var(--dsw-alias-label-tertiary, #999); font-size: 11px; margin-left: 4px; }
 `
 
     /**
-     * 桌面宠物浮层。
+     * 一只宠物的浮层实例。
      *
      * 为什么不用 React：它挂在 `document.body` 上，生命周期跨整个应用，和设置页的
      * 渲染树没有关系（关掉设置页宠物还在）。原生 DOM 让"进设置页才创建、退出就
      * 销毁"这类错误不可能发生，也省掉一次 createRoot。
+     *
+     * 一只 = 一个 host + 一个舞台 + 两个 video 槽位 + 一套自己的节奏与物理状态。
+     * 多只同屏就是多个实例，彼此不共享任何可变状态（大小除外，那是全局的）。
      *
      * 节奏：待机动作循环；每隔 15–35 秒随机演一个分类里的动作，演完回待机；
      * 左键随机回应、拖拽时循环"拖拽悬空"、右键按分类点播。
@@ -847,12 +879,15 @@ window.__ModuleLoader__.load({
      * （0 = 贴左/贴上，100 = 贴右/贴下），所以窗口缩放后宠物仍然贴着同一角，
      * 也不会跑到屏幕外。像素位置 = 百分比 × (视口 − 宠物尺寸)。
      *
-     * @param {{ onPersist: (patch: object) => void, t: (key: string) => string }} options 位置落盘回调 + 菜单文案。
-     * @returns {{ load: () => Promise<void>, sync: (pet: object) => void, play: (id: string) => void, playCategory: (id: string) => void, random: () => void, report: () => void, reset: () => void, destroy: () => void }} 浮层控制器。
+     * @param {{ entry: object, size: number, t: (key: string) => string, onPersist: (patch: object) => void, onMenuOpen: () => void }} options
+     *   入口配置（宠物包 + 它的位置）、共用大小、文案、落盘回调、开菜单前通知外层。
+     * @returns {{ update: (entry: object) => void, setSize: (size: number) => void, play: (id: string) => void, playCategory: (id: string) => void, random: () => void, report: () => void, reset: () => void, closeMenu: () => void, destroy: () => void }} 实例控制器。
      */
-    function createPetOverlay(options) {
+    function createPetInstance(options) {
       const onPersist = options.onPersist
       const t = options.t
+      /** 这只宠物的包（每次 sync 换成最新的那份对象，内容不变时不动 DOM）。 */
+      let entry = options.entry
       /** @type {HTMLStyleElement | null} */
       let styleEl = null
       /** @type {HTMLDivElement | null} */
@@ -864,8 +899,8 @@ window.__ModuleLoader__.load({
       let active = 0
       /** 已构建的包指纹：换宠物（或素材数变了）才重置 DOM。 */
       let builtKey = ''
-      /** 当前配置快照（位置字段只在 load/reset 时采纳，见 sync 的注释）。 */
-      let pet = { enabled: false, size: 176, x: 100, y: 100, pack: '', packs: [] }
+      /** 这一只自己的位置与大小（大小是全层共用的，由 setSize 推下来）。 */
+      let pet = { size: options.size, x: entry.x, y: entry.y }
       /** @type {any} 当前宠物包（宿主给的完整结构）。 */
       let pack = null
       let currentId = ''
@@ -875,8 +910,10 @@ window.__ModuleLoader__.load({
       /** "演完了回待机"的计时器。 */
       let returnTimer = 0
       let lastRandomId = ''
-      /** @type {{ id: number, dx: number, dy: number, startX: number, startY: number, moved: boolean } | null} */
+      /** @type {{ id: number, dx: number, dy: number, startX: number, startY: number, moved: boolean, samples: { x: number, y: number, t: number }[] } | null} */
       let drag = null
+      /** @type {{ vx: number, vy: number, raf: number, last: number } | null} 松手后的惯性飞行。 */
+      let flight = null
       let frame = 0
       /** @type {HTMLDivElement | null} 右键菜单（同一时刻至多一个）。 */
       let menu = null
@@ -944,13 +981,18 @@ window.__ModuleLoader__.load({
        * 重新申请解码器，切换宠物时会白屏一下。
        */
       const build = () => {
-        const next = pet.packs.find((item) => item.id === pet.pack) ?? pet.packs[0] ?? null
-        const key = next === null ? '' : `${next.id}:${next.clips.length}:${next.canvas.join('x')}`
-        if (key === builtKey && next === pack) return
+        const next = entry
+        const key = `${next.id}:${next.clips.length}:${next.canvas.join('x')}`
+        if (key === builtKey) {
+          // 内容没变（每次回包都是新对象）：更新引用就够了，别重建 DOM。
+          pack = next
+          return
+        }
         builtKey = key
         pack = next
         clearAmbience()
         clearReturn()
+        stopFlight()
         currentId = ''
         mode = 'idle'
         lastRandomId = ''
@@ -1062,7 +1104,9 @@ window.__ModuleLoader__.load({
           }
         }, 200)
         currentId = id
-        mode = once ? 'action' : loop ? 'loop' : 'action'
+        // **不在这里改 mode**：调用方比这里更清楚这次是"待机""一次性动作"还是"拖拽"。
+        // 以前在这里按 loop/once 反推，会把待机（loop=true）写成 'loop'，
+        // 于是 15 秒后的随机回调一看到 `mode !== 'idle'` 就早退 —— 随机动作永远不触发。
         // 告诉设置页"现在在演哪一段"（宠物自己切的时候也要高亮到对的位置）。
         window.dispatchEvent(
           new CustomEvent('dsa:pet-state', { detail: { id, name: clip.name, pack: pack.id, loop } }),
@@ -1071,7 +1115,7 @@ window.__ModuleLoader__.load({
 
       /** 回待机：循环 idle 动作，并重新排下一次随机。 */
       const startIdle = () => {
-        if (!pet.enabled || pack === null) return
+        if (pack === null) return
         clearReturn()
         clearAmbience()
         mode = 'idle'
@@ -1083,7 +1127,7 @@ window.__ModuleLoader__.load({
 
       /** 演一个一次性动作，演完回待机。 */
       const playAction = (id) => {
-        if (!pet.enabled || pack === null) return
+        if (pack === null) return
         const clip = clipById(id)
         if (clip === null) {
           startIdle()
@@ -1091,6 +1135,7 @@ window.__ModuleLoader__.load({
         }
         clearAmbience()
         clearReturn()
+        mode = 'action'
         show(id, false, true)
       }
 
@@ -1099,34 +1144,33 @@ window.__ModuleLoader__.load({
         clearReturn()
         returnTimer = window.setTimeout(() => {
           returnTimer = 0
-          if (pet.enabled && mode === 'action') startIdle()
+          if (mode === 'action' && pack !== null) startIdle()
         }, PET_RETURN_MS)
       }
 
-      /** 排下一次随机动作；已经在演一次性动作时不排（回待机时会重排）。 */
+      /** 待机满 15 秒就随机演一个小动作（动作随机、时间固定）；演的时候不排，回待机再排。 */
       function scheduleAmbience() {
         clearAmbience()
-        if (!pet.enabled || pack === null) return
-        const delay = PET_IDLE_MIN_MS + Math.random() * (PET_IDLE_MAX_MS - PET_IDLE_MIN_MS)
+        if (pack === null) return
         ambienceTimer = window.setTimeout(() => {
           ambienceTimer = 0
-          if (!pet.enabled || mode !== 'idle') return
+          if (mode !== 'idle' || pack === null) return
           const clip = randomClip(ambientClips())
           if (clip !== null) playAction(clip.id)
           else scheduleAmbience()
-        }, delay)
+        }, PET_IDLE_MS)
       }
 
       /** 设置页"随机一个"：立刻插播。 */
       const random = () => {
-        if (!pet.enabled || pack === null) return
+        if (pack === null) return
         const clip = randomClip(ambientClips())
         if (clip !== null) playAction(clip.id)
       }
 
       /** 按分类随机点播（右键菜单与设置页的分类卡）。 */
       const playCategory = (categoryId) => {
-        if (!pet.enabled || pack === null) return
+        if (pack === null) return
         const category = pack.categories.find((item) => item.id === categoryId)
         if (category === undefined) return
         const clip = randomClip(clipsOf(category.clips))
@@ -1155,7 +1199,7 @@ window.__ModuleLoader__.load({
 
       /** 左键点击：随机一个回应动作；没有回应角色就随机一个待机动作。 */
       const playClick = () => {
-        if (!pet.enabled || pack === null) return
+        if (pack === null) return
         playClickSound()
         const clicks = clipsOf(pack.roles.clicks)
         const clip = randomClip(clicks.length > 0 ? clicks : ambientClips())
@@ -1193,11 +1237,12 @@ window.__ModuleLoader__.load({
         if (menu !== null && event.target instanceof Node && !menu.contains(event.target)) closeMenu()
       }
 
-      const menuItem = (label, onClick, count) => {
+      const menuItem = (label, onClick, count, active = false) => {
         const item = document.createElement('button')
         item.type = 'button'
         item.className = 'dsa-pet-menu-item'
         item.textContent = label
+        if (active) item.dataset.on = '1'
         if (typeof count === 'number') {
           const badge = document.createElement('span')
           badge.className = 'dsa-pet-menu-count'
@@ -1211,31 +1256,58 @@ window.__ModuleLoader__.load({
         return item
       }
 
+      const menuSep = () => Object.assign(document.createElement('div'), { className: 'dsa-pet-menu-sep' })
+
       /**
-       * 右键菜单：**按分类**点播，不是几十条平铺。
+       * 右键菜单：**两级**。
        *
-       * 几十个动作的菜单会顶出屏幕，也没人从几十条里一条条找；分类 + 「随机一个」够用，
-       * 想指定某个动作去设置页搜。
+       * 一级是分类（互动 4 / 休闲 4 / 工作 1）；点进去是二级 —— 那个分类里每个动作的
+       * 完整名字，点哪条演哪条，正在演的那条标色。
+       *
+       * 为什么不用"悬停弹出子菜单"：动作名长短差很多（「动作001」到「换上圣诞主题皮肤」），
+       * 悬浮子菜单要处理贴边翻向、触摸屏还根本没有 hover；点进去 + 返回更稳，也照样能滚。
+       *
+       * @param {number} x 贴着鼠标展开的横坐标。
+       * @param {number} y 纵坐标。
+       * @param {object | null} category 已进入的分类；null = 一级。
        */
-      const openMenu = (x, y) => {
+      const openMenu = (x, y, category = null) => {
         if (pack === null) return
         closeMenu()
         ensureStyle()
         menu = document.createElement('div')
         menu.className = 'dsa-pet-menu'
-        const head = document.createElement('div')
-        head.className = 'dsa-pet-menu-head'
-        head.textContent = t('petMenuActions')
-        menu.appendChild(head)
-        for (const category of pack.categories) {
-          menu.appendChild(menuItem(category.name, () => playCategory(category.id), category.clips.length))
+        if (category === null) {
+          const head = document.createElement('div')
+          head.className = 'dsa-pet-menu-head'
+          head.textContent = t('petMenuActions')
+          menu.appendChild(head)
+          for (const item of pack.categories) {
+            // 点分类 = 进它的二级，不直接演（演哪个由用户在二级里挑）。
+            menu.appendChild(menuItem(item.name, () => openMenu(x, y, item), item.clips.length))
+          }
+          menu.appendChild(menuItem(t('petRandom'), random))
+          menu.appendChild(menuSep())
+          menu.appendChild(menuItem(t('petReset'), reset))
+          menu.appendChild(menuItem(t('petHide'), hideSelf))
+        } else {
+          // 标题行就是"返回"：点它回一级。
+          const back = document.createElement('button')
+          back.type = 'button'
+          back.className = 'dsa-pet-menu-back'
+          back.textContent = `‹ ${category.name}`
+          back.addEventListener('click', () => openMenu(x, y, null))
+          menu.appendChild(back)
+          for (const id of category.clips) {
+            const clip = clipById(id)
+            if (clip === null) continue
+            menu.appendChild(menuItem(clip.name, () => playAction(clip.id), undefined, clip.id === currentId))
+          }
+          menu.appendChild(menuSep())
+          menu.appendChild(menuItem(t('petRandom'), () => playCategory(category.id)))
         }
-        menu.appendChild(menuItem(t('petRandom'), random))
-        menu.appendChild(Object.assign(document.createElement('div'), { className: 'dsa-pet-menu-sep' }))
-        menu.appendChild(menuItem(t('petReset'), reset))
-        menu.appendChild(menuItem(t('petHide'), hideSelf))
         document.body.appendChild(menu)
-        // 贴着鼠标展开，但不许出屏。
+        // 贴着鼠标展开，但不许出屏（二级更高，每级都重新夹一遍）。
         const rect = menu.getBoundingClientRect()
         const left = Math.max(4, Math.min(x, window.innerWidth - rect.width - 4))
         const top = Math.max(4, Math.min(y, window.innerHeight - rect.height - 4))
@@ -1244,11 +1316,11 @@ window.__ModuleLoader__.load({
         document.addEventListener('pointerdown', onMenuDocDown, true)
       }
 
-      /** 菜单里的"隐藏"：等于设置页那个总开关，落盘后浮层会随 sync 自己收起来。 */
+      /** 菜单里的"隐藏"：只关这一只（总开关不动，别的宠物不受影响）。 */
       const hideSelf = () => {
         clearAmbience()
         clearReturn()
-        onPersist({ petEnabled: false })
+        if (pack !== null) onPersist({ petToggle: { pack: pack.id, enabled: false } })
       }
 
       /** 把当前像素位置写回百分比并落盘（拖动结束时调用）。 */
@@ -1262,13 +1334,130 @@ window.__ModuleLoader__.load({
         const top = Number.parseFloat(host.style.top) || 0
         pet.x = Math.max(0, Math.min(100, Math.round((left / maxLeft) * 1000) / 10))
         pet.y = Math.max(0, Math.min(100, Math.round((top / maxTop) * 1000) / 10))
-        onPersist({ petX: pet.x, petY: pet.y })
+        onPersist({ petMove: { pack: pack.id, x: pet.x, y: pet.y } })
+      }
+
+      // ── 甩抛 / 反弹 ──
+      //
+      // 松手时按最后 100ms 的手部位移算速度；够快就"扔出去"：每帧按速度推进，
+      // 指数衰减，撞到视口边缘反向并按 BOUNCE 打折。速度掉到 STOP 以下就停稳，
+      // 落盘位置、回待机。飞行期间继续演「拖拽悬空」——被扔出去的样子就该还是它。
+
+      /** 宠物当前的尺寸与可移动范围（飞行/拖拽/布局共用一套口径）。 */
+      const bounds = () => {
+        const width = pet.size
+        const height = pack === null ? width : Math.round((width * pack.canvas[1]) / pack.canvas[0])
+        return {
+          width,
+          height,
+          maxLeft: Math.max(0, window.innerWidth - width),
+          maxTop: Math.max(0, window.innerHeight - height),
+        }
+      }
+
+      /** 撞墙那一下的挤压：给个明确的"弹到了"的反馈，飞行结束自己会清掉。 */
+      const bump = () => {
+        if (stage === null) return
+        stage.style.transform = 'scale(0.88, 1.12)'
+        window.setTimeout(() => {
+          if (stage !== null && flight !== null) stage.style.transform = ''
+        }, 140)
+      }
+
+      /** 停稳：落盘位置、清掉飞行状态、回待机。 */
+      const finishFlight = () => {
+        if (flight !== null && flight.raf !== 0) window.cancelAnimationFrame(flight.raf)
+        flight = null
+        if (stage !== null) stage.style.transform = ''
+        commitPosition()
+        if (pack !== null) startIdle()
+      }
+
+      /** 一帧物理：推进 → 撞边反弹 → 衰减 → 判定停下。 */
+      const stepFlight = (now) => {
+        if (flight === null || host === null) return
+        // 掉帧保护：dt 太大（切后台回来）会让宠物一帧瞬移出屏幕，按 48ms 封顶。
+        const dt = Math.min(48, Math.max(1, now - flight.last))
+        flight.last = now
+        const { maxLeft, maxTop } = bounds()
+        let left = (Number.parseFloat(host.style.left) || 0) + flight.vx * dt
+        let top = (Number.parseFloat(host.style.top) || 0) + flight.vy * dt
+        let hit = false
+        if (left < 0) {
+          left = -left
+          flight.vx = -flight.vx * PET_BOUNCE
+          hit = true
+        } else if (left > maxLeft) {
+          left = maxLeft * 2 - left
+          flight.vx = -flight.vx * PET_BOUNCE
+          hit = true
+        }
+        if (top < 0) {
+          top = -top
+          flight.vy = -flight.vy * PET_BOUNCE
+          hit = true
+        } else if (top > maxTop) {
+          top = maxTop * 2 - top
+          flight.vy = -flight.vy * PET_BOUNCE
+          hit = true
+        }
+        // 一帧位移超过整块屏幕时（极端速度 + 长帧）上面那套镜像会算到边界外，贴回去。
+        left = Math.max(0, Math.min(maxLeft, left))
+        top = Math.max(0, Math.min(maxTop, top))
+        host.style.left = `${Math.round(left)}px`
+        host.style.top = `${Math.round(top)}px`
+        if (hit) bump()
+        if (Math.hypot(flight.vx, flight.vy) < PET_STOP_SPEED) {
+          finishFlight()
+          return
+        }
+        // 按真实时间衰减：掉帧时速度曲线不会变形（固定按帧乘会把慢机器的宠物甩更远）。
+        const decay = Math.pow(PET_SPEED_KEEP, dt / 1000)
+        flight.vx *= decay
+        flight.vy *= decay
+        flight.raf = window.requestAnimationFrame(stepFlight)
+      }
+
+      /**
+       * 起飞。
+       * @param {number} vx 水平速度（px/ms）。
+       * @param {number} vy 垂直速度（px/ms）。
+       */
+      const startFlight = (vx, vy) => {
+        if (host === null) return
+        const speed = Math.hypot(vx, vy)
+        // 没甩（慢慢拖到位置就松手）：不算飞，直接收尾。
+        if (speed < PET_STOP_SPEED) {
+          commitPosition()
+          if (pack !== null) startIdle()
+          return
+        }
+        const cap = Math.min(1, PET_MAX_SPEED / speed)
+        flight = { vx: vx * cap, vy: vy * cap, raf: 0, last: performance.now() }
+        if (stage !== null) {
+          stage.dataset.drag = '0'
+          stage.style.transform = ''
+        }
+        // 飞行期间保持"被扔出去"的动作；没有拖拽角色就演当前那段，别中途乱切。
+        flight.raf = window.requestAnimationFrame(stepFlight)
+      }
+
+      /** 打断飞行（用户又抓住了它 / 关掉宠物）：位置不落盘，等松手时统一提交。 */
+      const stopFlight = () => {
+        if (flight !== null && flight.raf !== 0) window.cancelAnimationFrame(flight.raf)
+        flight = null
+        if (stage !== null) stage.style.transform = ''
       }
 
       /** 拖动开始：接管指针、切到拖拽动作。 */
       const onPointerDown = (event) => {
-        if (event.button !== 0 || host === null || !pet.enabled || pack === null) return
+        if (event.button !== 0 || host === null || pack === null) return
         closeMenu()
+        // 飞行中又被抓住：钉在当前位置，先落盘 —— 用户抓到的就是它此刻待的地方。
+        if (flight !== null) {
+          stopFlight()
+          commitPosition()
+        }
         const rect = host.getBoundingClientRect()
         drag = {
           id: event.pointerId,
@@ -1277,6 +1466,8 @@ window.__ModuleLoader__.load({
           startX: event.clientX,
           startY: event.clientY,
           moved: false,
+          // 手部位移采样：松手时用最近 100ms 这段算甩出去的速度。
+          samples: [{ x: event.clientX, y: event.clientY, t: performance.now() }],
         }
         stage.dataset.drag = '1'
         try {
@@ -1298,13 +1489,14 @@ window.__ModuleLoader__.load({
         if (drag === null || event.pointerId !== drag.id || host === null || pack === null) return
         const dx = event.clientX - drag.startX
         const dy = event.clientY - drag.startY
+        // 采样先于门槛：门槛只决定"算不算拖拽"，速度还要靠这些点。
+        drag.samples.push({ x: event.clientX, y: event.clientY, t: performance.now() })
+        const cutoff = performance.now() - PET_VELOCITY_WINDOW_MS
+        while (drag.samples.length > 2 && drag.samples[0].t < cutoff) drag.samples.shift()
         // 4px 门槛：点击时手会抖一两像素，不该被当成拖拽。
         if (!drag.moved && Math.hypot(dx, dy) < 4) return
         drag.moved = true
-        const width = pet.size
-        const height = Math.round((width * pack.canvas[1]) / pack.canvas[0])
-        const maxLeft = Math.max(0, window.innerWidth - width)
-        const maxTop = Math.max(0, window.innerHeight - height)
+        const { maxLeft, maxTop } = bounds()
         const left = Math.max(0, Math.min(maxLeft, event.clientX - drag.dx))
         const top = Math.max(0, Math.min(maxTop, event.clientY - drag.dy))
         host.style.left = `${Math.round(left)}px`
@@ -1316,6 +1508,7 @@ window.__ModuleLoader__.load({
       const onPointerUp = (event) => {
         if (drag === null || event.pointerId !== drag.id) return
         const moved = drag.moved
+        const samples = drag.samples
         drag = null
         if (stage !== null) {
           stage.dataset.drag = '0'
@@ -1327,8 +1520,20 @@ window.__ModuleLoader__.load({
           /* 已经释放 */
         }
         if (moved) {
-          commitPosition()
-          startIdle()
+          // 用最近这段采样的平均速度当作甩出去的速度（单次位移噪声太大）。
+          const last = samples[samples.length - 1]
+          let vx = 0
+          let vy = 0
+          if (samples.length >= 2 && last !== undefined) {
+            const cutoff = last.t - PET_VELOCITY_WINDOW_MS
+            const first = samples.find((sample) => sample.t >= cutoff) ?? samples[0]
+            const dt = last.t - first.t
+            if (dt > 0) {
+              vx = (last.x - first.x) / dt
+              vy = (last.y - first.y) / dt
+            }
+          }
+          startFlight(vx, vy)
         } else {
           playClick()
         }
@@ -1338,6 +1543,16 @@ window.__ModuleLoader__.load({
         if (frame !== 0) return
         frame = window.requestAnimationFrame(() => {
           frame = 0
+          // 飞行中视口变了：不能走 layout（它会用旧的百分比坐标覆盖飞行位置），
+          // 只把当前位置夹回新边界，飞完再落盘。
+          if (flight !== null && host !== null) {
+            const { maxLeft, maxTop } = bounds()
+            const left = Number.parseFloat(host.style.left) || 0
+            const top = Number.parseFloat(host.style.top) || 0
+            host.style.left = `${Math.round(Math.max(0, Math.min(maxLeft, left)))}px`
+            host.style.top = `${Math.round(Math.max(0, Math.min(maxTop, top)))}px`
+            return
+          }
           layout()
         })
       }
@@ -1350,56 +1565,44 @@ window.__ModuleLoader__.load({
         stage.addEventListener('pointerup', onPointerUp)
         stage.addEventListener('pointercancel', onPointerUp)
         stage.addEventListener('contextmenu', (event) => {
-          if (!pet.enabled) return
+          if (pack === null) return
           event.preventDefault()
+          // 多只同屏时只留一个菜单：先请外层关掉别人的。
+          options.onMenuOpen()
           openMenu(event.clientX, event.clientY)
         })
         window.addEventListener('resize', onResize)
       }
 
-      /** 首次从服务端取状态（失败就安静地不出现 —— 宠物是装饰，不该报错）。 */
-      const load = () =>
-        fetch(MANAGE, { cache: 'no-store' })
-          .then((res) => res.json())
-          .then((payload) => {
-            if (!payload || !payload.ok || !payload.pet) return
-            pet.x = typeof payload.pet.x === 'number' ? payload.pet.x : pet.x
-            pet.y = typeof payload.pet.y === 'number' ? payload.pet.y : pet.y
-            sync(payload.pet)
-          })
-          .catch(() => {})
-
       /**
-       * 应用一份新配置（开关 / 大小 / 当前宠物 / 宠物包）。
+       * 应用一份新配置（这只宠物的包内容）。
        *
-       * **不采纳 x/y**：位置由本浮层独占（拖动后自己写盘）。设置页每次写别的字段都会
+       * **不采纳 x/y**：位置由本实例独占（拖动后自己写盘）。设置页每次写别的字段都会
        * 拿到一份状态回包，如果那份回包里的旧坐标也被应用，宠物会被拽回上一次保存的位置。
        *
-       * @param {object} next 服务端给的 pet 状态。
+       * @param {object} next 服务端给的这一只的状态（包内容 + x/y，但 x/y 忽略）。
        */
-      const sync = (next) => {
+      const update = (next) => {
         if (!next || typeof next !== 'object') return
-        pet.enabled = next.enabled === true
-        if (typeof next.size === 'number' && Number.isFinite(next.size)) pet.size = next.size
-        if (typeof next.pack === 'string') pet.pack = next.pack
-        if (Array.isArray(next.packs)) pet.packs = next.packs
-        // 关着的时候**不建 DOM**：宠物素材加起来几十 MB，没开就不该占带宽和内存。
-        if (!pet.enabled) {
-          clearAmbience()
-          clearReturn()
-          closeMenu()
-          pauseAll()
-          currentId = ''
-          mode = 'idle'
-          if (host !== null) host.dataset.on = '0'
-          return
-        }
+        entry = next
         build()
         if (pack === null) return
         layout()
         if (host !== null) host.dataset.on = '1'
-        // 正在演就接着演；从关到开、或换了宠物，才重新起待机。
+        // 正在演就接着演；首次建好或换了包，才重新起待机。
         if (currentId === '' || clipById(currentId) === null) startIdle()
+      }
+
+      /** 全局大小变了：重算高度与可移动范围（所有实例一起变）。一帧最多排一次布局。 */
+      let sizeFrame = 0
+      const setSize = (size) => {
+        if (typeof size !== 'number' || !Number.isFinite(size) || size === pet.size) return
+        pet.size = size
+        if (sizeFrame !== 0) return
+        sizeFrame = window.requestAnimationFrame(() => {
+          sizeFrame = 0
+          layout()
+        })
       }
 
       /** 归位：回到右下角并落盘。 */
@@ -1407,16 +1610,19 @@ window.__ModuleLoader__.load({
         pet.x = 100
         pet.y = 100
         layout()
-        onPersist({ petX: 100, petY: 100 })
+        if (pack !== null) onPersist({ petMove: { pack: pack.id, x: 100, y: 100 } })
       }
 
       const destroy = () => {
         window.removeEventListener('resize', onResize)
         if (frame !== 0) window.cancelAnimationFrame(frame)
         frame = 0
+        if (sizeFrame !== 0) window.cancelAnimationFrame(sizeFrame)
+        sizeFrame = 0
         clearAmbience()
         clearReturn()
         closeMenu()
+        stopFlight()
         pauseAll()
         videos.length = 0
         if (host !== null) host.remove()
@@ -1429,7 +1635,118 @@ window.__ModuleLoader__.load({
       }
 
       // play = 指定动作：设置页的动作卡和搜索都走这条 —— 演一遍然后回待机。
-      return { load, sync, play: playAction, playCategory, random, report, reset, destroy }
+      return { update, setSize, play: playAction, playCategory, random, report, reset, closeMenu, destroy }
+    }
+
+    /**
+     * 多只宠物的管理器。
+     *
+     * 职责只有三件：**哪几只该活着**（按 `pet.pets[].enabled` 增删实例）、
+     * 共享的大小与总开关、菜单互斥。每只宠物自己的节奏、物理、位置都在实例里，
+     * 互不干扰 —— 一只在飞，另一只照样待机。
+     *
+     * @param {{ onPersist: (patch: object) => void, t: (key: string) => string }} options 落盘回调 + 文案。
+     * @returns {{ load: () => Promise<void>, sync: (pet: object) => void, play: (pack: string, id: string) => void, playCategory: (pack: string, id: string) => void, random: (pack: string) => void, report: () => void, reset: () => void, destroy: () => void }} 管理层。
+     */
+    function createPetLayer(options) {
+      const onPersist = options.onPersist
+      const t = options.t
+      /** 全局：总开关 + 每只的状态（大小也是每只自己的，见 entry.size）。 */
+      let pet = { enabled: false, pets: [] }
+      /** @type {Map<string, ReturnType<typeof createPetInstance>>} */
+      const instances = new Map()
+
+      /** 关掉所有实例的右键菜单（开新菜单、收起宠物时用）。 */
+      const closeMenus = () => {
+        for (const instance of instances.values()) instance.closeMenu()
+      }
+
+      /** 把当前所有实例都收掉（总开关关掉 / 没有可显示的宠物）。 */
+      const dropAll = () => {
+        for (const instance of instances.values()) instance.destroy()
+        instances.clear()
+      }
+
+      const sync = (next) => {
+        if (!next || typeof next !== 'object') return
+        pet.enabled = next.enabled === true
+        // 每只的大小不在这里采纳：它由设置页的滑杆独占（拖的时候一路推 `dsa:pet-size`）。
+        // 每次回包都应用一次旧值的话，拖着滑杆的宠物会被拽回上一个尺寸 —— 看着就是卡。
+        if (Array.isArray(next.pets)) pet.pets = next.pets
+        // 总开关关着、或一个宠物包都没有：不建 DOM（素材几十 MB，不该占带宽和内存）。
+        if (!pet.enabled || pet.pets.length === 0) {
+          dropAll()
+          return
+        }
+        const wanted = new Set(pet.pets.filter((item) => item.enabled === true).map((item) => item.id))
+        for (const [id, instance] of [...instances]) {
+          if (!wanted.has(id)) {
+            instance.destroy()
+            instances.delete(id)
+          }
+        }
+        for (const entry of pet.pets) {
+          if (entry.enabled !== true) continue
+          const existing = instances.get(entry.id)
+          if (existing === undefined) {
+            // 新建时用**它自己的**大小；之后只认滑杆推过来的值。
+            const instance = createPetInstance({
+              entry,
+              size: typeof entry.size === 'number' ? entry.size : 176,
+              t,
+              onPersist,
+              onMenuOpen: closeMenus,
+            })
+            instance.update(entry)
+            instances.set(entry.id, instance)
+          } else {
+            existing.update(entry)
+          }
+        }
+      }
+
+      /** 首次从服务端取状态（失败就安静地不出现 —— 宠物是装饰，不该报错）。 */
+      const load = () =>
+        fetch(MANAGE, { cache: 'no-store' })
+          .then((res) => res.json())
+          .then((payload) => {
+            if (!payload || !payload.ok || !payload.pet) return
+            sync(payload.pet)
+          })
+          .catch(() => {})
+
+      /** 设置页拖滑杆时实时推过来的大小：只改那一只，**不落盘**。 */
+      const setSize = (packId, size) => {
+        if (typeof size !== 'number' || !Number.isFinite(size)) return
+        withInstance(packId, (instance) => instance.setSize(size))
+      }
+
+      /** 对某一只动手；包不在场（还没开/已关）就什么都不做。 */
+      const withInstance = (packId, run) => {
+        const instance = instances.get(packId)
+        if (instance !== undefined) run(instance)
+      }
+
+      return {
+        load,
+        sync,
+        play: (packId, id) => withInstance(packId, (instance) => instance.play(id)),
+        playCategory: (packId, id) => withInstance(packId, (instance) => instance.playCategory(id)),
+        random: (packId) => withInstance(packId, (instance) => instance.random()),
+        /** 滑杆实时推过来的大小：所有实例一起变（不落盘，落盘走原来的防抖 POST）。 */
+        setSize,
+        /** 每只自己报一次，设置页按 pack 挑它关心的那条。 */
+        report: () => {
+          for (const instance of instances.values()) instance.report()
+        },
+        /** 归位：**所有**宠物一起回右下角（一只飞出屏幕就不用逐只点了）。 */
+        reset: () => {
+          for (const instance of instances.values()) instance.reset()
+        },
+        destroy: () => {
+          dropAll()
+        },
+      }
     }
     /**
      * 「启动动画」页：常驻设置区 + 下方 [MP4|壁纸|音频|宠物|更新公告] 分类切换器与内容面板。
@@ -1464,7 +1781,15 @@ window.__ModuleLoader__.load({
         const [activeClip, setActiveClip] = React.useState('')
         /** 大宠物包（动作多）的搜索词；换宠物时清空。 */
         const [petQuery, setPetQuery] = React.useState('')
-        const petPackId = state && state.pet && typeof state.pet.pack === 'string' ? state.pet.pack : ''
+        /** 设置页"正在看"的那只（只影响下面展示谁的动作，不写配置）。 */
+        const [selectedPack, setSelectedPack] = React.useState('')
+        const petsAll = state && state.pet && Array.isArray(state.pet.pets) ? state.pet.pets : []
+        const petSelectedId = (() => {
+          if (petsAll.some((item) => item.id === selectedPack)) return selectedPack
+          // 没选过 / 选中的那只被删了：优先落在"开着的第一只"，都关着就第一只。
+          const on = petsAll.find((item) => item.enabled === true)
+          return on !== undefined ? on.id : petsAll[0] !== undefined ? petsAll[0].id : ''
+        })()
         // ── 卸载 / 更新（v1.11.0）──
         // 自管状态：宿主在 profile 里有没有装我们、有没有选中、装的是什么形态。
         const [selfState, setSelfState] = React.useState(null)
@@ -1474,21 +1799,33 @@ window.__ModuleLoader__.load({
         React.useEffect(() => {
           if (state && typeof state.durationSec === 'number') setSec(state.durationSec)
           if (state && typeof state.audioVolume === 'number') setAvol(Math.round(state.audioVolume * 100))
-          if (state && state.pet && typeof state.pet.size === 'number') setPetSize(state.pet.size)
         }, [state])
 
+        // 宠物大小滑杆跟着"当前看的那只"走：每只各记各的，切宠物就换成那只的值。
+        // 只在选中这一只时同步（拖动过程中别被回包的旧值拽回去）。
+        React.useEffect(() => {
+          const target = petsAll.find((item) => item.id === petSelectedId)
+          if (target === undefined || typeof target.size !== 'number') return
+          setPetSize(target.size)
+        }, [petSelectedId])
+
         // 设置页里的改动（开关 / 大小）要立刻反映到浮层上：两边不在同一棵渲染树上，
-        // 用一条 window 事件桥接。浮层只取 enabled/size/clips，位置它自己管。
+        // 用一条 window 事件桥接。浮层只取 enabled/size/pets，位置它自己管。
         React.useEffect(() => {
           if (!state || !state.pet) return
           window.dispatchEvent(new CustomEvent('dsa:pet-sync', { detail: state.pet }))
         }, [state])
 
-        // 反过来：浮层切了动作就回报一声，列表跟着高亮。
+        // 反过来：浮层切了动作就回报一声，列表跟着高亮（多只时只认当前看的那只）。
+        // 用 ref 读"正在看哪只"：effect 只注册一次，避免闭包里拿到过期的那只。
+        const petSelectedRef = React.useRef('')
+        petSelectedRef.current = petSelectedId
         React.useEffect(() => {
           const onState = (event) => {
             const detail = event.detail
-            setActiveClip(detail && typeof detail === 'object' ? String(detail.id || '') : String(detail || ''))
+            if (detail === null || typeof detail !== 'object') return
+            if (String(detail.pack || '') !== petSelectedRef.current) return
+            setActiveClip(String(detail.id || ''))
           }
           window.addEventListener('dsa:pet-state', onState)
           // 先挂监听再问：宠物在页面加载时就开播了，那会儿没人听。
@@ -1499,7 +1836,10 @@ window.__ModuleLoader__.load({
         // 换宠物后搜索词没有意义了（旧宠物的动作名对新宠物多半是空结果）。
         React.useEffect(() => {
           setPetQuery('')
-        }, [petPackId])
+          setActiveClip('')
+          // 问一句"你现在在演哪个"，换到的那只立刻能对上高亮。
+          window.dispatchEvent(new CustomEvent('dsa:pet-query'))
+        }, [petSelectedId])
 
         // 首次拿到状态时，把分类切换器对齐到当前使用的素材（只做一次，之后尊重手动切换）。
         React.useEffect(() => {
@@ -1570,14 +1910,22 @@ window.__ModuleLoader__.load({
           }, 350)
         }
 
-        // 宠物大小：同展示时长的防抖方式（停手 350ms 提交一次）。
+        // 宠物大小：滑杆每动一格都**立刻**推给浮层（不落盘），停手 350ms 再提交一次。
+        //
+        // 为什么不能等回包再变：拖滑杆时宠物要是不跟手，手感就是"卡"——用户看到的是
+        // 一个 350ms 的静止 + 一次跳变。落盘与显示解耦，拖起来才是连续的。
+        // 大小是**每只自己的**，所以事件和落盘都带上当前选中的 pack。
         const onPetSize = (value) => {
           const next = Math.min(320, Math.max(100, Math.round(Number(value))))
           setPetSize(next)
+          window.dispatchEvent(
+            new CustomEvent('dsa:pet-size', { detail: { pack: petSelectedId, size: next } }),
+          )
           if (petSizeRef.current !== null) clearTimeout(petSizeRef.current)
+          const packId = petSelectedId
           petSizeRef.current = setTimeout(() => {
             petSizeRef.current = null
-            postJson(send, { petSize: next }, t('petSaved'))
+            postJson(send, { petResize: { pack: packId, size: next } }, t('petSaved'))
           }, 350)
         }
 
@@ -1588,37 +1936,61 @@ window.__ModuleLoader__.load({
         }
 
         /**
-         * 预览的统一入口：宠物没开就先打开它 —— 用户按了按钮就是要看。
-         * @param {() => void} fire 真正发事件的回调（打开成功后延迟一点再发，等浮层建好 DOM）。
+         * 保证某一只在显示，然后执行动作。
+         *
+         * 宠物没开（总开关或这一只）就先打开它 —— 用户按了按钮就是要看。总开关关着时
+         * 先开总开关；这一只关着时再单独开它。两次回包都会把新状态推给浮层，
+         * 所以要在 `fire` 之前等它到位。
+         *
+         * @param {(payload: object | null) => void} fire 真正发事件的回调。
          */
-        const withPetEnabled = (fire) => {
-          if (state && state.pet && !state.pet.enabled) {
-            void postJson(send, { petEnabled: true }, t('petSaved')).then((payload) => {
-              if (!payload || !payload.ok) return
-              // 先把新状态推给浮层（它要在这之后才有 DOM 可播），再发播放事件。
-              // 只靠 effect 那条路会有一个"打开还没渲染完就播"的空窗。
-              if (payload.pet) window.dispatchEvent(new CustomEvent('dsa:pet-sync', { detail: payload.pet }))
-              setTimeout(fire, 60)
-            })
+        const withPetOn = (fire) => {
+          if (!state || !state.pet) return
+          const target = petsAll.find((item) => item.id === petSelectedId)
+          const needMaster = state.pet.enabled !== true
+          const needThis = target !== undefined && target.enabled !== true
+          if (!needMaster && !needThis) {
+            fire(null)
             return
           }
-          fire()
+          const first = needMaster ? { petEnabled: true } : { petToggle: { pack: petSelectedId, enabled: true } }
+          void postJson(send, first, t('petSaved')).then((payload) => {
+            if (!payload || !payload.ok) return
+            if (payload.pet) window.dispatchEvent(new CustomEvent('dsa:pet-sync', { detail: payload.pet }))
+            // 总开关刚打开时，这一只可能还是关的，补一刀再播。
+            if (needThis && needMaster) {
+              void postJson(send, { petToggle: { pack: petSelectedId, enabled: true } }, t('petSaved')).then((second) => {
+                if (second && second.ok && second.pet) {
+                  window.dispatchEvent(new CustomEvent('dsa:pet-sync', { detail: second.pet }))
+                }
+                setTimeout(() => fire(second), 60)
+              })
+              return
+            }
+            setTimeout(() => fire(payload), 60)
+          })
         }
 
         /** 指定动作：演一遍回待机（不写配置，纯预览）。 */
-        const previewPet = (id) => withPetEnabled(() => window.dispatchEvent(new CustomEvent('dsa:pet-play', { detail: id })))
+        const previewPet = (id) =>
+          withPetOn(() =>
+            window.dispatchEvent(new CustomEvent('dsa:pet-play', { detail: { pack: petSelectedId, id } })),
+          )
 
         /** 分类卡：让浮层在这个分类里随机挑一个。 */
         const previewPetCategory = (id) =>
-          withPetEnabled(() => window.dispatchEvent(new CustomEvent('dsa:pet-category', { detail: id })))
+          withPetOn(() =>
+            window.dispatchEvent(new CustomEvent('dsa:pet-category', { detail: { pack: petSelectedId, id } })),
+          )
 
         /** 「随机一个」：从全体待机动作里抽。 */
-        const previewPetRandom = () => withPetEnabled(() => window.dispatchEvent(new CustomEvent('dsa:pet-random')))
+        const previewPetRandom = () =>
+          withPetOn(() => window.dispatchEvent(new CustomEvent('dsa:pet-random', { detail: { pack: petSelectedId } })))
 
-        /** 换宠物：包 id 落盘，浮层随状态回包重建（开关状态不变）。 */
-        const choosePack = (id) => {
-          if (!state || !state.pet || state.pet.pack === id) return
-          postJson(send, { petPack: id }, t('petSaved'))
+        /** 开/关某一只：只动这一只，别的宠物不受影响。 */
+        const togglePack = (id, enabled) => {
+          if (!state || !state.pet) return
+          postJson(send, { petToggle: { pack: id, enabled } }, t('petSaved'))
         }
 
         /** 试听/停止一条音频（列表内点击，不影响开机配置）。 */        const togglePlay = (file) => {
@@ -2154,14 +2526,16 @@ window.__ModuleLoader__.load({
          * 铺一百多个格子没人看得下去。
          */
         const pet = state && state.pet && typeof state.pet === 'object' ? state.pet : null
-        const petPacks = pet && Array.isArray(pet.packs) ? pet.packs : []
-        const petPack = petPacks.find((item) => item.id === pet.pack) || petPacks[0] || null
+        const petPacks = petsAll
+        const petPack = petsAll.find((item) => item.id === petSelectedId) || petsAll[0] || null
         const petClips = petPack && Array.isArray(petPack.clips) ? petPack.clips : []
         const petCats = petPack && Array.isArray(petPack.categories) ? petPack.categories : []
         const petMany = petClips.length > 12
         const petKeyword = petQuery.trim()
         const petHits = petKeyword === '' ? [] : petClips.filter((clip) => clip.name.includes(petKeyword)).slice(0, 8)
         const petNow = petClips.find((clip) => clip.id === activeClip) || null
+        /** 动作区标题带上宠物名：多只同屏时得知道现在看的是哪一只。 */
+        const petActionTitle = petPack === null ? t('petAction') : `${t('petAction')} · ${petPack.name}`
         const petAsset = (file) => `${ASSET}?path=${encodeURIComponent(file)}`
         const petSwitch = h(
           'button',
@@ -2170,7 +2544,7 @@ window.__ModuleLoader__.load({
             className: 'dsa-set-switch',
             role: 'switch',
             'aria-checked': pet && pet.enabled ? 'true' : 'false',
-            'aria-label': t('petEnable'),
+            'aria-label': t('petEnableAll'),
             disabled: busy || pet === null,
             onClick: togglePet,
           },
@@ -2196,24 +2570,52 @@ window.__ModuleLoader__.load({
           },
           t('petRandom'),
         )
-        /** 一个宠物 = 一张卡（封面 + 名字 + 动作数），换它就换整套素材。 */
+        /**
+         * 一个宠物 = 一张卡：封面 + 名字 + 动作数 + 右上角一个小开关。
+         *
+         * - 点卡本身 = **选中看它**（下面那块动作列表跟着换），不影响宠物显不显示；
+         * - 点右上角的开关 = **开/关这一只**，多只可以同时开着。
+         *
+         * 为什么不用 button 包一层：button 里套 button 是非法嵌套，浏览器会把内层
+         * 拆出来，点开关会连带触发"选中"。所以外壳是 div，里面两个各自独立的 button。
+         */
         const petPackCard = (item) =>
           h(
-            'button',
+            'div',
             {
               key: item.id,
-              type: 'button',
               className: 'dsa-set-pet',
               'data-on': petPack && petPack.id === item.id ? '1' : '0',
-              'aria-pressed': petPack && petPack.id === item.id ? 'true' : 'false',
-              disabled: busy || pet === null,
-              onClick: () => choosePack(item.id),
+              'data-live': item.enabled ? '1' : '0',
             },
-            item.cover
-              ? h('img', { className: 'dsa-set-pet-cover', src: petAsset(item.cover), alt: '', loading: 'lazy' })
-              : h('div', { className: 'dsa-set-pet-cover' }),
-            h('span', { className: 'dsa-set-pet-name' }, item.name),
-            h('span', { className: 'dsa-set-pet-count' }, `${item.count} ${t('petUnit')}`),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dsa-set-pet-hit',
+                'aria-pressed': petPack && petPack.id === item.id ? 'true' : 'false',
+                disabled: busy || pet === null,
+                onClick: () => setSelectedPack(item.id),
+              },
+              item.cover
+                ? h('img', { className: 'dsa-set-pet-cover', src: petAsset(item.cover), alt: '', loading: 'lazy' })
+                : h('div', { className: 'dsa-set-pet-cover' }),
+              h('span', { className: 'dsa-set-pet-name' }, item.name),
+              h('span', { className: 'dsa-set-pet-count' }, `${item.count} ${t('petUnit')}`),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dsa-set-switch dsa-set-pet-switch',
+                role: 'switch',
+                'aria-checked': item.enabled ? 'true' : 'false',
+                'aria-label': `${t('petEnable')} · ${item.name}`,
+                disabled: busy || pet === null,
+                onClick: () => togglePack(item.id, !item.enabled),
+              },
+              h('span', { className: 'dsa-set-knob' }),
+            ),
           )
         /** 一个分类 = 一张卡；按下去浮层在这个分类里随机挑一个，省得一个个点。 */
         const petCatCard = (cat) =>
@@ -2298,13 +2700,17 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dsa-set-row' },
-            h('div', { className: 'dsa-set-label' }, t('petEnable')),
+            h('div', { className: 'dsa-set-label' }, t('petEnableAll')),
             h('div', { className: 'dsa-set-right' }, petSwitch),
           ),
           h(
             'div',
             { className: 'dsa-set-row' },
-            h('div', { className: 'dsa-set-label' }, t('petSize')),
+            h(
+              'div',
+              { className: 'dsa-set-label' },
+              petPack === null ? t('petSize') : `${t('petSize')} · ${petPack.name}`,
+            ),
             h(
               'div',
               { className: 'dsa-set-right' },
@@ -2324,7 +2730,12 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dsa-set-stack' },
-            h('div', { className: 'dsa-set-stack-head' }, h('div', { className: 'dsa-set-label' }, t('petPick'))),
+            h(
+              'div',
+              { className: 'dsa-set-stack-head' },
+              h('div', { className: 'dsa-set-label' }, t('petPick')),
+              h('div', { className: 'dsa-set-right' }, h('span', { className: 'dsa-set-hint' }, t('petPickHint'))),
+            ),
             petPacks.length === 0
               ? h('div', { className: 'dsa-set-empty' }, t('petEmpty'))
               : h('div', { className: 'dsa-set-pets' }, petPacks.map(petPackCard)),
@@ -2335,7 +2746,7 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'dsa-set-stack-head' },
-              h('div', { className: 'dsa-set-label' }, t('petAction')),
+              h('div', { className: 'dsa-set-label' }, petActionTitle),
               h('div', { className: 'dsa-set-right' }, petMany ? petRandomBtn : null, petResetBtn),
             ),
             petClips.length === 0
@@ -2581,11 +2992,11 @@ window.__ModuleLoader__.load({
 
           // ── 桌面宠物：常驻浮层，和设置页无关（关掉设置页它还在）──
           //
-          // 位置由浮层自己写盘：拖动结束时 POST 一次 petX/petY。设置页只做
+          // 位置由浮层自己写盘：拖动结束时 POST 一次 petMove（带 pack）。设置页只做
           // "开关 / 大小 / 触发动作"，两边用 window 事件桥接，互不持有引用。
           // POST 的回包会广播成 dsa:pet-sync：右键菜单里"隐藏"自己之后，浮层和
           // 设置页的开关都能立刻对上，不用等用户手动刷新。
-          const petLayer = createPetOverlay({
+          const petLayer = createPetLayer({
             t,
             onPersist: (patch) => {
               void fetch(MANAGE, {
@@ -2603,10 +3014,28 @@ window.__ModuleLoader__.load({
             },
           })
           const onPetSync = (event) => petLayer.sync(event.detail)
-          const onPetPlay = (event) => petLayer.play(String(event.detail || ''))
-          const onPetCategory = (event) => petLayer.playCategory(String(event.detail || ''))
-          const onPetRandom = () => petLayer.random()
+          // 下面几条都带 pack：多只同屏时，"演这个动作"要指名是哪一只。
+          const onPetPlay = (event) => {
+            const detail = event.detail
+            if (detail === null || typeof detail !== 'object') return
+            petLayer.play(String(detail.pack || ''), String(detail.id || ''))
+          }
+          const onPetCategory = (event) => {
+            const detail = event.detail
+            if (detail === null || typeof detail !== 'object') return
+            petLayer.playCategory(String(detail.pack || ''), String(detail.id || ''))
+          }
+          const onPetRandom = (event) => {
+            const detail = event.detail
+            petLayer.random(detail === null || typeof detail !== 'object' ? '' : String(detail.pack || ''))
+          }
           const onPetReset = () => petLayer.reset()
+          // 滑杆每动一格就推一次（带 pack）；浮层只改那一只的视觉，落盘另有 350ms 防抖。
+          const onPetSize = (event) => {
+            const detail = event.detail
+            if (detail === null || typeof detail !== 'object') return
+            petLayer.setSize(String(detail.pack || ''), Number(detail.size))
+          }
           // 设置页翻到宠物页签时会问一句"现在在演哪个"，好把动作列表的高亮对上。
           const onPetQuery = () => petLayer.report()
           window.addEventListener('dsa:pet-sync', onPetSync)
@@ -2614,6 +3043,7 @@ window.__ModuleLoader__.load({
           window.addEventListener('dsa:pet-category', onPetCategory)
           window.addEventListener('dsa:pet-random', onPetRandom)
           window.addEventListener('dsa:pet-reset', onPetReset)
+          window.addEventListener('dsa:pet-size', onPetSize)
           window.addEventListener('dsa:pet-query', onPetQuery)
           void petLayer.load()
 
@@ -2623,6 +3053,7 @@ window.__ModuleLoader__.load({
             window.removeEventListener('dsa:pet-category', onPetCategory)
             window.removeEventListener('dsa:pet-random', onPetRandom)
             window.removeEventListener('dsa:pet-reset', onPetReset)
+            window.removeEventListener('dsa:pet-size', onPetSize)
             window.removeEventListener('dsa:pet-query', onPetQuery)
             try {
               petLayer.destroy()

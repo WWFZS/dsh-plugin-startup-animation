@@ -12,7 +12,7 @@
  * 用法：
  *   node tools/pet-harness.mjs [port]           # 默认 8792
  *   浏览器打开 http://127.0.0.1:PORT/           # 宠物出现在右下角
- *   POST 请求会打印在终端（拖拽落位时能看到 petX/petY）
+ *   POST 请求会打印在终端（拖拽落位时能看到每只的坐标）
  */
 import fs from 'node:fs'
 import http from 'node:http'
@@ -30,15 +30,17 @@ const port = Number(process.argv[2] || 8792)
  */
 const packs = listPetPacks(root)
 
-/** 假的管理状态：只保留浮层关心的字段。 */
+/** 假的管理状态：只保留浮层关心的字段。第二只也开着，方便看多只同屏（大小也各给一份）。 */
 const state = {
   pet: {
     enabled: true,
-    size: 176,
-    x: 100,
-    y: 100,
-    pack: packs[0] === undefined ? '' : packs[0].id,
-    packs,
+    pets: packs.map((pack, index) => ({
+      ...pack,
+      enabled: index < 2,
+      size: index === 0 ? 176 : 140,
+      x: index === 0 ? 100 : 40,
+      y: index === 0 ? 100 : 55,
+    })),
   },
 }
 
@@ -114,13 +116,28 @@ http
           } catch {
             /* 空体/坏体就当没写 */
           }
-          // 配置键（petX / petEnabled…）→ 回包字段（x / enabled…），和宿主的 manage
-          // 状态形状对齐：这样刷新页面还能读回上次拖到的位置，验持久化才有意义。
-          const FIELDS = { petEnabled: 'enabled', petSize: 'size', petX: 'x', petY: 'y', petPack: 'pack' }
-          for (const [key, field] of Object.entries(FIELDS)) {
-            if (body[key] !== undefined) state.pet[field] = body[key]
+          // 配置键 → 回包字段，和宿主的 manage 状态形状对齐：这样刷新页面还能读回
+          // 上次拖到的位置、开关状态，验证持久化才有意义。
+          if (typeof body.petEnabled === 'boolean') state.pet.enabled = body.petEnabled
+          for (const key of ['petToggle', 'petResize', 'petMove']) {
+            const change = body[key]
+            if (change === null || typeof change !== 'object') continue
+            const target = state.pet.pets.find((item) => item.id === change.pack)
+            if (target === undefined) continue
+            if (key === 'petToggle') target.enabled = change.enabled === true
+            else if (key === 'petResize') {
+              if (typeof change.size === 'number') target.size = change.size
+            } else {
+              if (typeof change.x === 'number') target.x = change.x
+              if (typeof change.y === 'number') target.y = change.y
+            }
           }
-          console.log('[manage POST]', JSON.stringify(body), '→', `x=${state.pet.x} y=${state.pet.y}`)
+          console.log(
+            '[manage POST]',
+            JSON.stringify(body),
+            '→',
+            state.pet.pets.map((item) => `${item.id}:${item.enabled ? '开' : '关'}@${item.x},${item.y}`).join(' | '),
+          )
           res.writeHead(200, { 'Content-Type': types['.json'] })
           res.end(JSON.stringify({ ok: true, ...state }))
         })
