@@ -856,6 +856,9 @@ window.__ModuleLoader__.load({
 .dsa-pet-menu-item:hover { background: var(--dsw-alias-bg-layer-2, rgba(128, 128, 128, 0.12)); }
 .dsa-pet-menu-item[data-on="1"] { color: var(--dsw-alias-brand-primary, #4b6bfb); }
 .dsa-pet-menu-sep { height: 1px; margin: 5px 6px; background: var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.25)); }
+/* 二级菜单的返回行：看起来像标题，点一下回上一级 */
+.dsa-pet-menu-back { display: block; width: 100%; text-align: left; font: inherit; font-size: 11.5px; color: var(--dsw-alias-label-secondary, #666); background: none; border: 0; border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(128, 128, 128, 0.25)); padding: 4px 8px 6px; margin-bottom: 3px; cursor: pointer; white-space: nowrap; }
+.dsa-pet-menu-back:hover { color: var(--dsw-alias-label-primary, #333); }
 .dsa-pet-menu-count { color: var(--dsw-alias-label-tertiary, #999); font-size: 11px; margin-left: 4px; }
 `
 
@@ -1234,11 +1237,12 @@ window.__ModuleLoader__.load({
         if (menu !== null && event.target instanceof Node && !menu.contains(event.target)) closeMenu()
       }
 
-      const menuItem = (label, onClick, count) => {
+      const menuItem = (label, onClick, count, active = false) => {
         const item = document.createElement('button')
         item.type = 'button'
         item.className = 'dsa-pet-menu-item'
         item.textContent = label
+        if (active) item.dataset.on = '1'
         if (typeof count === 'number') {
           const badge = document.createElement('span')
           badge.className = 'dsa-pet-menu-count'
@@ -1252,31 +1256,58 @@ window.__ModuleLoader__.load({
         return item
       }
 
+      const menuSep = () => Object.assign(document.createElement('div'), { className: 'dsa-pet-menu-sep' })
+
       /**
-       * 右键菜单：**按分类**点播，不是几十条平铺。
+       * 右键菜单：**两级**。
        *
-       * 几十个动作的菜单会顶出屏幕，也没人从几十条里一条条找；分类 + 「随机一个」够用，
-       * 想指定某个动作去设置页搜。
+       * 一级是分类（互动 4 / 休闲 4 / 工作 1）；点进去是二级 —— 那个分类里每个动作的
+       * 完整名字，点哪条演哪条，正在演的那条标色。
+       *
+       * 为什么不用"悬停弹出子菜单"：动作名长短差很多（「动作001」到「换上圣诞主题皮肤」），
+       * 悬浮子菜单要处理贴边翻向、触摸屏还根本没有 hover；点进去 + 返回更稳，也照样能滚。
+       *
+       * @param {number} x 贴着鼠标展开的横坐标。
+       * @param {number} y 纵坐标。
+       * @param {object | null} category 已进入的分类；null = 一级。
        */
-      const openMenu = (x, y) => {
+      const openMenu = (x, y, category = null) => {
         if (pack === null) return
         closeMenu()
         ensureStyle()
         menu = document.createElement('div')
         menu.className = 'dsa-pet-menu'
-        const head = document.createElement('div')
-        head.className = 'dsa-pet-menu-head'
-        head.textContent = t('petMenuActions')
-        menu.appendChild(head)
-        for (const category of pack.categories) {
-          menu.appendChild(menuItem(category.name, () => playCategory(category.id), category.clips.length))
+        if (category === null) {
+          const head = document.createElement('div')
+          head.className = 'dsa-pet-menu-head'
+          head.textContent = t('petMenuActions')
+          menu.appendChild(head)
+          for (const item of pack.categories) {
+            // 点分类 = 进它的二级，不直接演（演哪个由用户在二级里挑）。
+            menu.appendChild(menuItem(item.name, () => openMenu(x, y, item), item.clips.length))
+          }
+          menu.appendChild(menuItem(t('petRandom'), random))
+          menu.appendChild(menuSep())
+          menu.appendChild(menuItem(t('petReset'), reset))
+          menu.appendChild(menuItem(t('petHide'), hideSelf))
+        } else {
+          // 标题行就是"返回"：点它回一级。
+          const back = document.createElement('button')
+          back.type = 'button'
+          back.className = 'dsa-pet-menu-back'
+          back.textContent = `‹ ${category.name}`
+          back.addEventListener('click', () => openMenu(x, y, null))
+          menu.appendChild(back)
+          for (const id of category.clips) {
+            const clip = clipById(id)
+            if (clip === null) continue
+            menu.appendChild(menuItem(clip.name, () => playAction(clip.id), undefined, clip.id === currentId))
+          }
+          menu.appendChild(menuSep())
+          menu.appendChild(menuItem(t('petRandom'), () => playCategory(category.id)))
         }
-        menu.appendChild(menuItem(t('petRandom'), random))
-        menu.appendChild(Object.assign(document.createElement('div'), { className: 'dsa-pet-menu-sep' }))
-        menu.appendChild(menuItem(t('petReset'), reset))
-        menu.appendChild(menuItem(t('petHide'), hideSelf))
         document.body.appendChild(menu)
-        // 贴着鼠标展开，但不许出屏。
+        // 贴着鼠标展开，但不许出屏（二级更高，每级都重新夹一遍）。
         const rect = menu.getBoundingClientRect()
         const left = Math.max(4, Math.min(x, window.innerWidth - rect.width - 4))
         const top = Math.max(4, Math.min(y, window.innerHeight - rect.height - 4))
