@@ -30,6 +30,8 @@ const CLIPS = [
   { src: '09_挥手打招呼.webm', out: '挥手打招呼.webm' },
   { src: '06_原地小憩沉眠.webm', out: '原地小憩.webm' },
   { src: '10_泡温泉.webm', out: '泡温泉.webm' },
+  { src: '11_工作玩笔记本电脑.webm', out: '玩电脑.webm' },
+  { src: '12_换上圣诞主题皮肤.webm', out: '圣诞换装.webm' },
 ]
 
 /**
