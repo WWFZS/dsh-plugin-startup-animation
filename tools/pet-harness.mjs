@@ -84,6 +84,7 @@ const types = {
   '.js': 'text/javascript; charset=utf-8',
   '.webm': 'video/webm',
   '.webp': 'image/webp',
+  '.wav': 'audio/wav',
   '.mp4': 'video/mp4',
   '.json': 'application/json; charset=utf-8',
 }

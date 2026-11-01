@@ -28,6 +28,8 @@ import {
   serveAsset,
   trackStream,
   writeHomeBootPatch,
+  listPetPacks,
+  readPetPack,
   ASSET_ROUTE,
   REPO_URL,
   UPDATE_ROUTE,
@@ -882,6 +884,39 @@ await check('cleanupLinkedInstall：只删链接，绝不动真实目录与目�
   assert.ok(fs.existsSync(path.join(source, 'index.js')), '删联接时连带删了目标目录')
 
   fs.rmSync(profile, { recursive: true, force: true })
+})
+
+console.log('== 宠物包 ==')
+
+await check('每只宠物都解析出点击音效（没有包内 click.wav 就落在共享的那份）', () => {
+  const packs = listPetPacks(packageRoot)
+  assert.ok(packs.length >= 2, `宠物包数量不对：${packs.length}`)
+  for (const pack of packs) {
+    assert.match(pack.clickSound, /click\.wav$/, `${pack.id} 没有点击音效`)
+    assert.ok(fs.existsSync(path.join(packageRoot, pack.clickSound)), `${pack.id} 的音效文件不存在`)
+  }
+})
+
+await check('pet.json 的 sound：包内文件优先、空串静音、缺省回落共享音效', () => {
+  const root = path.join(tmp, 'pet-case')
+  fs.rmSync(root, { recursive: true, force: true })
+  const dir = path.join(root, 'builtin', '宠物', 'test')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, '待机.webm'), 'x')
+  const write = (sound) =>
+    fs.writeFileSync(path.join(dir, 'pet.json'), JSON.stringify({ id: 'test', roles: { idle: '待机' }, sound }))
+
+  write(undefined)
+  assert.equal(readPetPack(root, 'test').clickSound, '', '没有音效时该是空串，不能凭空造路径')
+
+  fs.copyFileSync(path.join(packageRoot, 'builtin', '宠物', 'click.wav'), path.join(dir, 'click.wav'))
+  write(undefined)
+  assert.equal(readPetPack(root, 'test').clickSound, 'builtin/宠物/test/click.wav', '包内 click.wav 没被采用')
+
+  write('')
+  assert.equal(readPetPack(root, 'test').clickSound, '', 'sound: "" 应该显式静音')
+
+  fs.rmSync(root, { recursive: true, force: true })
 })
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)

@@ -453,6 +453,26 @@ export function readPetPack(packageRoot, dirName) {
     categories.push({ id: 'other', name: '其他', cover: '', clips: extras })
   }
 
+  /**
+   * 点击音效：包内 `click.wav` 优先，没有就用 `builtin/宠物/click.wav` 这份共享音效。
+   *
+   * `pet.json` 写 `"sound": ""` 显式静音 —— 否则每只宠物都该有反馈声，
+   * 但换素材的人未必想沿用别人的鸭子叫。
+   * @returns {string} 包内相对路径；'' 表示静音。
+   */
+  const clickSound = (() => {
+    const wanted = meta.sound
+    if (wanted === '' || wanted === false) return ''
+    const local = typeof wanted === 'string' && wanted !== '' ? fileOf(wanted) : fileOf('click.wav')
+    if (local !== '') return local
+    const shared = `${BUILTIN_DIR_NAME}/${PET_DIR_NAME}/click.wav`
+    try {
+      return fs.statSync(path.join(packageRoot, shared)).isFile() ? shared : ''
+    } catch {
+      return ''
+    }
+  })()
+
   const ambient = (Array.isArray(meta.ambient) ? meta.ambient : [])
     .filter((id) => categories.some((category) => category.id === id && !['balance', 'whisper', 'work', 'sleep', 'other'].includes(id)))
   const [width, height] = Array.isArray(meta.canvas) ? meta.canvas : []
@@ -477,6 +497,8 @@ export function readPetPack(packageRoot, dirName) {
       Number.isFinite(height) && height > 0 ? height : 648,
     ],
     cover,
+    /** 点击音效路径；'' = 不播。 */
+    clickSound,
     roles,
     /** 参与随机待机的分类；为空时客户端退化为「全部非事件分类」。 */
     ambient,
