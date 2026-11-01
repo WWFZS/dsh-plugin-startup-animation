@@ -814,6 +814,22 @@ window.__ModuleLoader__.load({
     /** 动作演完到回待机的停顿：直接跳回待机会在最后一帧上"啪"地一闪。 */
     const PET_RETURN_MS = 550
 
+    /**
+     * 甩抛物理：松手后按手部速度飞出去，撞视口边缘反弹，衰减到停下。
+     *
+     * 四个数值都是手调的手感，不是物理常数：
+     * - `SPEED_KEEP` 每秒保留多少速度（0.12 ≈ 一秒后剩一成），决定"能飞多远"；
+     * - `BOUNCE` 撞墙后保留多少速度（越小越"闷"，越大越"弹"）；
+     * - `STOP` 低于这个速度（px/ms）就算停了，避免无限拖一条零头在飘；
+     * - `MAX` 速度上限，防止一次抽搐把宠物甩到屏幕另一头。
+     */
+    const PET_SPEED_KEEP = 0.12
+    const PET_BOUNCE = 0.55
+    const PET_STOP_SPEED = 0.06
+    const PET_MAX_SPEED = 4
+    /** 取样窗口：只拿最近这段的手部位移算速度 —— 松手前停住不动就不该起飞。 */
+    const PET_VELOCITY_WINDOW_MS = 100
+
     /** 浮层样式。挂 body 的常驻元素，不走组件局部样式，单独注入一份 <style>。 */
     const PET_STYLE = `
 .dsa-pet { position: fixed; left: 0; top: 0; z-index: 999999; pointer-events: none; }
@@ -875,8 +891,10 @@ window.__ModuleLoader__.load({
       /** "演完了回待机"的计时器。 */
       let returnTimer = 0
       let lastRandomId = ''
-      /** @type {{ id: number, dx: number, dy: number, startX: number, startY: number, moved: boolean } | null} */
+      /** @type {{ id: number, dx: number, dy: number, startX: number, startY: number, moved: boolean, samples: { x: number, y: number, t: number }[] } | null} */
       let drag = null
+      /** @type {{ vx: number, vy: number, raf: number, last: number } | null} 松手后的惯性飞行。 */
+      let flight = null
       let frame = 0
       /** @type {HTMLDivElement | null} 右键菜单（同一时刻至多一个）。 */
       let menu = null
@@ -951,6 +969,7 @@ window.__ModuleLoader__.load({
         pack = next
         clearAmbience()
         clearReturn()
+        stopFlight()
         currentId = ''
         mode = 'idle'
         lastRandomId = ''
@@ -1265,10 +1284,127 @@ window.__ModuleLoader__.load({
         onPersist({ petX: pet.x, petY: pet.y })
       }
 
+      // ── 甩抛 / 反弹 ──
+      //
+      // 松手时按最后 100ms 的手部位移算速度；够快就"扔出去"：每帧按速度推进，
+      // 指数衰减，撞到视口边缘反向并按 BOUNCE 打折。速度掉到 STOP 以下就停稳，
+      // 落盘位置、回待机。飞行期间继续演「拖拽悬空」——被扔出去的样子就该还是它。
+
+      /** 宠物当前的尺寸与可移动范围（飞行/拖拽/布局共用一套口径）。 */
+      const bounds = () => {
+        const width = pet.size
+        const height = pack === null ? width : Math.round((width * pack.canvas[1]) / pack.canvas[0])
+        return {
+          width,
+          height,
+          maxLeft: Math.max(0, window.innerWidth - width),
+          maxTop: Math.max(0, window.innerHeight - height),
+        }
+      }
+
+      /** 撞墙那一下的挤压：给个明确的"弹到了"的反馈，飞行结束自己会清掉。 */
+      const bump = () => {
+        if (stage === null) return
+        stage.style.transform = 'scale(0.92, 1.08)'
+        window.setTimeout(() => {
+          if (stage !== null && flight !== null) stage.style.transform = ''
+        }, 140)
+      }
+
+      /** 停稳：落盘位置、清掉飞行状态、回待机。 */
+      const finishFlight = () => {
+        if (flight !== null && flight.raf !== 0) window.cancelAnimationFrame(flight.raf)
+        flight = null
+        if (stage !== null) stage.style.transform = ''
+        commitPosition()
+        if (pet.enabled) startIdle()
+      }
+
+      /** 一帧物理：推进 → 撞边反弹 → 衰减 → 判定停下。 */
+      const stepFlight = (now) => {
+        if (flight === null || host === null) return
+        // 掉帧保护：dt 太大（切后台回来）会让宠物一帧瞬移出屏幕，按 48ms 封顶。
+        const dt = Math.min(48, Math.max(1, now - flight.last))
+        flight.last = now
+        const { maxLeft, maxTop } = bounds()
+        let left = (Number.parseFloat(host.style.left) || 0) + flight.vx * dt
+        let top = (Number.parseFloat(host.style.top) || 0) + flight.vy * dt
+        let hit = false
+        if (left < 0) {
+          left = -left
+          flight.vx = -flight.vx * PET_BOUNCE
+          hit = true
+        } else if (left > maxLeft) {
+          left = maxLeft * 2 - left
+          flight.vx = -flight.vx * PET_BOUNCE
+          hit = true
+        }
+        if (top < 0) {
+          top = -top
+          flight.vy = -flight.vy * PET_BOUNCE
+          hit = true
+        } else if (top > maxTop) {
+          top = maxTop * 2 - top
+          flight.vy = -flight.vy * PET_BOUNCE
+          hit = true
+        }
+        // 一帧位移超过整块屏幕时（极端速度 + 长帧）上面那套镜像会算到边界外，贴回去。
+        left = Math.max(0, Math.min(maxLeft, left))
+        top = Math.max(0, Math.min(maxTop, top))
+        host.style.left = `${Math.round(left)}px`
+        host.style.top = `${Math.round(top)}px`
+        if (hit) bump()
+        if (Math.hypot(flight.vx, flight.vy) < PET_STOP_SPEED) {
+          finishFlight()
+          return
+        }
+        // 按真实时间衰减：掉帧时速度曲线不会变形（固定按帧乘会把慢机器的宠物甩更远）。
+        const decay = Math.pow(PET_SPEED_KEEP, dt / 1000)
+        flight.vx *= decay
+        flight.vy *= decay
+        flight.raf = window.requestAnimationFrame(stepFlight)
+      }
+
+      /**
+       * 起飞。
+       * @param {number} vx 水平速度（px/ms）。
+       * @param {number} vy 垂直速度（px/ms）。
+       */
+      const startFlight = (vx, vy) => {
+        if (host === null) return
+        const speed = Math.hypot(vx, vy)
+        // 没甩（慢慢拖到位置就松手）：不算飞，直接收尾。
+        if (speed < PET_STOP_SPEED) {
+          commitPosition()
+          if (pet.enabled) startIdle()
+          return
+        }
+        const cap = Math.min(1, PET_MAX_SPEED / speed)
+        flight = { vx: vx * cap, vy: vy * cap, raf: 0, last: performance.now() }
+        if (stage !== null) {
+          stage.dataset.drag = '0'
+          stage.style.transform = ''
+        }
+        // 飞行期间保持"被扔出去"的动作；没有拖拽角色就演当前那段，别中途乱切。
+        flight.raf = window.requestAnimationFrame(stepFlight)
+      }
+
+      /** 打断飞行（用户又抓住了它 / 关掉宠物）：位置不落盘，等松手时统一提交。 */
+      const stopFlight = () => {
+        if (flight !== null && flight.raf !== 0) window.cancelAnimationFrame(flight.raf)
+        flight = null
+        if (stage !== null) stage.style.transform = ''
+      }
+
       /** 拖动开始：接管指针、切到拖拽动作。 */
       const onPointerDown = (event) => {
         if (event.button !== 0 || host === null || !pet.enabled || pack === null) return
         closeMenu()
+        // 飞行中又被抓住：钉在当前位置，先落盘 —— 用户抓到的就是它此刻待的地方。
+        if (flight !== null) {
+          stopFlight()
+          commitPosition()
+        }
         const rect = host.getBoundingClientRect()
         drag = {
           id: event.pointerId,
@@ -1277,6 +1413,8 @@ window.__ModuleLoader__.load({
           startX: event.clientX,
           startY: event.clientY,
           moved: false,
+          // 手部位移采样：松手时用最近 100ms 这段算甩出去的速度。
+          samples: [{ x: event.clientX, y: event.clientY, t: performance.now() }],
         }
         stage.dataset.drag = '1'
         try {
@@ -1298,13 +1436,14 @@ window.__ModuleLoader__.load({
         if (drag === null || event.pointerId !== drag.id || host === null || pack === null) return
         const dx = event.clientX - drag.startX
         const dy = event.clientY - drag.startY
+        // 采样先于门槛：门槛只决定"算不算拖拽"，速度还要靠这些点。
+        drag.samples.push({ x: event.clientX, y: event.clientY, t: performance.now() })
+        const cutoff = performance.now() - PET_VELOCITY_WINDOW_MS
+        while (drag.samples.length > 2 && drag.samples[0].t < cutoff) drag.samples.shift()
         // 4px 门槛：点击时手会抖一两像素，不该被当成拖拽。
         if (!drag.moved && Math.hypot(dx, dy) < 4) return
         drag.moved = true
-        const width = pet.size
-        const height = Math.round((width * pack.canvas[1]) / pack.canvas[0])
-        const maxLeft = Math.max(0, window.innerWidth - width)
-        const maxTop = Math.max(0, window.innerHeight - height)
+        const { maxLeft, maxTop } = bounds()
         const left = Math.max(0, Math.min(maxLeft, event.clientX - drag.dx))
         const top = Math.max(0, Math.min(maxTop, event.clientY - drag.dy))
         host.style.left = `${Math.round(left)}px`
@@ -1316,6 +1455,7 @@ window.__ModuleLoader__.load({
       const onPointerUp = (event) => {
         if (drag === null || event.pointerId !== drag.id) return
         const moved = drag.moved
+        const samples = drag.samples
         drag = null
         if (stage !== null) {
           stage.dataset.drag = '0'
@@ -1327,8 +1467,20 @@ window.__ModuleLoader__.load({
           /* 已经释放 */
         }
         if (moved) {
-          commitPosition()
-          startIdle()
+          // 用最近这段采样的平均速度当作甩出去的速度（单次位移噪声太大）。
+          const last = samples[samples.length - 1]
+          let vx = 0
+          let vy = 0
+          if (samples.length >= 2 && last !== undefined) {
+            const cutoff = last.t - PET_VELOCITY_WINDOW_MS
+            const first = samples.find((sample) => sample.t >= cutoff) ?? samples[0]
+            const dt = last.t - first.t
+            if (dt > 0) {
+              vx = (last.x - first.x) / dt
+              vy = (last.y - first.y) / dt
+            }
+          }
+          startFlight(vx, vy)
         } else {
           playClick()
         }
@@ -1338,6 +1490,16 @@ window.__ModuleLoader__.load({
         if (frame !== 0) return
         frame = window.requestAnimationFrame(() => {
           frame = 0
+          // 飞行中视口变了：不能走 layout（它会用旧的百分比坐标覆盖飞行位置），
+          // 只把当前位置夹回新边界，飞完再落盘。
+          if (flight !== null && host !== null) {
+            const { maxLeft, maxTop } = bounds()
+            const left = Number.parseFloat(host.style.left) || 0
+            const top = Number.parseFloat(host.style.top) || 0
+            host.style.left = `${Math.round(Math.max(0, Math.min(maxLeft, left)))}px`
+            host.style.top = `${Math.round(Math.max(0, Math.min(maxTop, top)))}px`
+            return
+          }
           layout()
         })
       }
@@ -1388,6 +1550,7 @@ window.__ModuleLoader__.load({
           clearAmbience()
           clearReturn()
           closeMenu()
+          stopFlight()
           pauseAll()
           currentId = ''
           mode = 'idle'
@@ -1417,6 +1580,7 @@ window.__ModuleLoader__.load({
         clearAmbience()
         clearReturn()
         closeMenu()
+        stopFlight()
         pauseAll()
         videos.length = 0
         if (host !== null) host.remove()
