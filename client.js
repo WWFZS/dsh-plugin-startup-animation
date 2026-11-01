@@ -880,6 +880,8 @@ window.__ModuleLoader__.load({
       let frame = 0
       /** @type {HTMLDivElement | null} 右键菜单（同一时刻至多一个）。 */
       let menu = null
+      /** @type {HTMLAudioElement | null} 点击音效（复用一个元素：连点不会叠成一片）。 */
+      let clickAudio = null
 
       /** 注入一次样式（重复调用安全）。 */
       const ensureStyle = () => {
@@ -1131,9 +1133,30 @@ window.__ModuleLoader__.load({
         if (clip !== null) playAction(clip.id)
       }
 
+      /**
+       * 点击音效：每只宠物都该有反馈声，素材来自 `pet.json` 或共享的 `click.wav`。
+       *
+       * 浏览器拦掉播放（没有用户手势、页面被静音）就安静跳过 —— 动作照演，
+       * 不该为了听个响把点击整条链路搞挂。
+       */
+      const playClickSound = () => {
+        if (typeof Audio !== 'function' || pack === null) return
+        const file = typeof pack.clickSound === 'string' ? pack.clickSound : ''
+        if (file === '') return
+        try {
+          if (clickAudio === null) clickAudio = new Audio(`${ASSET}?path=${encodeURIComponent(file)}`)
+          clickAudio.currentTime = 0
+          const played = clickAudio.play()
+          if (played && typeof played.catch === 'function') played.catch(() => {})
+        } catch {
+          /* 播不了就算了 */
+        }
+      }
+
       /** 左键点击：随机一个回应动作；没有回应角色就随机一个待机动作。 */
       const playClick = () => {
         if (!pet.enabled || pack === null) return
+        playClickSound()
         const clicks = clipsOf(pack.roles.clicks)
         const clip = randomClip(clicks.length > 0 ? clicks : ambientClips())
         if (clip !== null) playAction(clip.id)
