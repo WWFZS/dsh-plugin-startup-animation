@@ -819,9 +819,8 @@ window.__ModuleLoader__.load({
     // 宠物浮层
     // ──────────────────────────────────────────────────────────────
 
-    /** 待机时两次随机动作之间的间隔（毫秒）：太密像抽风，太疏像静止。 */
-    const PET_IDLE_MIN_MS = 15000
-    const PET_IDLE_MAX_MS = 35000
+    /** 待机多久演一个小动作：固定 15 秒，**动作本身随机挑**（这样每只宠物的节奏一致）。 */
+    const PET_IDLE_MS = 15000
     /** 动作演完到回待机的停顿：直接跳回待机会在最后一帧上"啪"地一闪。 */
     const PET_RETURN_MS = 550
 
@@ -1102,7 +1101,9 @@ window.__ModuleLoader__.load({
           }
         }, 200)
         currentId = id
-        mode = once ? 'action' : loop ? 'loop' : 'action'
+        // **不在这里改 mode**：调用方比这里更清楚这次是"待机""一次性动作"还是"拖拽"。
+        // 以前在这里按 loop/once 反推，会把待机（loop=true）写成 'loop'，
+        // 于是 15 秒后的随机回调一看到 `mode !== 'idle'` 就早退 —— 随机动作永远不触发。
         // 告诉设置页"现在在演哪一段"（宠物自己切的时候也要高亮到对的位置）。
         window.dispatchEvent(
           new CustomEvent('dsa:pet-state', { detail: { id, name: clip.name, pack: pack.id, loop } }),
@@ -1131,6 +1132,7 @@ window.__ModuleLoader__.load({
         }
         clearAmbience()
         clearReturn()
+        mode = 'action'
         show(id, false, true)
       }
 
@@ -1143,18 +1145,17 @@ window.__ModuleLoader__.load({
         }, PET_RETURN_MS)
       }
 
-      /** 排下一次随机动作；已经在演一次性动作时不排（回待机时会重排）。 */
+      /** 待机满 15 秒就随机演一个小动作（动作随机、时间固定）；演的时候不排，回待机再排。 */
       function scheduleAmbience() {
         clearAmbience()
         if (pack === null) return
-        const delay = PET_IDLE_MIN_MS + Math.random() * (PET_IDLE_MAX_MS - PET_IDLE_MIN_MS)
         ambienceTimer = window.setTimeout(() => {
           ambienceTimer = 0
           if (mode !== 'idle' || pack === null) return
           const clip = randomClip(ambientClips())
           if (clip !== null) playAction(clip.id)
           else scheduleAmbience()
-        }, delay)
+        }, PET_IDLE_MS)
       }
 
       /** 设置页"随机一个"：立刻插播。 */
