@@ -593,12 +593,12 @@ export const DEFAULT_CONFIG = Object.freeze({
   // ── 桌面宠物（浮在 DSH 界面上的透明小动物）──
   /** 是否显示宠物（总开关）。默认关：装上新版不该突然冒出一只动物。 */
   petEnabled: false,
-  /** 宠物显示宽度（px），所有宠物共用；高度按各自素材的宽高比算。 */
+  /** 宠物显示宽度的**默认值**（px）：每只自己记，没记过的那只用这个。 */
   petSize: 176,
   /**
-   * 每只宠物自己的状态：`{ pack, enabled, x, y }`。
+   * 每只宠物自己的状态：`{ pack, enabled, size, x, y }`。
    *
-   * **只记用户动过的那几只**：没记录的包按"关着、右下角"处理。这样加一个新宠物包
+   * **只记用户动过的那几只**：没记录的包按"关着、默认大小、右下角"处理。这样加一个新宠物包
    * 不会因为缺配置就把所有老宠物重置一遍，也不会出现"删了包，配置里还留着"的死数据。
    */
   petPets: [],
@@ -1959,6 +1959,8 @@ export function manageStatus(options) {
     return {
       ...pack,
       enabled: saved === undefined ? index === 0 : saved.enabled === true,
+      // 大小每只独立：没记过就用默认值（不是"跟别人一样"）。
+      size: clampNumber(saved === undefined ? DEFAULT_CONFIG.petSize : saved.size, DEFAULT_CONFIG.petSize, 100, 320),
       x: clampNumber(saved === undefined ? PET_HOME.x : saved.x, PET_HOME.x, 0, 100),
       y: clampNumber(saved === undefined ? PET_HOME.y : saved.y, PET_HOME.y, 0, 100),
     }
@@ -2002,10 +2004,10 @@ export function manageStatus(options) {
     library: scanLibrary(options.packageRoot, deleted, options.homeDir),
     limitBytes: MEDIA_LIMIT_BYTES,
     /**
-     * 桌面宠物域：总开关 / 大小 / 每只宠物。
+     * 桌面宠物域：总开关 + 每只宠物。
      *
      * `pets[]` 是**每只宠物的完整状态**：包本体（clips / roles / canvas / 封面…）
-     * 加上它自己的 `enabled / x / y`。客户端直接遍历它建浮层，不必再去 packs 里查表。
+     * 加上它自己的 `enabled / size / x / y`。客户端直接遍历它建浮层，不必再去别处查表。
      * 加一个宠物包、删一个、改一个动作，这一份数据就全变了 —— 只有一个来源。
      *
      * `clips[].file` 是包内相对路径，客户端拼成 `ASSET?path=…` 取流 —— 复用既有的
@@ -2015,7 +2017,6 @@ export function manageStatus(options) {
      */
     pet: {
       enabled: raw.petEnabled === true,
-      size: clampNumber(raw.petSize, DEFAULT_CONFIG.petSize, 100, 320),
       pets: petList,
     },
     /**
@@ -2540,32 +2541,21 @@ export function apply(ctx) {
                     }
                     patch.durationSec = clampDurationSec(body.durationSec)
                   }
-                  // ── 宠物域：总开关 / 大小 / 每只的开关与位置 ──
-                  // 大小与位置照旧"服务端夹取不给商用"：越界的值就地夹好，不报错 ——
-                  // 拖到屏幕边缘时客户端算出的百分比偶尔会是 100.4 这种数。
+                  // ── 宠物域：总开关 / 每只的开关、大小、位置 ──
+                  // 三个 per-pet 键都带 pack id，只改那一只。数值照旧"服务端夹取不给商用"：
+                  // 越界的值就地夹好，不报错 —— 拖到边缘/拖滑杆时客户端算出的数偶尔带小数。
                   if (typeof body.petEnabled === 'boolean') patch.petEnabled = body.petEnabled
-                  if (body.petSize !== undefined) {
-                    if (typeof body.petSize !== 'number' || !Number.isFinite(body.petSize)) {
-                      reply(res, 400, { ok: false, error: '宠物大小必须是 100–320 的数字（px）' })
-                      return
-                    }
-                    patch.petSize = clampNumber(body.petSize, DEFAULT_CONFIG.petSize, 100, 320)
-                  }
-                  // 单只的开关与位置：`petToggle`/`petMove` 带 pack id，只改那一只。
                   // 需要先读一次当前配置（这次写的是"数组里的一项"，不能只靠 patch 覆盖）。
+                  const perPet = ['petToggle', 'petResize', 'petMove'].filter((key) => body[key] !== undefined)
                   const petsNow =
-                    body.petToggle === undefined && body.petMove === undefined
+                    perPet.length === 0
                       ? []
                       : (() => {
                           const current = loadConfig({ packageRoot, homeDir }).raw
                           return Array.isArray(current.petPets) ? current.petPets : []
                         })()
                   const knownPacks = listPetPacks(packageRoot).map((pack) => pack.id)
-                  for (const [key, fields] of [
-                    ['petToggle', ['enabled']],
-                    ['petMove', ['x', 'y']],
-                  ]) {
-                    if (body[key] === undefined) continue
+                  for (const key of perPet) {
                     const change = body[key]
                     if (change === null || typeof change !== 'object' || typeof change.pack !== 'string') {
                       reply(res, 400, { ok: false, error: `${key} 需要 { pack, ... }` })
@@ -2583,8 +2573,14 @@ export function apply(ctx) {
                         return
                       }
                       next.enabled = change.enabled
+                    } else if (key === 'petResize') {
+                      if (typeof change.size !== 'number' || !Number.isFinite(change.size)) {
+                        reply(res, 400, { ok: false, error: '宠物大小必须是 100–320 的数字（px）' })
+                        return
+                      }
+                      next.size = clampNumber(change.size, DEFAULT_CONFIG.petSize, 100, 320)
                     } else {
-                      for (const field of fields) {
+                      for (const field of ['x', 'y']) {
                         if (change[field] === undefined) continue
                         if (typeof change[field] !== 'number' || !Number.isFinite(change[field])) {
                           reply(res, 400, { ok: false, error: '宠物位置必须是 0–100 的数字' })
@@ -2593,10 +2589,11 @@ export function apply(ctx) {
                         next[field] = clampNumber(change[field], 100, 0, 100)
                       }
                     }
-                    patch.petPets = mergePetState(petsNow, change.pack, next)
+                    // 逐键应用：一条请求里同时带 petToggle 与 petResize 时两次都要落到同一份上。
+                    patch.petPets = mergePetState(patch.petPets ?? petsNow, change.pack, next)
                   }
                   if (Object.keys(patch).length === 0) {
-                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "petEnabled", "petSize", "petToggle", "petMove", "use", "useAudio" or "forget"' })
+                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "petEnabled", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
                     return
                   }
                   try {

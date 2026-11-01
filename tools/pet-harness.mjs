@@ -30,14 +30,14 @@ const port = Number(process.argv[2] || 8792)
  */
 const packs = listPetPacks(root)
 
-/** 假的管理状态：只保留浮层关心的字段。第二只也开着，方便看多只同屏。 */
+/** 假的管理状态：只保留浮层关心的字段。第二只也开着，方便看多只同屏（大小也各给一份）。 */
 const state = {
   pet: {
     enabled: true,
-    size: 176,
     pets: packs.map((pack, index) => ({
       ...pack,
       enabled: index < 2,
+      size: index === 0 ? 176 : 140,
       x: index === 0 ? 100 : 40,
       y: index === 0 ? 100 : 55,
     })),
@@ -119,14 +119,15 @@ http
           // 配置键 → 回包字段，和宿主的 manage 状态形状对齐：这样刷新页面还能读回
           // 上次拖到的位置、开关状态，验证持久化才有意义。
           if (typeof body.petEnabled === 'boolean') state.pet.enabled = body.petEnabled
-          if (typeof body.petSize === 'number') state.pet.size = body.petSize
-          for (const key of ['petToggle', 'petMove']) {
+          for (const key of ['petToggle', 'petResize', 'petMove']) {
             const change = body[key]
             if (change === null || typeof change !== 'object') continue
             const target = state.pet.pets.find((item) => item.id === change.pack)
             if (target === undefined) continue
             if (key === 'petToggle') target.enabled = change.enabled === true
-            else {
+            else if (key === 'petResize') {
+              if (typeof change.size === 'number') target.size = change.size
+            } else {
               if (typeof change.x === 'number') target.x = change.x
               if (typeof change.y === 'number') target.y = change.y
             }

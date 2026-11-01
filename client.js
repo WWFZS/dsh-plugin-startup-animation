@@ -1619,8 +1619,8 @@ window.__ModuleLoader__.load({
     function createPetLayer(options) {
       const onPersist = options.onPersist
       const t = options.t
-      /** 全局：总开关 + 共用大小 + 每只的状态。 */
-      let pet = { enabled: false, size: 176, pets: [] }
+      /** 全局：总开关 + 每只的状态（大小也是每只自己的，见 entry.size）。 */
+      let pet = { enabled: false, pets: [] }
       /** @type {Map<string, ReturnType<typeof createPetInstance>>} */
       const instances = new Map()
 
@@ -1638,9 +1638,8 @@ window.__ModuleLoader__.load({
       const sync = (next) => {
         if (!next || typeof next !== 'object') return
         pet.enabled = next.enabled === true
-        // **不采纳 size**：大小由设置页的滑杆独占（拖的时候一路推 `dsa:pet-size`）。
+        // 每只的大小不在这里采纳：它由设置页的滑杆独占（拖的时候一路推 `dsa:pet-size`）。
         // 每次回包都应用一次旧值的话，拖着滑杆的宠物会被拽回上一个尺寸 —— 看着就是卡。
-        // 首次真值由 load() 灌进来（见下）。
         if (Array.isArray(next.pets)) pet.pets = next.pets
         // 总开关关着、或一个宠物包都没有：不建 DOM（素材几十 MB，不该占带宽和内存）。
         if (!pet.enabled || pet.pets.length === 0) {
@@ -1658,9 +1657,10 @@ window.__ModuleLoader__.load({
           if (entry.enabled !== true) continue
           const existing = instances.get(entry.id)
           if (existing === undefined) {
+            // 新建时用**它自己的**大小；之后只认滑杆推过来的值。
             const instance = createPetInstance({
               entry,
-              size: pet.size,
+              size: typeof entry.size === 'number' ? entry.size : 176,
               t,
               onPersist,
               onMenuOpen: closeMenus,
@@ -1668,7 +1668,6 @@ window.__ModuleLoader__.load({
             instance.update(entry)
             instances.set(entry.id, instance)
           } else {
-            existing.setSize(pet.size)
             existing.update(entry)
           }
         }
@@ -1680,19 +1679,14 @@ window.__ModuleLoader__.load({
           .then((res) => res.json())
           .then((payload) => {
             if (!payload || !payload.ok || !payload.pet) return
-            // 首次的大小从这里灌进来；之后只认滑杆推的事件。
-            if (typeof payload.pet.size === 'number' && Number.isFinite(payload.pet.size)) {
-              pet.size = payload.pet.size
-            }
             sync(payload.pet)
           })
           .catch(() => {})
 
-      /** 设置页拖滑杆时实时推过来的大小：所有实例一起变，**不落盘**。 */
-      const setSize = (size) => {
+      /** 设置页拖滑杆时实时推过来的大小：只改那一只，**不落盘**。 */
+      const setSize = (packId, size) => {
         if (typeof size !== 'number' || !Number.isFinite(size)) return
-        pet.size = size
-        for (const instance of instances.values()) instance.setSize(size)
+        withInstance(packId, (instance) => instance.setSize(size))
       }
 
       /** 对某一只动手；包不在场（还没开/已关）就什么都不做。 */
@@ -1775,15 +1769,13 @@ window.__ModuleLoader__.load({
           if (state && typeof state.audioVolume === 'number') setAvol(Math.round(state.audioVolume * 100))
         }, [state])
 
-        // 宠物大小只**初始化一次**：之后这个值由滑杆独占。
-        // 每次回包都回写的话，拖着滑杆时旧值会把滑杆拽回去 —— 那就是"卡顿"的一半来源。
-        const petSizeInited = React.useRef(false)
+        // 宠物大小滑杆跟着"当前看的那只"走：每只各记各的，切宠物就换成那只的值。
+        // 只在选中这一只时同步（拖动过程中别被回包的旧值拽回去）。
         React.useEffect(() => {
-          if (petSizeInited.current || !state || !state.pet) return
-          if (typeof state.pet.size !== 'number') return
-          petSizeInited.current = true
-          setPetSize(state.pet.size)
-        }, [state])
+          const target = petsAll.find((item) => item.id === petSelectedId)
+          if (target === undefined || typeof target.size !== 'number') return
+          setPetSize(target.size)
+        }, [petSelectedId])
 
         // 设置页里的改动（开关 / 大小）要立刻反映到浮层上：两边不在同一棵渲染树上，
         // 用一条 window 事件桥接。浮层只取 enabled/size/pets，位置它自己管。
@@ -1890,14 +1882,18 @@ window.__ModuleLoader__.load({
         //
         // 为什么不能等回包再变：拖滑杆时宠物要是不跟手，手感就是"卡"——用户看到的是
         // 一个 350ms 的静止 + 一次跳变。落盘与显示解耦，拖起来才是连续的。
+        // 大小是**每只自己的**，所以事件和落盘都带上当前选中的 pack。
         const onPetSize = (value) => {
           const next = Math.min(320, Math.max(100, Math.round(Number(value))))
           setPetSize(next)
-          window.dispatchEvent(new CustomEvent('dsa:pet-size', { detail: next }))
+          window.dispatchEvent(
+            new CustomEvent('dsa:pet-size', { detail: { pack: petSelectedId, size: next } }),
+          )
           if (petSizeRef.current !== null) clearTimeout(petSizeRef.current)
+          const packId = petSelectedId
           petSizeRef.current = setTimeout(() => {
             petSizeRef.current = null
-            postJson(send, { petSize: next }, t('petSaved'))
+            postJson(send, { petResize: { pack: packId, size: next } }, t('petSaved'))
           }, 350)
         }
 
@@ -2678,7 +2674,11 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dsa-set-row' },
-            h('div', { className: 'dsa-set-label' }, t('petSize')),
+            h(
+              'div',
+              { className: 'dsa-set-label' },
+              petPack === null ? t('petSize') : `${t('petSize')} · ${petPack.name}`,
+            ),
             h(
               'div',
               { className: 'dsa-set-right' },
@@ -2998,8 +2998,12 @@ window.__ModuleLoader__.load({
             petLayer.random(detail === null || typeof detail !== 'object' ? '' : String(detail.pack || ''))
           }
           const onPetReset = () => petLayer.reset()
-          // 滑杆每动一格就推一次；浮层只改视觉，落盘另有 350ms 防抖。
-          const onPetSize = (event) => petLayer.setSize(Number(event.detail))
+          // 滑杆每动一格就推一次（带 pack）；浮层只改那一只的视觉，落盘另有 350ms 防抖。
+          const onPetSize = (event) => {
+            const detail = event.detail
+            if (detail === null || typeof detail !== 'object') return
+            petLayer.setSize(String(detail.pack || ''), Number(detail.size))
+          }
           // 设置页翻到宠物页签时会问一句"现在在演哪个"，好把动作列表的高亮对上。
           const onPetQuery = () => petLayer.report()
           window.addEventListener('dsa:pet-sync', onPetSync)

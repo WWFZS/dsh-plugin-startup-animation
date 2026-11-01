@@ -681,7 +681,7 @@ const petStatus = (packs = [LULU_PACK], over = {}) => ({
   pet: {
     enabled: false,
     size: 176,
-    pets: packs.map((pack, index) => ({ ...pack, enabled: index === 0, x: 100, y: 100 })),
+    pets: packs.map((pack, index) => ({ ...pack, enabled: index === 0, size: 176, x: 100, y: 100 })),
     ...over,
   },
 })
@@ -707,7 +707,7 @@ await check('宠物页签：开关 + 大小 + 宠物卡 + 动作区', async () =
   const petTree = await openPetTab(render)
   const all = texts(petTree)
   assert.ok(all.includes('显示所有宠物'), '没有宠物总开关')
-  assert.ok(all.includes('宠物大小'), '没有大小滑杆')
+  assert.ok(all.some((line) => line.includes('宠物大小')), '没有大小滑杆')
   assert.ok(all.includes('宠物'), '没有宠物选择标题')
   assert.ok(all.some((line) => line.startsWith('动作')), '没有动作区标题')
   const range = findByProp(petTree, 'type').find(
@@ -900,7 +900,7 @@ await check('宠物没开就点动作 → 先打开宠物，再通知浮层播�
   assert.equal(play.detail && play.detail.pack, 'lulu', '播放事件没说播哪一只')
 })
 
-await check('拖大小滑杆 → 立刻推给浮层，落盘走防抖', async () => {
+await check('拖大小滑杆 → 带 pack 立刻推给浮层，落盘走防抖', async () => {
   const { render, calls } = await loadClient({ status: petStatus() })
   const petTree = await openPetTab(render)
   const range = findByProp(petTree, 'type').find(
@@ -909,7 +909,11 @@ await check('拖大小滑杆 → 立刻推给浮层，落盘走防抖', async ()
   range.props.onChange({ target: { value: '260' } })
   const size = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-size')
   assert.ok(size, '拖滑杆没有实时推给浮层（宠物会等回包才变，看着卡）')
-  assert.equal(size.detail, 260, `推的尺寸不对：${size.detail}`)
+  assert.equal(
+    JSON.stringify(size.detail),
+    JSON.stringify({ pack: 'lulu', size: 260 }),
+    `推的尺寸不对：${JSON.stringify(size.detail)}`,
+  )
   assert.equal(
     calls.filter((call) => call.type === 'fetch' && call.init?.method === 'POST').length,
     0,
@@ -917,14 +921,47 @@ await check('拖大小滑杆 → 立刻推给浮层，落盘走防抖', async ()
   )
 })
 
-await check('宠物大小越界 → 夹到 320 再写回', async () => {
+await check('宠物大小越界 → 夹到 320 再写回（带 pack）', async () => {
   const { render, calls } = await loadClient({ status: petStatus() })
   const petTree = await openPetTab(render)
   const range = findByProp(petTree, 'aria-label').find((el) => el.props['aria-label'] === '宠物大小')
   range.props.onChange({ target: { value: '9999' } })
   await new Promise((resolve) => setTimeout(resolve, 400))
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
-  assert.deepEqual(JSON.parse(post.init.body), { petSize: 320 }, '越界值没被夹到 320')
+  assert.deepEqual(JSON.parse(post.init.body), { petResize: { pack: 'lulu', size: 320 } }, '越界值没被夹到 320')
+})
+
+await check('每只各记各的大小：切到女仆后，改的是女仆那一份', async () => {
+  const pets = [
+    { ...LULU_PACK, enabled: true, size: 180, x: 100, y: 100 },
+    { ...MAID_PACK, enabled: true, size: 300, x: 20, y: 30 },
+  ]
+  const { render, calls } = await loadClient({ status: petStatus([], { enabled: true, pets }) })
+  let petTree = await openPetTab(render)
+  // 选中女仆 → 再拖滑杆，推给浮层的 pack 必须是 maid（不是全局共用一份大小）。
+  findAll(petTree, 'dsa-set-pet')
+    .find((card) => texts(card).includes('女仆'))
+    .children[0].props.onClick()
+  petTree = await render()
+  assert.ok(
+    texts(petTree).some((line) => line.includes('大小 · 女仆')),
+    '大小这一行的标签没跟着换宠物',
+  )
+  const range = findByProp(petTree, 'aria-label').find((el) => el.props['aria-label'] === '宠物大小')
+  range.props.onChange({ target: { value: '280' } })
+  const size = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-size')
+  assert.equal(
+    JSON.stringify(size.detail),
+    JSON.stringify({ pack: 'maid', size: 280 }),
+    `推的不是女仆那一份：${JSON.stringify(size.detail)}`,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.deepEqual(
+    JSON.parse(post.init.body),
+    { petResize: { pack: 'maid', size: 280 } },
+    '落盘没带上 pack',
+  )
 })
 
 console.log('== 恢复默认与版本 ==')
