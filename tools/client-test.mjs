@@ -657,8 +657,15 @@ const MAID_PACK = {
   count: 109,
 }
 
-/** 带宠物域的 manage 状态（宿主的真实回包形状）。 */
-const petStatus = (packs = [LULU_PACK], pack = 'lulu', over = {}) => ({
+/**
+ * 带宠物域的 manage 状态（宿主的真实回包形状）。
+ *
+ * `pet.pets` 是**每只宠物的完整状态**：包本体 + 自己的 enabled/x/y。第一只默认开着，
+ * 这样「总开关关着、点动作先开总开关」那条路径仍然成立。
+ * @param {object[]} [packs] 宠物包。
+ * @param {object} [over] 覆盖 pet 的字段（总开关 / 大小 / pets）。
+ */
+const petStatus = (packs = [LULU_PACK], over = {}) => ({
   ok: true,
   enabled: true,
   durationSec: 8,
@@ -671,7 +678,12 @@ const petStatus = (packs = [LULU_PACK], pack = 'lulu', over = {}) => ({
   limitBytes: 1e9,
   library: [],
   cfg: {},
-  pet: { enabled: false, size: 176, x: 100, y: 100, pack, packs, ...over },
+  pet: {
+    enabled: false,
+    size: 176,
+    pets: packs.map((pack, index) => ({ ...pack, enabled: index === 0, x: 100, y: 100 })),
+    ...over,
+  },
 })
 
 /** 切到宠物页签并返回这一轮渲染的树。 */
@@ -694,10 +706,10 @@ await check('宠物页签：开关 + 大小 + 宠物卡 + 动作区', async () =
   const { render } = await loadClient({ status: petStatus() })
   const petTree = await openPetTab(render)
   const all = texts(petTree)
-  assert.ok(all.includes('显示桌面宠物'), '没有宠物开关')
+  assert.ok(all.includes('显示所有宠物'), '没有宠物总开关')
   assert.ok(all.includes('宠物大小'), '没有大小滑杆')
   assert.ok(all.includes('宠物'), '没有宠物选择标题')
-  assert.ok(all.includes('动作'), '没有动作区标题')
+  assert.ok(all.some((line) => line.startsWith('动作')), '没有动作区标题')
   const range = findByProp(petTree, 'type').find(
     (el) => el.props.type === 'range' && el.props['aria-label'] === '宠物大小',
   )
@@ -726,18 +738,18 @@ await check('小包动作直接平铺：丢一个动作进去就多一格', asyn
 })
 
 await check('点动作格 → 通知浮层播这个名字对应的动作', async () => {
-  const { render, calls } = await loadClient({ status: petStatus([LULU_PACK], 'lulu', { enabled: true }) })
+  const { render, calls } = await loadClient({ status: petStatus([LULU_PACK], { enabled: true }) })
   const petTree = await openPetTab(render)
   const card = findAll(petTree, 'dsa-set-act').find((el) => texts(el).includes('害羞捂脸'))
   assert.ok(card, '找不到「害羞捂脸」')
   card.props.onClick()
   const play = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-play')
   assert.ok(play, '没有通知浮层播放')
-  assert.equal(play.detail, '害羞捂脸', `播的动作不对：${play.detail}`)
+  assert.equal(play.detail && play.detail.id, '害羞捂脸', `播的动作不对：${JSON.stringify(play.detail)}`)
 })
 
 await check('浮层回报当前动作 → 对应那格高亮', async () => {
-  const { render, context } = await loadClient({ status: petStatus([LULU_PACK], 'lulu', { enabled: true }) })
+  const { render, context } = await loadClient({ status: petStatus([LULU_PACK], { enabled: true }) })
   let petTree = await openPetTab(render)
   // 浮层回报的是对象（v1.14.0 起带名字与包名）。
   context.window.dispatchEvent(
@@ -750,7 +762,7 @@ await check('浮层回报当前动作 → 对应那格高亮', async () => {
 })
 
 await check('大包不铺动作格：分类卡 + 搜索 + 随机一个', async () => {
-  const { render } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const { render } = await loadClient({ status: petStatus([MAID_PACK], { enabled: true }) })
   const petTree = await openPetTab(render)
   assert.equal(findAll(petTree, 'dsa-set-act').length, 0, '109 个动作不该平铺')
   const cats = findAll(petTree, 'dsa-set-cat')
@@ -764,7 +776,7 @@ await check('大包不铺动作格：分类卡 + 搜索 + 随机一个', async (
 })
 
 await check('大包搜索：最多 8 条命中，点 chip 播放', async () => {
-  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], { enabled: true }) })
   let petTree = await openPetTab(render)
   findAll(petTree, 'dsa-set-input')[0].props.onChange({ target: { value: '动作04' } })
   petTree = await render()
@@ -776,11 +788,11 @@ await check('大包搜索：最多 8 条命中，点 chip 播放', async () => {
   assert.equal(chipThumbs.length, 8, `chip 缩略图数量不对：${chipThumbs.length}`)
   chips[0].props.onClick()
   const play = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-play')
-  assert.equal(play && play.detail, '动作040', 'chip 没有触发播放')
+  assert.equal(play && play.detail && play.detail.id, '动作040', 'chip 没有触发播放')
 })
 
 await check('搜索无命中 → 说一句没有匹配的动作', async () => {
-  const { render } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const { render } = await loadClient({ status: petStatus([MAID_PACK], { enabled: true }) })
   let petTree = await openPetTab(render)
   findAll(petTree, 'dsa-set-input')[0].props.onChange({ target: { value: '不存在' } })
   petTree = await render()
@@ -789,18 +801,18 @@ await check('搜索无命中 → 说一句没有匹配的动作', async () => {
 })
 
 await check('点分类卡 → 通知浮层在这个分类里随机演一个', async () => {
-  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], { enabled: true }) })
   const petTree = await openPetTab(render)
   findAll(petTree, 'dsa-set-cat')
     .find((cat) => texts(cat).includes('吃什么'))
     .props.onClick()
   const play = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-category')
   assert.ok(play, '没有通知浮层按分类播放')
-  assert.equal(play.detail, 'food')
+  assert.equal(play.detail && play.detail.id, 'food')
 })
 
 await check('「随机一个」→ 通知浮层随机演', async () => {
-  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], { enabled: true }) })
   const petTree = await openPetTab(render)
   const btn = findByProp(petTree, 'className').find((el) => el.props.className === 'dsa-set-btn' && texts(el).includes('随机一个'))
   assert.ok(btn, '找不到「随机一个」按钮')
@@ -811,20 +823,49 @@ await check('「随机一个」→ 通知浮层随机演', async () => {
   )
 })
 
-await check('换宠物 → 写回 petPack，卡片高亮跟着走', async () => {
-  const { render, calls } = await loadClient({ status: petStatus([LULU_PACK, MAID_PACK], 'lulu', { enabled: true }) })
-  const petTree = await openPetTab(render)
+await check('点卡片 = 只看不动配置；卡片开关 = 只开这一只', async () => {
+  const { render, calls } = await loadClient({ status: petStatus([LULU_PACK, MAID_PACK], { enabled: true }) })
+  let petTree = await openPetTab(render)
   const cards = findAll(petTree, 'dsa-set-pet')
   assert.equal(cards.length, 2, `宠物卡数量不对：${cards.length}`)
-  const maid = cards.find((card) => texts(card).includes('女仆'))
-  assert.ok(maid, '找不到女仆卡')
-  maid.props.onClick()
+  const maidCard = cards.find((card) => texts(card).includes('女仆'))
+  assert.ok(maidCard, '找不到女仆卡')
+  // ① 点卡片主体 → 只是切换"看哪只"（动作区标题跟着换），不发任何写请求。
+  findAll(maidCard, 'dsa-set-pet-hit')[0].props.onClick()
+  petTree = await render()
+  assert.ok(
+    texts(petTree).some((line) => line.startsWith('动作 · 女仆')),
+    `动作区没跟着切到女仆：${texts(petTree).filter((line) => line.startsWith('动作')).join('|')}`,
+  )
+  assert.equal(
+    calls.filter((call) => call.type === 'fetch' && call.init?.method === 'POST').length,
+    0,
+    '只切换视图不该写配置',
+  )
+  // ② 点卡片右上角开关 → 只发这一只的 petToggle（它本来没开，点了就是开）。
+  findByClass(maidCard, 'dsa-set-switch')[0].props.onClick()
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
-  assert.deepEqual(JSON.parse(post.init.body), { petPack: 'maid' })
+  assert.deepEqual(JSON.parse(post.init.body), { petToggle: { pack: 'maid', enabled: true } })
+})
+
+await check('多只可以同时开着：每只各自的开关互不影响', async () => {
+  const pets = [
+    { ...LULU_PACK, enabled: true, x: 100, y: 100 },
+    { ...MAID_PACK, enabled: true, x: 20, y: 30 },
+  ]
+  const { render } = await loadClient({ status: petStatus([], { enabled: true, pets }) })
+  const petTree = await openPetTab(render)
+  const switches = findByClass(petTree, 'dsa-set-switch').filter((el) => String(el.props['aria-label']).includes('·'))
+  assert.equal(switches.length, 2, `宠物卡开关数量不对：${switches.length}`)
+  assert.deepEqual(
+    switches.map((el) => el.props['aria-checked']),
+    ['true', 'true'],
+    '两只都开着时两个开关都该是开',
+  )
 })
 
 await check('素材署名：带原作者链接', async () => {
-  const { render } = await loadClient({ status: petStatus([MAID_PACK], 'maid', { enabled: true }) })
+  const { render } = await loadClient({ status: petStatus([MAID_PACK], { enabled: true }) })
   const petTree = await openPetTab(render)
   const credit = findAll(petTree, 'dsa-set-credit')[0]
   assert.ok(credit, '没有署名行')
@@ -836,7 +877,7 @@ await check('素材署名：带原作者链接', async () => {
 await check('打开宠物开关 → 写回 petEnabled:true', async () => {
   const { render, calls } = await loadClient({ status: petStatus() })
   const petTree = await openPetTab(render)
-  const toggle = findAll(petTree, 'dsa-set-switch').find((el) => el.props['aria-label'] === '显示桌面宠物')
+  const toggle = findAll(petTree, 'dsa-set-switch').find((el) => el.props['aria-label'] === '显示所有宠物')
   assert.ok(toggle, '找不到宠物开关')
   toggle.props.onClick()
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
@@ -850,12 +891,13 @@ await check('宠物没开就点动作 → 先打开宠物，再通知浮层播�
     .find((card) => texts(card).includes('点击回应'))
     .props.onClick()
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
-  assert.deepEqual(JSON.parse(post.init.body), { petEnabled: true }, '没有先把宠物打开')
+  assert.deepEqual(JSON.parse(post.init.body), { petEnabled: true }, '没有先把总开关打开')
   // 打开之后再发播放事件（等状态落地），否则浮层还没显示，动作白播。
   await new Promise((resolve) => setTimeout(resolve, 120))
   const play = calls.find((call) => call.type === 'event' && call.name === 'dsa:pet-play')
   assert.ok(play, '没有通知浮层播放')
-  assert.equal(play.detail, '点击回应', `播的动作不对：${play.detail}`)
+  assert.equal(play.detail && play.detail.id, '点击回应', `播的动作不对：${JSON.stringify(play.detail)}`)
+  assert.equal(play.detail && play.detail.pack, 'lulu', '播放事件没说播哪一只')
 })
 
 await check('宠物大小越界 → 夹到 320 再写回', async () => {

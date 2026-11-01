@@ -253,6 +253,23 @@ assert.equal(off.json().enabled, false)
 assert.equal(off.json().cfg.enabled, false)
 console.log('  ok   时长夹取 / 非法值 400 / 开关')
 
+// ── 9.5 宠物：单只开关 / 位置（多只各记各的）──
+const petPets = (await call(MANAGE_ROUTE)).json().pet.pets
+assert.ok(Array.isArray(petPets) && petPets.length > 0, 'pet.pets 为空（应当列出所有宠物包）')
+const petId = petPets[0].id
+const petOn = await postJson({ petToggle: { pack: petId, enabled: true } })
+assert.equal(petOn.status, 200, petOn.body.toString())
+assert.equal(petOn.json().pet.pets.find((pet) => pet.id === petId).enabled, true, '单只开关没写进去')
+const petMoved = await postJson({ petMove: { pack: petId, x: 33.3, y: 66.6 } })
+assert.equal(petMoved.status, 200, petMoved.body.toString())
+const movedPet = petMoved.json().pet.pets.find((pet) => pet.id === petId)
+assert.equal(movedPet.x, 33.3, '位置没写进去')
+assert.equal(movedPet.y, 66.6, '位置没写进去')
+assert.equal(movedPet.enabled, true, '写位置把开关冲掉了')
+const petBad = await postJson({ petToggle: { pack: '不存在的宠物', enabled: true } })
+assert.equal(petBad.status, 400, '不存在的宠物包应当 400')
+console.log('  ok   宠物：单只开关 / 位置 / 未知包拒绝')
+
 // ── 10. 音频域 ──
 const audioFile = Buffer.alloc(5000, 3)
 const upAudio = await call(MANAGE_ROUTE, {
