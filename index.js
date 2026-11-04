@@ -1350,17 +1350,108 @@ function avoidWindowsDeviceName(name) {
 }
 
 /**
+ * 读一段 MP4 的时长（秒），给卡片上的「12s」标记用。
+ *
+ * 为什么不用 ffprobe：那是开发期工具（见 tools/make-thumbs.mjs），用户机器上不一定有，
+ * 而插件运行期只允许 node: 内建。MP4 的时长就写在 moov/mvhd 里，顶层盒子逐层跳过、
+ * 只读那几十个字节即可 —— 不需要解析任何编码参数。
+ *
+ * 只认前 32 MiB：moov 偶尔在文件末尾（非 faststart 的素材），但远超这个尺寸还没找到，
+ * 说明它不是普通 MP4（或文件坏了），放弃比拼元数据更划算。
+ *
+ * 任何不确定都返回 undefined（卡片照常显示，只是没有时长）—— 时长是锦上添花，
+ * 绝不能成为"素材列表变慢/报错"的原因。
+ *
+ * @param {string} filePath 视频文件绝对路径。
+ * @returns {number | undefined} 时长（秒，向上取整前保持浮点）；读不到返回 undefined。
+ */
+export function videoDurationSec(filePath) {
+  let fd
+  try {
+    fd = fs.openSync(filePath, 'r')
+    const size = fs.fstatSync(fd).size
+    const head = Buffer.alloc(16)
+    let pos = 0
+    const scanEnd = Math.min(size, 32 * 1024 * 1024)
+    while (pos + 8 <= scanEnd) {
+      fs.readSync(fd, head, 0, 8, pos)
+      let boxSize = head.readUInt32BE(0)
+      const type = head.toString('latin1', 4, 8)
+      if (boxSize === 1) {
+        // 64 位长度：前 8 字节才是真实长度。
+        fs.readSync(fd, head, 0, 8, pos + 8)
+        boxSize = Number(head.readBigUInt64BE(0))
+      } else if (boxSize === 0) {
+        // 0 = 一直到文件末尾。
+        boxSize = size - pos
+      }
+      if (boxSize < 8) return undefined
+      if (type === 'moov') {
+        const moov = Buffer.alloc(Math.min(boxSize, 64 * 1024 * 1024))
+        fs.readSync(fd, moov, 0, moov.length, pos)
+        return mvhdDuration(moov)
+      }
+      pos += boxSize
+    }
+    return undefined
+  } catch {
+    return undefined
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd)
+      } catch {
+        /* 关不掉也不影响结果 */
+      }
+    }
+  }
+}
+
+/**
+ * 在 moov 里找 mvhd，返回 duration / timescale。
+ *
+ * mvhd 只有两种版本：v0（uint32 秒）与 v1（uint64 秒）。两种都按固定偏移取，
+ * 不做完整盒子树遍历 —— moov 里 mvhd 必然是第一个或第二个子盒子。
+ * @param {Buffer} moov 从盒子头开始的 moov 内容。
+ * @returns {number | undefined} 秒数。
+ */
+function mvhdDuration(moov) {
+  // 跳过 moov 自己的 8 字节头（或 16 字节的 64 位头）。
+  let cursor = moov.readUInt32BE(0) === 1 ? 16 : 8
+  while (cursor + 8 <= moov.length) {
+    const boxSize = moov.readUInt32BE(cursor)
+    const type = moov.toString('latin1', cursor + 4, cursor + 8)
+    if (boxSize < 8) return undefined
+    if (type === 'mvhd') {
+      const body = cursor + 8
+      const version = moov.readUInt8(body)
+      if (version === 1) {
+        const timescale = moov.readUInt32BE(body + 20)
+        const duration = Number(moov.readBigUInt64BE(body + 24))
+        return timescale > 0 && duration > 0 ? duration / timescale : undefined
+      }
+      const timescale = moov.readUInt32BE(body + 12)
+      const duration = moov.readUInt32BE(body + 16)
+      return timescale > 0 && duration > 0 ? duration / timescale : undefined
+    }
+    cursor += boxSize
+  }
+  return undefined
+}
+
+/**
  * 列出素材库（内置 + 上传合并）：
  *   - `builtin/` 下每个子目录是一个内置分类（如 MP4、图片）；tombstone 条目不出现；
  *   - `$DSH_HOME/startup-animation-media/` 里的用户上传文件**按扩展名自动归类**：
  *     视频 → MP4 分类，图片 → 图片（壁纸）分类，条目标记 `uploaded: true`。
+ *   - 视频条目额外带 `duration`（秒）：卡片要标「12s」，让用户选之前就知道素材多长。
  *
  * "删除内置"只写 tombstone（包内文件保留，宣传仓库完整）；上传素材的删除是真删（见 removeUploadedFile）。
  *
  * @param {string} packageRoot 包根。
  * @param {string[]} [deleted] 已移除（tombstone）的内置相对路径列表。
  * @param {string} [homeDir] DSH_HOME（提供后才扫描上传目录）。
- * @returns {Array<{ id: string, files: Array<{ path: string, name: string, size: number, uploaded?: boolean }> }>} 分类列表。
+ * @returns {Array<{ id: string, files: Array<{ path: string, name: string, size: number, uploaded?: boolean, duration?: number }> }>} 分类列表。
  */
 export function scanLibrary(packageRoot, deleted = [], homeDir) {
   const hidden = new Set(deleted)
@@ -1416,13 +1507,15 @@ export function scanLibrary(packageRoot, deleted = [], homeDir) {
     for (const [logicalName, servedName] of videoEntries) {
       const rel = `${BUILTIN_DIR_NAME}/${dir.name}/${logicalName}`
       if (hidden.has(rel)) continue
+      const abs = path.join(catDir, servedName)
       let size = 0
       try {
-        size = fs.statSync(path.join(catDir, servedName)).size
+        size = fs.statSync(abs).size
       } catch {
         continue
       }
-      items.push({ path: rel, name: logicalName, size })
+      const duration = videoDurationSec(abs)
+      items.push(duration === undefined ? { path: rel, name: logicalName, size } : { path: rel, name: logicalName, size, duration })
     }
     // 非视频素材：逐个列。
     for (const file of files) {
@@ -1475,7 +1568,12 @@ export function scanLibrary(packageRoot, deleted = [], homeDir) {
         cat = { id: catId, files: [] }
         categories.push(cat)
       }
-      cat.files.push({ path: abs, name: file.name, size, uploaded: true })
+      const duration = kind === 'video' ? videoDurationSec(abs) : undefined
+      cat.files.push(
+        duration === undefined
+          ? { path: abs, name: file.name, size, uploaded: true }
+          : { path: abs, name: file.name, size, uploaded: true, duration },
+      )
     }
   }
 
