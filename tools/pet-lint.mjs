@@ -46,7 +46,7 @@ const argOf = (name, fallback) => {
   return at >= 0 && argv[at + 1] !== undefined ? argv[at + 1] : fallback
 }
 
-const srcDir = argOf('--src', 'D:/不重要测试文件/lulu_pet/webm')
+const srcDir = argOf('--src', 'tools/pet-src/lulu')
 const packDir = argOf('--pack', 'builtin/宠物/噜噜')
 const crop = readCrop()
 

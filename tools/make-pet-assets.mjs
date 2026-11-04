@@ -13,7 +13,7 @@
  *    让 chromakey 把它当背景一起抠掉 —— 比事后修 alpha 稳得多（geq 会把 alpha 重置）。
  *
  * 用法：node tools/make-pet-assets.mjs [--src <目录>]
- *   默认源目录 D:/不重要测试文件/lulu_pet/webm
+ *   默认源目录 tools/pet-src/lulu（仓库内，13 MB）
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -63,9 +63,18 @@ const SAT_MAX = 90
 const CHROMAKEY = 'chromakey=0x00ff00:0.22:0.10'
 const DESPILL = 'despill=type=green:mix=0.5:expand=0'
 
+/**
+ * 源片目录。
+ *
+ * 默认就是仓库里的 `tools/pet-src/lulu/` —— 源片一共 13 MB（1280×720 VP9，单段 ~1 MB），
+ * 放仓库里比放在外面某个"测试文件"目录靠谱：换机器、重装、协作者都能直接跑转码，
+ * 不必再问"素材在哪"。`tools/` 不在 package.json 的 files 里，所以不会被打进 npm 包。
+ *
+ * 想用别的目录：`--src <目录>`。
+ */
 const srcDir = (() => {
   const at = process.argv.indexOf('--src')
-  return at >= 0 ? process.argv[at + 1] : 'D:/不重要测试文件/lulu_pet/webm'
+  return at >= 0 ? process.argv[at + 1] : 'tools/pet-src/lulu'
 })()
 
 /** geq 表达式：把「Y≥SHADOW_Y 且 低饱和 且 明显偏绿」的像素写成纯绿，其余原样。

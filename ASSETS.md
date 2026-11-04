@@ -51,12 +51,24 @@
 
 均为网络素材，作演示用语音片段。
 
-## 宠物（2 只 / 118 段）
+## 宠物（2 只 / 122 段）
 
 一包一只宠物：`builtin/宠物/<目录>/` 里放 `pet.json` + 若干 `.webm` + 封面 `webp`，
 缩略图在 `thumbs/<动作>.webp`。点击音效是共享的 `builtin/宠物/click.wav`（30 KB，
 取自 dsh-pet 的 `click-duck.wav`）；`pet.json` 里写 `"sound": "click.wav"` 就用包内那份，
 写 `"sound": ""` 静音，不写则回落到共享音效。
+
+### 源片放在哪
+
+`tools/pet-src/lulu/` —— 绿幕源片（1280×720、VP9、单段约 1 MB，合计 13 MB）就放在仓库里：
+
+- 换机器 / 重装 / 协作者 clone 下来就能直接跑转码，不必再问"素材在哪"；
+- `tools/` 不在 `package.json` 的 `files` 里，所以**不会被打进 npm 包**；
+- 转码链是 `tools/make-pet-assets.mjs`（`--src` 可指向别处）。
+
+加一段动作：源片丢进 `tools/pet-src/lulu/`（编号接着往下排）→ 在脚本的 `CLIPS` 里加一行 →
+`node tools/pet-lint.mjs`（看有没有越出裁剪窗口）→ 转码 → `make-pet-thumbs` → 改 `pet.json`
+分类 → `node tools/pet-preview.mjs` 用真实尺寸看一遍。
 
 - **噜噜**（`builtin/宠物/噜噜/`，13 段）：`待机`、`点击回应`、`害羞捂脸`、`拖拽悬空`、
   `原地踏步`、`吃橘子`、`挥手打招呼`、`原地小憩`、`泡温泉`、`玩电脑`、`圣诞换装`、`收红包`、`堆雪人`
