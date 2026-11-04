@@ -248,67 +248,32 @@ html[data-dsa-cover] [data-dsh-boot] {
   text-align: center;
 }
 
-/* ── HUD：进度条 + 状态行 + 跳过胶囊（素材模式下也显示）──
-   素材还没出画的这段，HUD 跟着素材一起淡入：不在空背景上先冒出一条进度条。 */
-.dsa-hud {
+/* ── 状态行：平时是空的（不占位），只在启动慢 / 内核失败 / 声音被拦时出现 ── */
+.dsa-status {
   position: absolute;
   left: 50%;
   bottom: 64px;
   transform: translateX(-50%);
   z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  width: min(340px, calc(100vw - 48px));
-  pointer-events: none;
-  transition: opacity 260ms ease;
-}
-
-.dsa-root[data-mode="media"][data-media="loading"] .dsa-hud {
-  opacity: 0;
-}
-
-.dsa-bar {
-  position: relative;
-  width: 100%;
-  height: 3px;
-  border-radius: 999px;
-  background: var(--dsa-track);
-  overflow: hidden;
-}
-
-.dsa-fill {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: var(--dsa-prog, 4%);
-  min-width: 8px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--dsa-accent), var(--dsa-accent-2));
-  transition: width 0.35s ease;
-}
-
-/* 拿不到内核真实进度时改流光。 */
-.dsa-bar[data-indeterminate="1"] .dsa-fill {
-  width: 38%;
-  animation: dsa-slide 1.5s ease-in-out infinite;
-}
-
-@keyframes dsa-slide {
-  0% { transform: translateX(-110%); }
-  100% { transform: translateX(300%); }
-}
-
-.dsa-status {
+  max-width: min(340px, calc(100vw - 48px));
   font-size: 13px;
   line-height: 1.4;
   color: var(--dsa-text-dim);
   text-align: center;
+  pointer-events: none;
+  transition: opacity 260ms ease;
 }
 
+.dsa-status:empty {
+  display: none;
+}
+
+/* ── 跳过胶囊：固定右下角，不抢画面中心的注意力 ── */
 .dsa-skip {
+  position: absolute;
+  right: 28px;
+  bottom: 26px;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -320,6 +285,8 @@ html[data-dsa-cover] [data-dsh-boot] {
   color: var(--dsa-text-dim);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
+  pointer-events: none;
+  transition: opacity 260ms ease;
 }
 
 .dsa-skip-glyph {
@@ -327,8 +294,15 @@ html[data-dsa-cover] [data-dsh-boot] {
   transform: translateX(1px);
 }
 
+/* 素材还没出画的这段，提示跟着素材一起淡入：不在空背景上先冒出来。 */
+.dsa-root[data-mode="media"][data-media="loading"] .dsa-skip,
+.dsa-root[data-mode="media"][data-media="loading"] .dsa-status {
+  opacity: 0;
+}
+
 /* 素材模式下隐藏标题场景后，跳过胶囊就是唯一提示——保持常驻。 */
-.dsa-root[data-state="leaving"] .dsa-hud,
+.dsa-root[data-state="leaving"] .dsa-skip,
+.dsa-root[data-state="leaving"] .dsa-status,
 .dsa-root[data-state="leaving"] .dsa-sound {
   opacity: 0;
   transition: opacity 200ms ease;
@@ -361,7 +335,6 @@ html[data-dsa-cover] [data-dsh-boot] {
   .dsa-ring.r1,
   .dsa-ring.r2,
   .dsa-core,
-  .dsa-bar[data-indeterminate="1"] .dsa-fill,
   .dsa-root[data-still="1"] .dsa-img {
     animation: none;
   }

@@ -160,7 +160,7 @@ const DISPLAY = "getComputedStyle(document.querySelector('[data-dsh-boot]')).dis
 const OVERLAY_OPACITY = "getComputedStyle(document.querySelector('.dsa-root') ?? document.body).opacity"
 const COVER = "getComputedStyle(document.documentElement, '::before').content"
 const SCENE_DISPLAY = "getComputedStyle(document.querySelector('.dsa-scene')).display"
-const HUD_OPACITY = "getComputedStyle(document.querySelector('.dsa-hud')).opacity"
+const SKIP_OPACITY = "getComputedStyle(document.querySelector('.dsa-skip')).opacity"
 const page = (state) => `http://127.0.0.1:${port}/compile-cache/boot-card.html?state=${state}`
 
 console.log('== 动画挂上就藏掉宿主原生启动卡 ==')
@@ -183,10 +183,10 @@ await check('素材未出画（loading）→ 原生启动卡同样隐藏', async
 
 console.log('== 素材模式不许出现内置徽标场景 ==')
 
-await check('素材未出画（loading）→ 徽标场景不显示、HUD 未淡入', async () => {
+await check('素材未出画（loading）→ 徽标场景不显示、跳过胶囊未淡入', async () => {
   // 用户要求的是"黑一下就出自己的画面"，不是先闪一张 DeepSeek Harness 标题页。
   assert.equal(await evaluate(page('loading'), SCENE_DISPLAY), 'none')
-  assert.equal(await evaluate(page('loading'), HUD_OPACITY), '0')
+  assert.equal(await evaluate(page('loading'), SKIP_OPACITY), '0')
 })
 
 await check('素材已出画（ok）→ 徽标场景也不显示（那是 css 模式的东西）', async () => {

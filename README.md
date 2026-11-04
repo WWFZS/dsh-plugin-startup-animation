@@ -14,6 +14,8 @@
 
 [安装](#安装) · [界面预览](#界面预览) · [使用指南](#怎么用) · [兼容性](#对未来-dsh-版本的兼容性) · [更新记录](https://github.com/WWFZS/dsh-plugin-startup-animation/releases) · [源码构建](#开发)
 
+GitHub：[WWFZS/dsh-plugin-startup-animation](https://github.com/WWFZS/dsh-plugin-startup-animation) ｜ Gitee：[weiwenfengzs/dsh-plugin-startup-animation](https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation)
+
 </div>
 
 ---
@@ -41,7 +43,7 @@
 - **声音两个独立开关** —— 视频音轨与独立音频各管各的，可任意组合
 - **绝不扣住你** —— 点击、`Esc` / `Enter` / `空格`、或者干等，每条路都能出去
 - **失败即降级** —— 任何一步出错都退回 Harness 原生启动页，不阻塞启动
-- **真实进度条** —— 内核给出启动进度弧就用真实进度，否则走流光
+- **干净的画面** —— 只有动画本身，右下角一枚「点击画面跳过」；不出问题就不冒任何文字
 - **时长自己定** —— 3–30 秒，视频与壁纸共用；点击跳过不受它限制
 - **更新前先看清** —— 设置页的「更新公告」直接显示 Release 说明，不用跳 GitHub
 - **卸载与升级都由你** —— 有新版只提示、你点一下才装；不需要了就卸载
@@ -88,6 +90,10 @@
 
 四种方式，任选一种。装好后都在 **设置 → 开机动画** 里配置，首次安装完刷新一次页面即可。
 
+代码在国内两个地方都放了一份，内容一致：[GitHub](https://github.com/WWFZS/dsh-plugin-startup-animation) 与
+[Gitee](https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation)。**版本号、Release 与 npm 包以 GitHub 为准。**
+方式二到方式四都有 Gitee 通道，GitHub 慢的时候替换链接即可，见每节末尾。
+
 ### 方式一：搜包名（最简单）
 
 插件已发布到 npm，DSH 0.2.1+ 的插件管理器能直接装。
@@ -115,6 +121,15 @@ https://github.com/WWFZS/dsh-plugin-startup-animation/releases/latest/download/d
 **文件的绝对路径**填进「插件名」（例如 `C:\Users\你\Downloads\dsh-plugin-startup-animation.tgz`），
 效果一样。
 
+国内走 Gitee 的话用这条：
+
+```
+https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation/releases/download/v1.22.1/dsh-plugin-startup-animation.tgz
+```
+
+Gitee 没有 `latest` 这种永久链接，地址里带着版本号，换版本要换地址 —— 想一次填对就用上面
+GitHub 那条，或者直接下载文件后填本地路径。
+
 ### 方式三：命令行
 
 ```sh
@@ -123,6 +138,9 @@ dsh plugin --profile <你的 profile> add dsh-plugin-startup-animation
 
 # 或从 GitHub 直链
 dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-startup-animation/releases/latest/download/dsh-plugin-startup-animation.tgz
+
+# 或从 Gitee 直链
+dsh plugin --profile <你的 profile> add https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation/releases/download/v1.22.1/dsh-plugin-startup-animation.tgz
 ```
 
 本地 `.tgz` 文件或本地目录路径同样可以，把最后一个参数换掉即可。然后重启 `dsh`。
@@ -131,6 +149,9 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 
 ```sh
 git clone https://github.com/WWFZS/dsh-plugin-startup-animation.git
+# 或者从 Gitee 克隆（内容一致）
+git clone https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation.git
+
 dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 ```
 
@@ -169,6 +190,10 @@ dsh plugin --profile <你的 profile> add /该仓库的绝对路径
 
 **不管你是从 npm、直链还是源码装的，一键更新都从 GitHub Release 取包**——那条 tgz 直链是
 唯一的更新来源，所以哪怕当初用 `npm i` 装的，点了更新之后也会切到 Release 版本。
+
+这条对 **GitHub 不可达**的环境不成立：版本检查和安装包都指向 GitHub，检查不到时那只是一枚
+安静的版本号，不会报错。走 Gitee 装的用户请手动换包（下载新版 Gitee Release 的 tgz 覆盖安装），
+**Update 按钮不会也不能帮你从 Gitee 更新**。
 
 设置页还有一个 **更新公告** 页签：内容就是最新版 Release 的发布说明（同一次更新检查
 顺手带回来，不另发请求），装没装新版都能先看清"这次改了什么"；取不到就安静地显示
