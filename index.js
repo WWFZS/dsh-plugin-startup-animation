@@ -582,7 +582,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   noFrameMs: 10000,
   /** 时长未知（duration=Infinity）时的唯一上界。 */
   endlessMs: 20000,
-  /** "点击画面跳过"胶囊文案；'' = 运行时按语言选择。 */
+  /** 右下角跳过键位文案（默认 Esc）；'' = 运行时按语言选择。点击画面照样能跳过。 */
   skipLabel: '',
   /** 声音被浏览器拦下时开关的文案；'' = 运行时按语言选择。 */
   soundLabel: '',

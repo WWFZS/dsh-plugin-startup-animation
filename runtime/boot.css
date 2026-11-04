@@ -268,7 +268,7 @@ html[data-dsa-cover] [data-dsh-boot] {
   display: none;
 }
 
-/* ── 跳过胶囊：固定右下角，不抢画面中心的注意力 ── */
+/* ── 跳过键位：右下角一枚小键帽，只标 Esc；点击画面同样能跳过，只是不写出来 ── */
 .dsa-skip {
   position: absolute;
   right: 28px;
@@ -276,22 +276,19 @@ html[data-dsa-cover] [data-dsh-boot] {
   z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 14px;
-  border-radius: 999px;
+  padding: 6px 11px;
+  border-radius: 8px;
   background: var(--dsa-pill-bg);
   border: 1px solid var(--dsa-pill-border);
-  font-size: 12px;
+  box-shadow: 0 2px 0 var(--dsa-pill-border);
+  font-size: 11.5px;
+  line-height: 1;
+  letter-spacing: 0.04em;
   color: var(--dsa-text-dim);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   pointer-events: none;
   transition: opacity 260ms ease;
-}
-
-.dsa-skip-glyph {
-  font-size: 9px;
-  transform: translateX(1px);
 }
 
 /* 素材还没出画的这段，提示跟着素材一起淡入：不在空背景上先冒出来。 */
@@ -300,7 +297,6 @@ html[data-dsa-cover] [data-dsh-boot] {
   opacity: 0;
 }
 
-/* 素材模式下隐藏标题场景后，跳过胶囊就是唯一提示——保持常驻。 */
 .dsa-root[data-state="leaving"] .dsa-skip,
 .dsa-root[data-state="leaving"] .dsa-status,
 .dsa-root[data-state="leaving"] .dsa-sound {
