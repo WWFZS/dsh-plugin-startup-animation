@@ -74,6 +74,9 @@ const srcDir = (() => {
  *  - `gt(G-R,12)` 而不是 `lte(R,G)`：白色/灰色的道具（比如"玩电脑"的笔记本）R≈G，
  *    用 `lte(R,G)` 会把它们一并当成地面投影染绿抠掉，道具就"缺一块"。
  *  - 木桶箍是深棕色（sat≈55，R 最大），`G-R` 为负，同样不会被误伤。
+ *  - **`gte(G,B)` 不能省**：雪是"亮白偏蓝"（rgb≈203,216,244，B 最大），它的 `G-R` 也有
+ *    13 左右，光靠 `G-R>12` 会被当投影染绿 —— 表现就是"堆雪人的雪堆下半截被吃掉，
+ *    只剩一排灰白碎片"。绿幕上的阴影一定是绿调（G 最大），雪的 B 一定压过 G，这条能分开。
  *  绿幕上的阴影始终是绿的，G 比 R 高出 20–40，卡 12 够分辨。
  *
  * ③ **`待机` 段单独多染一条「暖白投影带」**。只有这一段，脚下有一条灰白/暖白投影
@@ -92,7 +95,7 @@ function shadowPainter(footY) {
   const G = 'g(X,Y)'
   const B = 'b(X,Y)'
   const sat = `max(max(${R},${G}),${B})-min(min(${R},${G}),${B})`
-  const green = `gte(Y,${SHADOW_Y})*lt(${sat},${footY ? 130 : SAT_MAX})*gt(${G}-${R},12)`
+  const green = `gte(Y,${SHADOW_Y})*lt(${sat},${footY ? 130 : SAT_MAX})*gt(${G}-${R},12)*gte(${G},${B})`
   const warm = `+gte(Y,${SHADOW_Y})*lt(${sat},${SAT_MAX})*(gte(${B},${G}-30)*between(${G}-${R},-40,12)+between(${G}-${R},4,60))`
   const cond = green + (footY ? warm : '')
   return `geq=r='if(${cond},0,${R})':g='if(${cond},255,${G})':b='if(${cond},0,${B})'`

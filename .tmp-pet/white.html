@@ -1,0 +1,9 @@
+<!doctype html><html><body style="margin:0;background:#fff">
+<div style="background:#fff;width:480px">
+<video id="v" muted playsinline style="width:480px;display:block;background:#fff"></video>
+</div>
+<script>
+const v = document.getElementById('v')
+v.src = '/builtin/%E5%AE%A0%E7%89%A9/%E5%99%9C%E5%99%9C/%E5%A0%86%E9%9B%AA%E4%BA%BA.webm'
+v.onloadedmetadata = () => { v.currentTime = 4.2 }
+</script></body></html>

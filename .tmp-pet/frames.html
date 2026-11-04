@@ -1,0 +1,31 @@
+<!doctype html><html><body style="margin:0;background:#fff">
+<div id="row" style="display:flex;gap:2px;background:#fff;flex-wrap:wrap"></div>
+<script>
+const times = [2, 3.5, 5, 6.5, 8]
+const row = document.getElementById('row')
+const v = document.createElement('video')
+v.muted = true; v.playsInline = true
+v.src = '/builtin/%E5%AE%A0%E7%89%A9/%E5%99%9C%E5%99%9C/%E5%A0%86%E9%9B%AA%E4%BA%BA.webm'
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+window.ready = new Promise((resolve) => {
+  v.onloadeddata = async () => {
+    for (const t of times) {
+      v.currentTime = t
+      await sleep(260)
+      const c = document.createElement('canvas')
+      c.width = 240; c.height = 324
+      const ctx = c.getContext('2d')
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 240, 324)
+      ctx.drawImage(v, 0, 0, 240, 324)
+      const wrap = document.createElement('div')
+      wrap.style.cssText = 'position:relative'
+      const tag = document.createElement('div')
+      tag.textContent = `目标${t}s 实际${v.currentTime.toFixed(2)}s`
+      tag.style.cssText = 'position:absolute;left:4px;top:2px;font:11px system-ui;color:#c00'
+      wrap.append(c, tag)
+      row.appendChild(wrap)
+    }
+    resolve(true)
+  }
+})
+</script></body></html>
