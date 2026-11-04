@@ -108,24 +108,24 @@
   var COPY = {
     zh: {
       label: '启动动画',
-      skip: '点击画面跳过',
+      skip: 'Esc',
       sound: '开启声音',
       slow: '启动较慢，正在进入…',
       failed: '启动失败 · 点击查看',
       waiting: '界面就绪后自动进入',
       muted: '浏览器拦下了自动播放的声音 · 点左下角开声音',
-      soundOn: '声音已开 · 点画面跳过',
+      soundOn: '声音已开 · Esc 跳过',
       soundRefused: '系统拒绝了声音播放',
     },
     en: {
       label: 'Startup animation',
-      skip: 'Click to skip',
+      skip: 'Esc',
       sound: 'Turn on sound',
       slow: 'Slow start — almost there…',
       failed: 'Startup failed · click to view',
       waiting: 'Continuing once the UI is ready',
       muted: 'Autoplay sound blocked · use the button at bottom left',
-      soundOn: 'Sound on · click the screen to skip',
+      soundOn: 'Sound on · Esc to skip',
       soundRefused: 'The system refused sound playback',
     },
   }[lang]
@@ -262,9 +262,10 @@
     // 状态行只在出问题时才写字（载入慢、内核启动失败、声音被拦）；
     // 平时是空的，空的时候 CSS 直接不占位。
     var status = el('div', 'dsa-status')
+
+    // 跳过提示只标键盘键位：鼠标/触屏点画面照样能跳过，只是不再写出来。
     var skipPill = el('div', 'dsa-skip')
-    skipPill.appendChild(el('span', 'dsa-skip-glyph', '▶'))
-    skipPill.appendChild(el('span', null, skipLabel))
+    skipPill.appendChild(el('span', 'dsa-skip-key', skipLabel))
 
     var soundButton = el('div', 'dsa-sound')
     soundButton.setAttribute('data-visible', '0')
