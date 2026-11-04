@@ -96,6 +96,22 @@ if (files.length === 0) {
   problems.push(`源目录里没有 webm：${srcDir}`)
 }
 
+/**
+ * 源目录 vs 转码映射表：两个方向都查。
+ *
+ * 往素材目录里丢了新片子却忘了加进 `CLIPS`，转码会静默跳过（"这个动作怎么没出来"）；
+ * 反过来映射表里留着已经删掉的源片，转码会打一行"跳过（源文件不存在）"就过去。
+ * 两头都不该靠人记。
+ */
+const assetScript = fs.readFileSync('tools/make-pet-assets.mjs', 'utf8')
+const mapped = new Set([...assetScript.matchAll(/\{ src: '([^']+)'/g)].map((m) => m[1]))
+for (const name of files) {
+  if (!mapped.has(name)) warnings.push(`源片「${name}」没加进 make-pet-assets 的 CLIPS，转码不会产出它`)
+}
+for (const name of mapped) {
+  if (!files.includes(name)) problems.push(`CLIPS 里的「${name}」在源目录找不到（转码会跳过）`)
+}
+
 console.log(`窗口 ${crop.w}×${crop.h} @ ${crop.x},${crop.y}   源目录 ${srcDir}\n`)
 console.log('动作'.padEnd(22) + '内容范围'.padEnd(30) + '越界')
 
