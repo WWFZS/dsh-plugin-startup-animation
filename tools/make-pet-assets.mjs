@@ -22,9 +22,9 @@ import { spawn } from 'node:child_process'
 /** 源文件 → 输出名（动作名）。输出名即运行时契约：显示名、动作 id 都是它。 */
 const CLIPS = [
   { src: '01_待机呼吸休闲.webm', out: '待机.webm', footY: 596 },
-  { src: '02_点击回应-开心跃动.webm', out: '点击回应.webm' },
+  { src: '02_点击回应-开心跃动.webm', out: '点击回应.webm', footY: 596 },
   { src: '03_点击回应-害羞捂脸.webm', out: '害羞捂脸.webm' },
-  { src: '05_被鼠标拖拽悬空反馈.webm', out: '拖拽悬空.webm' },
+  { src: '05_被鼠标拖拽悬空反馈.webm', out: '拖拽悬空.webm', footY: 596 },
   { src: '07_原地踏步.webm', out: '原地踏步.webm' },
   { src: '08_吃橘子小零食.webm', out: '吃橘子.webm' },
   { src: '09_挥手打招呼.webm', out: '挥手打招呼.webm' },
@@ -53,6 +53,9 @@ const SHADOW_Y = 596
 /** alphaKiller 比 SHADOW_Y 高一行起算：y595 那行经 despill 中和后同样满足灰白判据，
  *  卡 596 会给它留一条 1px 的白虚线尾巴。 */
 const KILL_Y = 595
+/** 中性灰残渣（despill 洗白后 sat<25）要更早开始清：它落在 y592–594，比 KILL_Y 高。
+ *  只清 590 以下、且亮度不过 200 的——白短裤下沿是 210+ 的亮白，够不着。 */
+const NEUTRAL_Y = 590
 /** 饱和度的上限：低于它算"灰"，会被当成阴影染绿。角色是橙色（sat≈190），白短裤（sat≈10，但在 596 以上）。 */
 const SAT_MAX = 90
 /** 绿幕抠像参数：容差比默认宽一些，用来吃掉阴影被染绿后的边缘过渡色。
@@ -124,7 +127,9 @@ function alphaKiller(footY) {
   const sat = `max(max(${R},${G}),${B})-min(min(${R},${G}),${B})`
   const green = `gte(Y,${KILL_Y})*lt(${sat},130)*gt(${G}-${R},12)`
   const warm = `+gte(Y,${KILL_Y})*lt(${sat},${SAT_MAX})*(gte(${B},${G}-30)*between(${G}-${R},-40,12)+between(${G}-${R},4,60))`
-  return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(${green}${warm},0,alpha(X,Y))'`
+  const neutral = `+gte(Y,${NEUTRAL_Y})*lt(${sat},45)*lt(max(max(${R},${G}),${B}),200)`
+  const midWarm = `+gte(Y,${SHADOW_Y})*between(${sat},45,95)*gt(${R}-${G},20)*gt(${G}-${B},10)*gt(${R},150)`
+  return `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='if(${green}${warm}${neutral}${midWarm},0,alpha(X,Y))'`
 }
 
 /**
