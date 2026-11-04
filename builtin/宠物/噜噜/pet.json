@@ -1,7 +1,7 @@
 {
   "id": "lulu",
   "name": "噜噜",
-  "description": "橙色小水豚，11 段动作",
+  "description": "橙色小水豚，13 段动作",
   "canvas": [480, 648],
   "cover": "cover.webp",
   "roles": {
@@ -11,10 +11,11 @@
     "turn": [],
     "moves": []
   },
-  "ambient": ["interact", "chill", "desk"],
+  "ambient": ["interact", "chill", "desk", "festival"],
   "categories": [
-    { "id": "interact", "name": "互动", "cover": "cat-interact.webp", "clips": ["点击回应", "害羞捂脸", "挥手打招呼", "圣诞换装"] },
-    { "id": "chill", "name": "休闲", "cover": "cat-chill.webp", "clips": ["吃橘子", "原地踏步", "原地小憩", "泡温泉"] },
-    { "id": "desk", "name": "工作", "cover": "cat-work.webp", "clips": ["玩电脑"] }
+    { "id": "interact", "name": "互动", "cover": "cat-interact.webp", "clips": ["点击回应", "害羞捂脸", "挥手打招呼"] },
+    { "id": "chill", "name": "休闲", "cover": "cat-chill.webp", "clips": ["吃橘子", "原地踏步", "原地小憩", "泡温泉", "堆雪人"] },
+    { "id": "desk", "name": "工作", "cover": "cat-work.webp", "clips": ["玩电脑"] },
+    { "id": "festival", "name": "节庆", "cover": "cat-festival.webp", "clips": ["收红包", "圣诞换装"] }
   ]
 }
