@@ -472,8 +472,8 @@ try {
     const css = fs.readFileSync(new URL('./runtime/boot.css', import.meta.url), 'utf8')
     // loading 必须**不**透明：否则素材解码那几百毫秒里原生启动卡会露出来，
     // 就是用户看到的"闪一下原生动画"。只有素材彻底失败（gone）才让开。
-    // 注意锚点要卡在根节点规则上 —— HUD 那条 `[data-media="loading"] … .dsa-hud`
-    // 里也有 opacity: 0，那是"让 HUD 跟着素材一起淡入"，不是根节点透明。
+    // 注意锚点要卡在根节点规则上 —— 跳过胶囊那条 `[data-media="loading"] … .dsa-skip`
+    // 里也有 opacity: 0，那是"让提示跟着素材一起淡入"，不是根节点透明。
     assert.ok(!/\.dsa-root\[data-media="loading"\]\s*\{[^}]*opacity: 0/.test(css), 'loading 态根节点仍透明')
     assert.ok(/\.dsa-root\[data-media="gone"\]\s*\{[\s\S]{0,120}opacity: 0/.test(css), 'gone 态未透明')
     assert.ok(css.includes('pointer-events: none'), '透明期未关闭点击拦截')
@@ -487,8 +487,8 @@ try {
       '素材模式仍会显示内置徽标场景',
     )
     assert.ok(
-      /\.dsa-root\[data-mode="media"\]\[data-media="loading"\]\s+\.dsa-hud\s*\{[^}]*opacity: 0/.test(css),
-      'HUD 未跟随素材淡入（会在空背景上先冒出一条进度条）',
+      /\.dsa-root\[data-mode="media"\]\[data-media="loading"\]\s+\.dsa-skip[^{]*\{[^}]*opacity: 0/.test(css),
+      '跳过胶囊未跟随素材淡入（会在空背景上先冒出来）',
     )
   })
   await check('boot.css 动画可见时隐藏原生启动卡（静态锚点）', () => {

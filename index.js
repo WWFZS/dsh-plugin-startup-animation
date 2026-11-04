@@ -582,10 +582,6 @@ export const DEFAULT_CONFIG = Object.freeze({
   noFrameMs: 10000,
   /** 时长未知（duration=Infinity）时的唯一上界。 */
   endlessMs: 20000,
-  /** 是否显示真实启动进度条（内核暴露进度弧时用真实值，否则流光）。 */
-  progress: true,
-  /** 状态行文字；'' = 运行时按浏览器语言选择中/英。 */
-  hint: '',
   /** "点击画面跳过"胶囊文案；'' = 运行时按语言选择。 */
   skipLabel: '',
   /** 声音被浏览器拦下时开关的文案；'' = 运行时按语言选择。 */
@@ -895,8 +891,6 @@ export function loadConfig(options) {
     holdGraceMs: clampNumber(raw.holdGraceMs, d.holdGraceMs, 0, 30000),
     noFrameMs: clampNumber(raw.noFrameMs, d.noFrameMs, 1500, 30000),
     endlessMs: clampNumber(raw.endlessMs, d.endlessMs, 3000, 60000),
-    progress: raw.progress !== false,
-    hint: pickString(raw.hint, ''),
     skipLabel: pickString(raw.skipLabel, ''),
     soundLabel: pickString(raw.soundLabel, ''),
   }

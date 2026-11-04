@@ -108,11 +108,9 @@
   var COPY = {
     zh: {
       label: '启动动画',
-      hint: '正在启动…',
       skip: '点击画面跳过',
       sound: '开启声音',
       slow: '启动较慢，正在进入…',
-      entering: '正在进入…',
       failed: '启动失败 · 点击查看',
       waiting: '界面就绪后自动进入',
       muted: '浏览器拦下了自动播放的声音 · 点左下角开声音',
@@ -121,11 +119,9 @@
     },
     en: {
       label: 'Startup animation',
-      hint: 'Starting…',
       skip: 'Click to skip',
       sound: 'Turn on sound',
       slow: 'Slow start — almost there…',
-      entering: 'Entering…',
       failed: 'Startup failed · click to view',
       waiting: 'Continuing once the UI is ready',
       muted: 'Autoplay sound blocked · use the button at bottom left',
@@ -238,9 +234,7 @@
     var volume = num(cfg.volume, 1, 0, 1)
     var audioOn = cfg.audioEnabled === true && typeof cfg.audioSrc === 'string' && cfg.audioSrc !== ''
     var audioVolume = num(cfg.audioVolume, 1, 0, 1)
-    var showProgress = cfg.progress !== false
 
-    var hintIdle = pickText(cfg.hint, COPY.hint)
     var skipLabel = pickText(cfg.skipLabel, COPY.skip)
     var soundLabel = pickText(cfg.soundLabel, COPY.sound)
 
@@ -265,21 +259,12 @@
     scene.appendChild(emblem)
     scene.appendChild(el('div', 'dsa-title', pickText(cfg.title, 'DeepSeek Harness')))
 
-    var hud = el('div', 'dsa-hud')
-    var bar = el('div', 'dsa-bar')
-    bar.setAttribute('role', 'progressbar')
-    bar.setAttribute('aria-label', COPY.hint)
-    if (showProgress) bar.setAttribute('data-indeterminate', '1')
-    else bar.style.display = 'none'
-    var fill = el('span', 'dsa-fill')
-    bar.appendChild(fill)
-    var status = el('div', 'dsa-status', hintIdle)
+    // 状态行只在出问题时才写字（载入慢、内核启动失败、声音被拦）；
+    // 平时是空的，空的时候 CSS 直接不占位。
+    var status = el('div', 'dsa-status')
     var skipPill = el('div', 'dsa-skip')
     skipPill.appendChild(el('span', 'dsa-skip-glyph', '▶'))
     skipPill.appendChild(el('span', null, skipLabel))
-    hud.appendChild(bar)
-    hud.appendChild(status)
-    hud.appendChild(skipPill)
 
     var soundButton = el('div', 'dsa-sound')
     soundButton.setAttribute('data-visible', '0')
@@ -300,7 +285,8 @@
 
     root.appendChild(media)
     root.appendChild(scene)
-    root.appendChild(hud)
+    root.appendChild(status)
+    root.appendChild(skipPill)
     root.appendChild(soundButton)
     if (audioNode !== null) root.appendChild(audioNode)
 
@@ -513,7 +499,6 @@
     function markAppReady(why) {
       if (state.appReady || state.leaving) return
       state.appReady = true
-      setHint(COPY.entering)
       maybeEnter()
     }
 
@@ -593,57 +578,23 @@
       }, 2600)
     }
 
-    /** 采样内核真实进度：启动页 spinner 上的 --dsh-boot-arc（72° 空 → 288° 满）。 */
-    var PROGRESS_ARC_MIN = 72
-    var PROGRESS_ARC_SPAN = 216
-    var progressObserved = false
-    var progressStartAt = 0
-
-    function sampleProgress() {
-      var spinner = doc.querySelector('[data-dsh-boot-spinner]')
-      if (spinner !== null && spinner !== undefined && spinner.style) {
-        var raw = parseFloat(
-          typeof spinner.style.getPropertyValue === 'function'
-            ? spinner.style.getPropertyValue('--dsh-boot-arc')
-            : '',
-        )
-        if (isFinite(raw)) {
-          var ratio = Math.min(Math.max((raw - PROGRESS_ARC_MIN) / PROGRESS_ARC_SPAN, 0), 1)
-          root.style.setProperty('--dsa-prog', (Math.max(ratio, 0.04) * 100).toFixed(1) + '%')
-          if (!progressObserved) {
-            progressObserved = true
-            bar.setAttribute('data-indeterminate', '0')
-          }
-          return
-        }
-      }
-      // 4 秒还没见到内核进度 → 认定拿不到，转流光。
-      // 用真实时间戳而不是"tick 数 × 周期"：标签页被节流时累加会失真。
-      if (!progressObserved && Date.now() - progressStartAt >= 4000) {
-        if (bar.getAttribute('data-indeterminate') !== '1') bar.setAttribute('data-indeterminate', '1')
-      }
-    }
-
     /**
      * 启动期的全部轮询合成**一个** tick。
      *
      * 分开写是三条 interval（120 / 200 / 400ms）交替唤醒 —— 启动阶段白白多两次
-     * 调度，而且同一个 DOM 在一毫秒内被扫三遍。合并后按 tick 计数分频，语义与
-     * 原来一一对应：每 tick 判就绪（最需要及时），每 2 tick 采样进度，
-     * 每 4 tick 查失败文案。enter() 的 clearScheduling 会把这一个 interval 收掉。
+     * 调度，而且同一个 DOM 在一毫秒内被扫三遍。合并后按 tick 计数分频：每 tick 判就绪
+     * （最需要及时），每 4 tick 查失败。enter() 的 clearScheduling 会把这一个 interval 收掉。
      */
     function watchBoot() {
       // 挂上就立刻判一次：覆盖层出现前 #root 可能已经有内容了。
       if (doc.readyState === 'complete') state.loaded = true
       else global.addEventListener('load', onWindowLoad)
       checkReady()
-      if (showProgress) progressStartAt = Date.now()
       var ticks = 0
       interval(function () {
         if (state.leaving) return
         ticks += 1
         checkReady()
-        if (showProgress && ticks % 2 === 0) sampleProgress()
         if (ticks % 4 === 0) checkFailure()
       }, TICK_MS)
     }
