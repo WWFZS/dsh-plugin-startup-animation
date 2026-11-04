@@ -579,6 +579,41 @@ await check('删除按钮文案区分内置与上传', async () => {
   }
 })
 
+await check('视频卡片标时长，读不到时不占位', async () => {
+  const { render } = await loadClient({
+    status: {
+      ok: true,
+      enabled: true,
+      durationSec: 8,
+      mode: 'css',
+      custom: false,
+      name: '',
+      file: '',
+      audioFile: '',
+      audioBuiltin: false,
+      limitBytes: 1e9,
+      library: [
+        {
+          id: 'MP4',
+          files: [
+            { path: 'builtin/MP4/短.mp4', name: '短.mp4', size: 100, duration: 8.06 },
+            { path: 'builtin/MP4/长.mp4', name: '长.mp4', size: 100, duration: 65.4 },
+            { path: 'builtin/MP4/坏.mp4', name: '坏.mp4', size: 100 },
+          ],
+        },
+      ],
+      cfg: {},
+    },
+  })
+  const tree = await render()
+  const badges = findAll(tree, 'dsa-set-card-src').map((node) => texts(node).join(''))
+  // 不足一分钟只写秒（四舍五入），超过一分钟用分:秒。
+  assert.ok(badges.includes('8s'), `短视频没有时长标记：${badges.join(' | ')}`)
+  assert.ok(badges.includes('1:05'), `长视频没有时长标记：${badges.join(' | ')}`)
+  // 三条卡片各一个来源标记 + 两个时长 = 5；读不到时长的第三张不多出一个空标记。
+  assert.equal(badges.length, 5, `标记数量异常：${badges.join(' | ')}`)
+})
+
 await check('内置素材删除 → 只写 forget，不真删', async () => {
   const { render, calls } = await loadClient({
     status: {

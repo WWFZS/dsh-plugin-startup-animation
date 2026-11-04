@@ -36,3 +36,6 @@ tools/push-commit.mjs
 # WorkBuddy 项目数据（记忆日志等内部笔记，不随包分发）
 .workbuddy/
 
+
+# 临时验证目录（抽帧、对比图、一次性脚本）
+.tmp-*/

@@ -547,6 +547,21 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 视频时长标签：`8s` / `24s` / `1:05`。
+     *
+     * 不足一分钟只写秒（启动动画本来就短，`8s` 比 `0:08` 好读）；
+     * 超过一分钟才用分:秒。向上取整：播放器里 0.6 秒也会被当成"1 秒"，
+     * 标成 `16.1s` 反而让人以为素材没播完。
+     * @param {number} seconds 时长（秒，宿主从 MP4 的 mvhd 读出来的）。
+     * @returns {string} 标签文本。
+     */
+    function durationLabel(seconds) {
+      const total = Math.max(1, Math.round(seconds))
+      if (total < 60) return `${total}s`
+      return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`
+    }
+
+    /**
      * `<img>` 的浏览器端解码缓存上限约 20–30 MB（取决于设备与是否 2D canvas）：
      * 内置壁纸动辄 1600×2848 起（单张解码 ≈ 18–35 MB），7 张卡片一次性加载就会
      * 把早先的图片移出缓存、表现为卡片"破图"或整页发卡。卡片只显示 16:9 的小格子，
@@ -2451,10 +2466,15 @@ window.__ModuleLoader__.load({
                           ),
                           // 来源标记：内置与上传可能同名（用户上传过同一段素材时），
                           // 只显示素材名会让人分不清选的是哪一个 —— 内置随包走、上传在 DSH_HOME。
+                          // 视频再补一个时长（`12s`）：启动动画只有几秒可看，选之前就想知道多长；
+                          // 读不到时长的（非 MP4/文件坏了）不显示，不占位。
                           h(
                             'span',
                             { className: 'dsa-set-card-name', title: displayName(file.name) },
                             displayName(file.name),
+                            isVideo && typeof file.duration === 'number'
+                              ? h('span', { className: 'dsa-set-card-src' }, durationLabel(file.duration))
+                              : null,
                             h(
                               'span',
                               { className: 'dsa-set-card-src' },

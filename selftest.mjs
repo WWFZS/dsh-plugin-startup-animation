@@ -27,6 +27,7 @@ import {
   scanLibrary,
   serveAsset,
   trackStream,
+  videoDurationSec,
   writeHomeBootPatch,
   listPetPacks,
   readPetPack,
@@ -285,6 +286,26 @@ try {
     const lib = scanLibrary(packageRoot)
     const mp4 = lib.find((c) => c.id === 'MP4')
     assert.ok(mp4.files.every((f) => f.uploaded !== true))
+  })
+  await check('视频条目带时长（读自 MP4 的 mvhd）', () => {
+    // 卡片要标「8s」：只认能得到真值的条目，读不到就干脆没有 duration。
+    const lib = scanLibrary(packageRoot)
+    const mp4 = lib.find((c) => c.id === 'MP4')
+    const withDur = mp4.files.filter((f) => typeof f.duration === 'number')
+    assert.ok(withDur.length >= 4, `带时长的视频偏少：${withDur.length}`)
+    for (const f of withDur) assert.ok(f.duration > 0.2 && f.duration < 600, `${f.name} 时长离谱：${f.duration}`)
+    // 图片没有时长，也不该出现 duration 字段。
+    const img = lib.find((c) => c.id === '图片')
+    assert.ok(img.files.every((f) => f.duration === undefined))
+  })
+  await check('videoDurationSec：非 MP4/不存在 → undefined，不抛', () => {
+    assert.equal(videoDurationSec(path.join(packageRoot, 'LICENSE')), undefined)
+    assert.equal(videoDurationSec(path.join(packageRoot, 'builtin/MP4/ghost.mp4')), undefined)
+    // 上传目录里那种只有 1 KiB 的假 mp4 同样读不到时长。
+    const fake = path.join(home, 'startup-animation-media', 'cccc3333deadbeef.mp4')
+    fs.writeFileSync(fake, Buffer.alloc(1024, 3))
+    assert.equal(videoDurationSec(fake), undefined)
+    fs.rmSync(fake, { force: true })
   })
   await check('assertUploadedFile 接受目录内、拒绝目录外/错类型/不存在', () => {
     assert.equal(assertUploadedFile(home, upMp4), upMp4)
