@@ -1494,6 +1494,20 @@ await check('主题壁纸：让位变量必须带 !important（内核把令牌�
   assert.ok(!/font-size|font-family|--dsh-content-font-size/.test(css), `样式表里混进了排版变量：${css}`)
 })
 
+await check('主题壁纸：换预设立刻广播给背景层（不用刷新页面）', async () => {
+  const { render, calls } = await loadClient({ status: themeStatus() })
+  const tree = await openThemeTab(render)
+  const card = findByClass(tree, 'dsa-set-preset')[0]
+  assert.ok(card, '没有预设卡')
+  // 背景层是常驻的独立实例，只靠 window 事件桥接：不广播就只改了设置页自己的卡片，
+  // 界面要等下次刷新才变 —— 这正是"换主题得刷新"的根因。
+  card.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const synced = calls.filter((call) => call.type === 'event' && call.name === 'dsa:wall-sync')
+  assert.equal(synced.length, 1, `换预设应该广播一次 dsa:wall-sync，实际 ${synced.length} 次`)
+  assert.ok(synced[0].detail && typeof synced[0].detail.enabled === 'boolean', '广播里没带 wallpaper 段')
+})
+
 console.log('')
 if (failures > 0) {
   console.error(`${failures} 项失败`)

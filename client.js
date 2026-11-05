@@ -863,6 +863,12 @@ window.__ModuleLoader__.load({
             setBusy(false)
             if (payload && payload.ok) {
               setState(payload)
+              // 壁纸背景层是常驻的独立实例，不共享 React 状态 —— 任何一次写操作回包都
+              // 顺手广播一次，换预设/换素材/开关才不用等刷新页面才生效。
+              // 回包与当前画面一致时由背景层的 sameAs 短路，不会白算。
+              if (payload.wallpaper) {
+                window.dispatchEvent(new CustomEvent('dsa:wall-sync', { detail: payload.wallpaper }))
+              }
               setMessage({
                 // 成功文案可以是函数：按回包内容区分（如"已删除" vs "被占用仅隐藏"）。
                 text: typeof successText === 'function' ? successText(payload) : successText,
@@ -2417,9 +2423,13 @@ window.__ModuleLoader__.load({
           return
         }
         ensureStyle()
-        // 先用出厂代表色定一版（视频的首帧还没到，先把字色摆对）。
+        // 画面摘要优先用"真取样到的那份"：换预设/换素材都不该把已经量到的画面丢掉 ——
+        // 丢掉的后果是对比度退回出厂代表色去算，和眼前的实际观感对不上。
+        // mountedKey 还是上一份素材的键，所以"新配置的键和它一样"就等于没换素材。
+        const sameMedia = mountedKey === `${next.file}|${next.kind}`
         const hint = Array.isArray(next.hint) ? next.hint : []
-        const analysis = hint.length > 0 ? analyzeColors(hint) : null
+        const sampled = sameMedia && lastDecision !== null ? lastDecision.analysis : null
+        const analysis = sampled ?? (hint.length > 0 ? analyzeColors(hint) : null)
         if (changed || lastDecision === null) decideAndApply(analysis)
         mountMedia()
         probe()
