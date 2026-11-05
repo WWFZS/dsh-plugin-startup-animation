@@ -1430,7 +1430,7 @@ await check('主题页签：点预设卡 → 写 preset 并把玻璃/模糊/幕�
   matte.props.onClick()
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
   assert.ok(post, '点预设没有发 POST')
-  // 只写 preset 是不够的：之前拖过的 scrim/blur/saturate/glassAlpha/surfaceBlur 会继续
+  // 只写 preset 是不够的：之前拖过的 scrim/blur/saturate/glassAlpha 会继续
   // 盖住新预设，幕浓度和玻璃纹丝不动 → 用户看到的就是"点了没反应"。必须一并清回 auto。
   assert.deepEqual(JSON.parse(post.init.body), {
     wallpaperPreset: 'frosted',
@@ -1438,7 +1438,6 @@ await check('主题页签：点预设卡 → 写 preset 并把玻璃/模糊/幕�
     wallpaperBlur: 'auto',
     wallpaperSaturate: 'auto',
     wallpaperGlass: 'auto',
-    wallpaperSurfaceBlur: 'auto',
   })
 })
 
@@ -1458,13 +1457,34 @@ await check('主题页签：点素材卡 → 写 wallpaperFile 并顺手打开�
   })
 })
 
-await check('主题页签：遮罩滑杆的下限不低于"算出来的安全值"', async () => {
+await check('主题页签：遮罩滑杆从 0 开始（想原样透出壁纸就能拖到 0）', async () => {
   const { render } = await loadClient({ status: themeStatus({ scrim: 0.3 }) })
   const tree = await openThemeTab(render)
   const scrim = findByClass(tree, 'dsa-set-range').find((node) => node.props['aria-label'] === '遮罩厚度')
   assert.ok(scrim, '没有遮罩滑杆')
-  // 没有画面摘要时用预设值兜底 —— 但必须有下限，不能拖到 0（拖到 0 字就看不见了）。
-  assert.ok(Number(scrim.props.min) > 0, `遮罩下限是 ${scrim.props.min}，字会看不清`)
+  // 下限就是 0：安全线在引擎里（玻璃厚度会把面板抬回来），不该靠滑杆下限锁人。
+  assert.equal(Number(scrim.props.min), 0, `遮罩下限是 ${scrim.props.min}，应该允许 0`)
+})
+await check('主题页签：面板模糊滑杆已去掉（开着只会让画面更糊）', async () => {
+  const { render } = await loadClient({ status: themeStatus() })
+  const tree = await openThemeTab(render)
+  const labels = findAll(tree, 'dsa-set-range').map((node) => node.props['aria-label'])
+  assert.ok(!labels.includes('面板模糊'), `滑杆里还有「面板模糊」：${labels.join('/')}`)
+  // 主题面板自己的四根：遮罩厚度 / 壁纸模糊 / 色彩浓度 / 玻璃厚度
+  // （页面上还有个开机动画的「展示时长」，不在主题面板里）。
+  assert.deepEqual(
+    labels.filter((label) => label !== '展示时长'),
+    ['遮罩厚度', '壁纸模糊', '色彩浓度', '玻璃厚度'],
+  )
+})
+await check('玻璃厚度真的动面板：拖到 0 和拖到 1 的不透明度必须不同', async () => {
+  const wall = await import('../lib/wallpaper.mjs')
+  const analysis = wall.analyzeColors(['#1f2d3d', '#4a6b8a'])
+  const preset = wall.resolvePreset({ preset: 'readable' })
+  const decision = wall.decideTheme(analysis, preset)
+  const thin = Number(wall.deriveTokens(decision, { ...preset, glassAlpha: 0 }, { dark: true })['dsa-wall-wall-alpha'])
+  const thick = Number(wall.deriveTokens(decision, { ...preset, glassAlpha: 1 }, { dark: true })['dsa-wall-wall-alpha'])
+  assert.ok(thick > thin + 0.2, `玻璃厚度没效果：0→${thin}，1→${thick}`)
 })
 
 await check('主题页签：壁纸关闭时滑杆禁用（没有壁纸可调）', async () => {

@@ -504,15 +504,26 @@ window.__ModuleLoader__.load({
       // 列底不透明度：按**幕布之后**的壁纸反推，而不是按裸壁纸的极端反推。
       //
       // 壁纸层上本来就压着一层幕（`dsa-wall-scrim`，浓度 = decision.scrim，方向跟墨色），
-      // 它把壁纸的亮度范围从 [0,255] 压成了 [亮端混幕后, 暗端混幕后]。列底只需要扛住
-      // **这个已经被压过的范围** —— 之前按裸壁纸的纯黑/纯白反推，等于把幕的活儿让列
-      // 再干一遍，面板被算得死实，壁纸透不出来（用户看到的"背景不明显"就是这个）。
+      // 它把壁纸的亮度范围压过一遍。列底只需要扛住**压过之后的那个范围** —— 之前按裸壁纸
+      // 的纯黑/纯白反推，等于把幕的活儿让列再干一遍，面板被算得死实（用户看到的
+      // "背景不明显"就是这个）。
       const scrimRgb = decision.ink === 'light' ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 }
       const scrimmedLo = mixColor({ r: 0, g: 0, b: 0 }, decision.scrim, scrimRgb)
       const scrimmedHi = mixColor({ r: 255, g: 255, b: 255 }, decision.scrim, scrimRgb)
       const glassInk = parseHex(inkLight ? INK.light : INK.dark) ?? scrimmedLo
       const wallWorst = contrastRatio(scrimmedLo, glassInk) <= contrastRatio(scrimmedHi, glassInk) ? scrimmedLo : scrimmedHi
-      const wallAlpha = solveWallAlpha(parseHex(g1.final) ?? wallWorst, glassInk, wallWorst)
+      // 列底能"藏"多少，由**玻璃厚度**决定 —— 这是它存在的唯一理由。
+      //
+      // 只看 4.5:1 的话，算出来的不透明度几乎永远落在下限 0.35（窗子太宽），滑杆也就
+      // 永远看不出反应 —— 这正是用户说的"玻璃厚度没效果"。所以这里把玻璃厚度翻译成
+      // **面板能藏住多少壁纸**：玻璃越厚，成品色越靠近玻璃色、越远离壁纸。
+      //
+      // 上下限都压在 0.55–0.9：0.55 保证成品始终看得出玻璃色，0.9 保证再厚也还剩一点
+      // 壁纸透上来（否则跟没开壁纸一样）。安全性算出来更高时以安全值为准。
+      const SHELL_MIN = 0.55
+      const SHELL_MAX = 0.9
+      const shellTarget = SHELL_MIN + clampRange(glassAlpha, [0, 1]) * (SHELL_MAX - SHELL_MIN)
+      const wallAlpha = Math.max(shellTarget, solveWallAlpha(parseHex(g1.final) ?? wallWorst, glassInk, wallWorst))
       const ink = inkLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(14, 16, 22, 0.95)'
       const dim = inkLight ? 'rgba(255, 255, 255, 0.76)' : 'rgba(14, 16, 22, 0.70)'
       const faint = inkLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(14, 16, 22, 0.54)'
@@ -535,13 +546,9 @@ window.__ModuleLoader__.load({
         'dsa-wall-blur-2': layerBlur(surfaceBlur, 1.25),
         'dsa-wall-blur-3': layerBlur(surfaceBlur, 1.5),
         'dsa-wall-accent': accent,
-        // 三列的不透明度：**按最坏壁纸反推**，不是抄死。
-        //
-        // 列底是壁纸透上来的唯一通道，所以它必须自己扛得住：壁纸最亮（浅色主题）或最暗
-        // （深色主题）的像素压在这层上时，字还得 ≥4.5:1。面板越亮的预设透得越少 ——
-        // 白玻璃透在白壁上就是一片白（参考实现的 sidebarAlpha / glassAlpha 是同一回事，
-        // 只是它是手调的，我们把它算出来）。
-        'dsa-wall-wall-alpha': String(wallAlpha),
+        // 三列的不透明度：`max(玻璃厚度, 安全性算出来的下限)`。
+        // 玻璃厚度决定"面板藏住多少壁纸"，安全性决定"最少要藏多少"，取严的那个。
+        'dsa-wall-wall-alpha': String(Math.round(wallAlpha * 100) / 100),
         'dsa-wall-wall': rgba(g1Rgb(g1.final), wallAlpha),
         'dsa-wall-border': inkLight ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.12)',
         // 壁纸层自己的垫底色：画面没送到屏上时退化成这个颜色，而不是白闪。
@@ -752,7 +759,6 @@ window.__ModuleLoader__.load({
       wallBlur: '壁纸模糊',
       wallSaturate: '色彩浓度',
       wallGlass: '玻璃厚度',
-      wallSurfaceBlur: '面板模糊',
       wallPick: '壁纸素材',
       wallPickHint: '视频与图片都能当壁纸',
       wallUse: '当壁纸',
@@ -863,7 +869,6 @@ window.__ModuleLoader__.load({
       wallBlur: 'Blur',
       wallSaturate: 'Saturation',
       wallGlass: 'Glass',
-      wallSurfaceBlur: 'Panel blur',
       wallPick: 'Wallpaper media',
       wallPickHint: 'Videos and images both work',
       wallUse: 'Use as wallpaper',
@@ -3565,7 +3570,6 @@ window.__ModuleLoader__.load({
             ['wallpaperBlur', 'blur'],
             ['wallpaperSaturate', 'saturate'],
             ['wallpaperGlass', 'glassAlpha'],
-            ['wallpaperSurfaceBlur', 'surfaceBlur'],
           ]
           for (const [from, to] of sliderKeys) {
             if (patch[from] === 'auto') next[to] = 'auto'
@@ -4160,7 +4164,6 @@ window.__ModuleLoader__.load({
            * （它自己会退回内置取色）。
            */
           const liveNow = presetPreview(cfg.preset)
-          const floor = liveNow !== null && typeof liveNow.scrim === 'number' ? liveNow.scrim : activePreset.scrim
           const liveContrast = liveNow !== null && typeof liveNow.contrast === 'number' ? liveNow.contrast : null
 
           const slider = (key, label, min, max, step, value, unit) => {
@@ -4235,8 +4238,8 @@ window.__ModuleLoader__.load({
                 'data-tone': surface,
                 disabled: busy,
                 title: decision ? `${preset.name} · ${decision.contrast.toFixed(2)}:1` : preset.name,
-                // 预设是"整套观感"：必须把五根滑杆的残留值一并清回 auto。
-                // 只写 preset 的话，之前拖过的 scrim/blur/saturate/glass/surfaceBlur 会继续
+                // 预设是"整套观感"：必须把滑杆的残留值一并清回 auto。
+                // 只写 preset 的话，之前拖过的 scrim/blur/saturate/glass 会继续
                 // 盖住新预设 —— 幕浓度和玻璃纹丝不动，用户看到的就是"点了没反应"。
                 onClick: () =>
                   wallCfg(
@@ -4246,7 +4249,6 @@ window.__ModuleLoader__.load({
                       wallpaperBlur: 'auto',
                       wallpaperSaturate: 'auto',
                       wallpaperGlass: 'auto',
-                      wallpaperSurfaceBlur: 'auto',
                     },
                     t('saved'),
                   ),
@@ -4314,17 +4316,16 @@ window.__ModuleLoader__.load({
               h('div', { className: 'dsa-set-presets' }, PRESETS.map(presetCard)),
             ),
             // ── ③ 微调 ──
-            // 前三根调的是"壁纸本体透出来多少"：幕厚度、壁纸自己的模糊与色彩浓度。
-            // 后两根调的是"面板这块玻璃有多厚"：玻璃涂层（玻璃色占比）与面板背后的模糊。
-            // 两者分开是因为它们是两件不同的事 —— 糊了壁纸不代表面板变实，素净的面板
-            // 也不等于壁纸清楚。可读性下限只挂在玻璃那一层，跟这五根滑杆都无关。
-            slider('wallpaperScrim', t('wallScrim'), Number(floor.toFixed(2)), SCREEN_LIMITS.scrim[1], 0.02, shown.scrim, '%'),
+            // 遮罩厚度调"壁纸被压多少"，壁纸模糊/色彩浓度调"壁纸本身长什么样"，
+            // 玻璃厚度调"面板藏住多少壁纸"。可读性下限挂在玻璃那一层，跟这几根滑杆都无关。
+            //
+            // 遮罩下限是 0：想让壁纸原样透出来就从 0 开始试。真到字看不清的时候，
+            // 玻璃厚度会把面板抬回来 —— 安全线在引擎里，不在滑杆上。
+            slider('wallpaperScrim', t('wallScrim'), SCREEN_LIMITS.scrim[0], SCREEN_LIMITS.scrim[1], 0.02, shown.scrim, '%'),
             slider('wallpaperBlur', t('wallBlur'), SCREEN_LIMITS.blur[0], SCREEN_LIMITS.blur[1], 1, shown.blur, 'px'),
             slider('wallpaperSaturate', t('wallSaturate'), SCREEN_LIMITS.saturate[0], SCREEN_LIMITS.saturate[1], 0.05, shown.saturate, '×'),
             slider('wallpaperGlass', t('wallGlass'), SCREEN_LIMITS.glass[0], SCREEN_LIMITS.glass[1], 0.01,
               Number(shown.glassAlpha.toFixed(2)), ''),
-            slider('wallpaperSurfaceBlur', t('wallSurfaceBlur'), SCREEN_LIMITS.surfaceBlur[0], SCREEN_LIMITS.surfaceBlur[1], 1,
-              shown.surfaceBlur, 'px'),
             // ── ④ 素材：所有视频与图片都能当壁纸 ──
             h(
               'div',
