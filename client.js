@@ -34,6 +34,403 @@ window.__ModuleLoader__.load({
     const ASSET = '/dsh-startup-animation/asset'
     const NS = 'startup-animation'
 
+// >>> INLINE lib/wallpaper.mjs（由 tools/sync-wallpaper-inline.mjs 生成，勿手改）
+    // 真源：lib/wallpaper.mjs（与宿主、单测共用同一份算法，改那边再跑同步脚本）。
+    // 导出（供 client-test 校验）：CONTRAST_BODY, CONTRAST_LARGE, CONTRAST_SURFACE, INK, PRESETS, DEFAULT_PRESET_ID, SCREEN_LIMITS, parseHex, toHex, rgba, relativeLuminance, contrastRatio, pickInk, solveScrim, analyzePixels, analyzeColors, resolvePreset, decideTheme, deriveTokens, layerStyle, sanitizeTweak
+    /**
+     * 壁纸主题的**纯决策层**：给一个画面（图/视频帧/取色样本），算出"文字要怎么配色、
+     * 壁纸上面那层幕要压多厚、面板要不要变实"，以及出厂预设表。
+     *
+     * 为什么单独成文件：
+     * - 这里全是纯函数，不碰 DOM、不碰网络、不认识 DSH —— 所以能在 node 里直接单测
+     *   （`node lib/wallpaper-test.mjs`），也能被宿主与浏览器两边共用。
+     * - "字看不看得清"必须可复算。用户换一张壁纸时，结论应该是算出来的，而不是
+     *   让人去拖一根滑杆碰运气。
+     *
+     * 三件套（顺序不能反）：
+     *   1. `analyzePixels` / `analyzeColors`  → 画面摘要（平均色、亮度、暗部占比、分散度）
+     *   2. `decideTheme`                      → 决定"字用亮色还是暗色"+ 需要的幕浓度
+     *   3. `deriveTokens`                     → 把决定翻成一组 CSS 变量值，交给渲染层落地
+     *
+     * 关于字体的边界：这些函数**从不产生**字号、字族、行高。文字的"大小与形状"归用户
+     * （DSH 的 ui-theme 里有独立设置），壁纸只允许影响**颜色**与壁纸自己那层的遮罩。
+     */
+
+    // ─────────────────────────────────────────────── 常量 ───────────────────────────────────────────────
+
+    /** WCAG 2.x 正文对比度下限。 */
+    const CONTRAST_BODY = 4.5
+    /** 大字号/次要文字的下限。 */
+    const CONTRAST_LARGE = 3
+    /** 菜单、输入框这类"薄底"界面元素的下限 —— 它保的是**底**，不是字。 */
+    const CONTRAST_SURFACE = 3
+
+    /**
+     * 浅色字 / 深色字两套基准。用接近纯黑的 `#111` 而不是 `#000`：纯黑落在壁纸的深色区
+     * 会像一块洞，`#111` 观感更接近"墨水"。
+     */
+    const INK = Object.freeze({ light: '#ffffff', dark: '#111111' })
+
+    /**
+     * 出厂预设。`surface` 只描述"面板底"的策略，`text` 描述"字色"的策略：
+     *
+     * - `auto`       跟着画面算（分析结果说了算）
+     * - `light`/`dark` 强制浅色字/深色字，不因为画面变亮变暗
+     * - `keep`       完全不碰字色，交给 DSH 自己的主题
+     *
+     * `scrim` 是**下限**：算出来需要更厚的幕时，取更厚的那个（下限只为观感服务，
+     * 上限为可读性服务 —— 两者不冲突）。
+     */
+    const PRESETS = Object.freeze([
+      { id: 'readable', name: '可读优先', scrim: 0.52, blur: 0, saturate: 1, text: 'auto', surface: 'solid', desc: '按画面算字色，壁纸压一层浅幕' },
+      { id: 'matte', name: '重磨砂', scrim: 0.34, blur: 18, saturate: 1.05, text: 'auto', surface: 'solid', desc: '大模糊，动态也稳' },
+      { id: 'glaze', name: '暗夜釉色', scrim: 0.72, blur: 6, saturate: 0.9, text: 'light', surface: 'solid', desc: '深色压幕，白字保底' },
+      { id: 'vivid', name: '原色直出', scrim: 0.08, blur: 0, saturate: 1.15, text: 'auto', surface: 'clear', desc: '几乎不压幕，面板透出壁纸' },
+      { id: 'hacker', name: '黑客绿', scrim: 0.8, blur: 2, saturate: 0.6, text: 'light', surface: 'solid', desc: '终端绿配色' },
+      { id: 'violet', name: '紫色心情', scrim: 0.6, blur: 10, saturate: 1.2, tint: '#7c5cff', text: 'light', surface: 'solid', desc: '紫色偏色幕' },
+      { id: 'clear', name: '清透', scrim: 0.16, blur: 4, saturate: 1, text: 'auto', surface: 'soft', desc: '面板半透，壁纸仍可辨' },
+    ])
+
+    /** 默认预设 id：装上就有合理观感，不逼用户先选一套。 */
+    const DEFAULT_PRESET_ID = 'readable'
+
+    /** 用户改动过的安全区间（服务端也用这几个数夹取，两边一致）。 */
+    const SCREEN_LIMITS = Object.freeze({
+      scrim: [0, 0.92],
+      blur: [0, 32],
+      saturate: [0.3, 1.6],
+      opacity: [0.15, 0.92],
+    })
+
+    // ─────────────────────────────────────────────── 颜色数学 ───────────────────────────────────────────────
+
+    /** 0–255 夹取（输入可能来自浮点运算）。 */
+    const byte = (value) => {
+      const n = Number(value)
+      if (!Number.isFinite(n)) return 0
+      return Math.max(0, Math.min(255, Math.round(n)))
+    }
+
+    /**
+     * `#rrggbb` / `#rgb` → `{ r, g, b }`（0–255）。不认识就 null（调用方走保底）。
+     * @param {string} hex
+     * @returns {{ r: number, g: number, b: number } | null}
+     */
+    function parseHex(hex) {
+      if (typeof hex !== 'string') return null
+      const text = hex.trim()
+      const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(text)
+      if (short !== null) {
+        return { r: parseInt(short[1] + short[1], 16), g: parseInt(short[2] + short[2], 16), b: parseInt(short[3] + short[3], 16) }
+      }
+      const full = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(text)
+      if (full !== null) return { r: parseInt(full[1], 16), g: parseInt(full[2], 16), b: parseInt(full[3], 16) }
+      return null
+    }
+
+    /** `{ r, g, b }`（0–255，可浮点）→ `#rrggbb`。 */
+    function toHex(rgb) {
+      return `#${byte(rgb.r).toString(16).padStart(2, '0')}${byte(rgb.g).toString(16).padStart(2, '0')}${byte(rgb.b).toString(16).padStart(2, '0')}`
+    }
+
+    /** `rgba()` 字符串：壁纸接管用的 token 多数是半透明层。 */
+    function rgba(rgb, alpha) {
+      const a = Math.max(0, Math.min(1, Number(alpha) || 0))
+      return `rgba(${byte(rgb.r)}, ${byte(rgb.g)}, ${byte(rgb.b)}, ${Math.round(a * 1000) / 1000})`
+    }
+
+    /**
+     * WCAG 相对亮度（sRGB → 线性 → 加权）。这是对比度公式的中间量，
+     * **不是**"看起来多亮"——所以取色时也算一次，观感与标准用的是同一个数。
+     * @param {{ r: number, g: number, b: number }} rgb 0–255。
+     * @returns {number} 0–1。
+     */
+    function relativeLuminance(rgb) {
+      const channel = (v) => {
+        const s = byte(v) / 255
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+      }
+      return 0.2126 * channel(rgb.r) + 0.7152 * channel(rgb.g) + 0.0722 * channel(rgb.b)
+    }
+
+    /**
+     * 两色对比度（1–21）。
+     * @param {{ r: number, g: number, b: number }} a
+     * @param {{ r: number, g: number, b: number }} b
+     * @returns {number}
+     */
+    function contrastRatio(a, b) {
+      const la = relativeLuminance(a)
+      const lb = relativeLuminance(b)
+      const hi = Math.max(la, lb)
+      const lo = Math.min(la, lb)
+      return (hi + 0.05) / (lo + 0.05)
+    }
+
+    /**
+     * 在两套墨色里挑对比度更高的那个。
+     * @param {{ r: number, g: number, b: number }} bg
+     * @returns {'light' | 'dark'}
+     */
+    function pickInk(bg) {
+      const light = contrastRatio(parseHex(INK.light), bg)
+      const dark = contrastRatio(parseHex(INK.dark), bg)
+      // 相等时选浅色字：暗色壁纸占绝对多数，少一次"该翻而没翻"的意外。
+      return light >= dark ? 'light' : 'dark'
+    }
+
+    /**
+     * 在"背景色 → 目标墨色"之间插一层**中性幕**（不是纯黑），把对比度抬到 target。
+     *
+     * 为什么用二分而不是解析解：对比度公式里有一段 gamma 曲线，解析解要解四次方程，
+     * 不值得。单调性保证二分必然收敛，30 次就够到浮点精度。
+     *
+     * 幕的方向：补到**偏暗**那一侧 —— 往墨色的反方向压，白的壁纸压黑字更清楚，
+     * 黑的壁纸压黑幕加白字也更清楚。`mode` 允许指定 `light`（压白幕）。
+     *
+     * @param {{ r: number, g: number, b: number }} bg 壁纸平均色。
+     * @param {'light' | 'dark'} ink 文字用哪套墨。
+     * @param {number} target 目标对比度。
+     * @param {{ mode?: 'light' | 'dark' }} [opts] `mode` = 幕往哪边压，默认与 ink 相反。
+     * @returns {number} 需要的幕浓度 0–1（0 = 不用压）。
+     */
+    function solveScrim(bg, ink, target, opts = {}) {
+      const inkRgb = parseHex(INK[ink])
+      const scrimMode = opts.mode ?? (ink === 'light' ? 'dark' : 'dark')
+      const scrimRgb = scrimMode === 'light' ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 }
+      if (contrastRatio(inkRgb, bg) >= target) return 0
+      const mix = (alpha) => ({
+        r: bg.r + (scrimRgb.r - bg.r) * alpha,
+        g: bg.g + (scrimRgb.g - bg.g) * alpha,
+        b: bg.b + (scrimRgb.b - bg.b) * alpha,
+      })
+      // 满幕都够不着（目标定太高时的病态输入）：直接返回 1，别返回一个假的"刚够"。
+      if (contrastRatio(inkRgb, mix(1)) < target) return 1
+      // 二分：lo 侧永远不达标、hi 侧永远达标。
+      let lo = 0
+      let hi = 1
+      for (let i = 0; i < 40; i += 1) {
+        const mid = (lo + hi) / 2
+        if (contrastRatio(inkRgb, mix(mid)) >= target) hi = mid
+        else lo = mid
+      }
+      // **往上取整**：精确解常带 0.6173… 这种尾巴，四舍五入会把它掉到目标线下面。
+      // 幕多压 0.001 看不出来，少压一点字就糊了 —— 宁可往厚的方向错。
+      return Math.min(1, Math.ceil(hi * 1000) / 1000)
+    }
+
+    // ─────────────────────────────────────────────── 画面摘要 ───────────────────────────────────────────────
+
+    /**
+     * 把"一张图的像素"压成摘要。
+     *
+     * @param {Uint8ClampedArray | number[]} data RGBA 连续排列（canvas `getImageData().data`）。
+     * @param {{ step?: number }} [opts] `step` = 采样步长（像素），>1 时抽稀。
+     * @returns {{ mean: { r: number, g: number, b: number }, luminance: number, darkShare: number, spread: number, samples: number } | null}
+     *   全透明/空输入返回 null。
+     */
+    function analyzePixels(data, opts = {}) {
+      if (data === null || data === undefined || typeof data.length !== 'number') return null
+      const step = Math.max(1, Math.floor(opts.step ?? 1))
+      const stride = 4 * step
+      let r = 0
+      let g = 0
+      let b = 0
+      let count = 0
+      let dark = 0
+      /** 每个像素的亮度也留着算分散度 —— 平均色会藏住"半黑半白"这种最坏情况。 */
+      const lums = []
+      for (let i = 0; i + 3 < data.length; i += stride) {
+        const alpha = data[i + 3]
+        if (alpha < 8) continue
+        const pr = data[i]
+        const pg = data[i + 1]
+        const pb = data[i + 2]
+        r += pr
+        g += pg
+        b += pb
+        count += 1
+        const lum = relativeLuminance({ r: pr, g: pg, b: pb })
+        lums.push(lum)
+        if (lum < 0.12) dark += 1
+      }
+      if (count === 0) return null
+      const mean = { r: r / count, g: g / count, b: b / count }
+      let variance = 0
+      for (const lum of lums) variance += (lum - relativeLuminance(mean)) ** 2
+      variance /= lums.length
+      return {
+        mean,
+        luminance: relativeLuminance(mean),
+        // 暗部占比：> 0.5 说明画面大面积是暗的，"白字"几乎是必然选择，可以少压幕。
+        darkShare: dark / count,
+        // 分散度（亮度标准差）：越大说明画面明暗夹杂，只在平均色上算对比度是骗子，
+        // 幕必须更厚才能让**每一块**区域都清楚。
+        spread: Math.sqrt(variance),
+        samples: count,
+      }
+    }
+
+    /**
+     * 从一串颜色直接出摘要（内置素材出厂预设可以写死几个代表色，省一次解码）。
+     * @param {string[]} hexes
+     * @returns {ReturnType<typeof analyzePixels>}
+     */
+    function analyzeColors(hexes) {
+      if (!Array.isArray(hexes) || hexes.length === 0) return null
+      const data = []
+      for (const hex of hexes) {
+        const rgb = parseHex(hex)
+        if (rgb === null) continue
+        data.push(rgb.r, rgb.g, rgb.b, 255)
+      }
+      if (data.length === 0) return null
+      return analyzePixels(data)
+    }
+
+    // ─────────────────────────────────────────────── 决策 ───────────────────────────────────────────────
+
+    /**
+     * 合并预设与用户微调后的"有效参数"。
+     *
+     * 用户的微调永远是**相对预设**的：换预设时不该把用户之前拖的 3 根滑杆带过去。
+     * 所以存盘的是 `{ preset, scrim?, blur?, saturate? }`，没有写的字段就取预设值。
+     *
+     * @param {{ preset?: string, scrim?: number, blur?: number, saturate?: number, opacity?: number, text?: string, surface?: string }} tweak
+     * @returns {typeof PRESETS[number]}
+     */
+    function resolvePreset(tweak = {}) {
+      const found = PRESETS.find((item) => item.id === tweak.preset)
+      const base = found ?? PRESETS.find((item) => item.id === DEFAULT_PRESET_ID)
+      const out = { ...base }
+      if (Number.isFinite(tweak.scrim)) out.scrim = clampRange(tweak.scrim, SCREEN_LIMITS.scrim)
+      if (Number.isFinite(tweak.blur)) out.blur = clampRange(tweak.blur, SCREEN_LIMITS.blur)
+      if (Number.isFinite(tweak.saturate)) out.saturate = clampRange(tweak.saturate, SCREEN_LIMITS.saturate)
+      if (Number.isFinite(tweak.opacity)) out.opacity = clampRange(tweak.opacity, SCREEN_LIMITS.opacity)
+      if (typeof tweak.text === 'string' && ['auto', 'light', 'dark', 'keep'].includes(tweak.text)) out.text = tweak.text
+      if (typeof tweak.surface === 'string' && ['solid', 'soft', 'clear'].includes(tweak.surface)) out.surface = tweak.surface
+      return out
+    }
+
+    /** 把 n 夹进 [min, max]。 */
+    function clampRange(n, [min, max]) {
+      return Math.max(min, Math.min(max, Number(n)))
+    }
+
+    /**
+     * 核心决策：给画面摘要 + 预设，算出"字用哪套墨"和"需要多厚的幕"。
+     *
+     * @param {ReturnType<typeof analyzePixels>} analysis 摘要；null 时按"深色画面"保底。
+     * @param {ReturnType<typeof resolvePreset>} preset 有效预设。
+     * @param {{ preference?: 'light' | 'dark' | 'system' }} [opts] 用户的主题偏好，只作输入。
+     * @returns {{ ink: 'light' | 'dark', tint: string, scrim: number, required: number, surface: 'solid' | 'soft' | 'clear', contrast: number, reason: string }}
+     */
+    function decideTheme(analysis, preset, opts = {}) {
+      const safe = analysis ?? { mean: { r: 18, g: 18, b: 24 }, luminance: 0.01, darkShare: 1, spread: 0, samples: 0 }
+      const autoInk = pickInk(safe.mean)
+      let ink = preset.text === 'light' ? 'light' : preset.text === 'dark' ? 'dark' : autoInk
+      // `keep`：不碰字色 —— 交给 DSH 自己的主题，但仍然算"最多长出一层什么样的幕"。
+      const keeps = preset.text === 'keep'
+      if (!keeps && preset.text === 'auto' && opts.preference === 'dark' && safe.luminance > 0.35) {
+        // 亮壁纸 + 用户偏好深色：仍然按画面走（深色字），偏好只是"打平时偏向谁"的参考，
+        // 绝不反过来把字硬生生调成看不清的白。
+        ink = autoInk
+      }
+
+      const inkRgb = parseHex(INK[ink])
+      const baseContrast = contrastRatio(inkRgb, safe.mean)
+      // 分散度高 → 平均色的对比度不可信，目标抬一档（最差区域也要过线）。
+      const target = CONTRAST_BODY + Math.min(0.9, safe.spread * 2.2)
+      // 预设给的幕是**下限**（观感），算出来的幕是**需求**（可读），取大。
+      const required = solveScrim(safe.mean, ink, target)
+      const scrim = Math.max(preset.scrim, required)
+      // 幕一律压向"墨色的反方向"：浅色字压暗幕，深色字压亮幕。压反了会越压越糊。
+      const scrimRgb = ink === 'light' ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 }
+      const contrast = contrastRatio(inkRgb, mixColor(safe.mean, scrim, scrimRgb))
+      return {
+        ink,
+        tint: toHex(safe.mean),
+        scrim,
+        required,
+        surface: preset.surface ?? 'solid',
+        contrast: Math.round(contrast * 100) / 100,
+        reason: keeps ? 'keep' : preset.text === 'auto' ? 'auto' : 'forced',
+      }
+    }
+
+    /** 在 bg 上按 alpha 叠一层 scrim 色。 */
+    function mixColor(bg, alpha, scrim) {
+      const a = Math.max(0, Math.min(1, alpha))
+      return {
+        r: bg.r + (scrim.r - bg.r) * a,
+        g: bg.g + (scrim.g - bg.g) * a,
+        b: bg.b + (scrim.b - bg.b) * a,
+      }
+    }
+
+    /**
+     * 把决策翻成一组 CSS 变量。
+     *
+     * 渲染层只认"名字 → 字符串"，不认业务含义：这样以后内核换 token 名、或者要补某个面，
+     * 改的是这张表，而不是渲染代码。
+     *
+     * 返回的 key 是 CSS 自定义属性名（不含 `--`），值是合法的 color。
+     *
+     * @param {ReturnType<typeof decideTheme>} decision
+     * @param {{ tint?: string }} [preset] 预设（取 tint / surface）。
+     * @returns {Record<string, string>}
+     */
+    function deriveTokens(decision, preset = {}) {
+      const ink = decision.ink === 'light' ? 'rgba(255, 255, 255, 0.94)' : 'rgba(20, 20, 24, 0.92)'
+      const dim = decision.ink === 'light' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(20, 20, 24, 0.68)'
+      const faint = decision.ink === 'light' ? 'rgba(255, 255, 255, 0.55)' : 'rgba(20, 20, 24, 0.52)'
+      const tintRgb = parseHex(preset.tint ?? decision.tint) ?? { r: 0, g: 0, b: 0 }
+      const surface = preset.surface ?? decision.surface ?? 'solid'
+      // 面板底必须是"文字能与壁纸分开的那一侧"：浅色字 → 面板压到接近黑，深色字 → 压到接近白。
+      // 直接用壁纸平均色当面板底是错的 —— 那会让面板和壁纸糊成一片，越描越看不见。
+      const surfaceBase = decision.ink === 'light' ? { r: 12, g: 13, b: 18 } : { r: 248, g: 246, b: 242 }
+      // solid 实心感最强；soft 半透；clear 几乎全透（壁纸透到面板里，靠这层幕撑住字）。
+      const surfaceAlpha = surface === 'clear' ? 0.18 : surface === 'soft' ? 0.5 : 0.82
+      return {
+        'dsa-wall-ink': ink,
+        'dsa-wall-ink-dim': dim,
+        'dsa-wall-ink-faint': faint,
+        'dsa-wall-scrim': String(decision.scrim),
+        'dsa-wall-surface': rgba(surfaceBase, surfaceAlpha),
+        'dsa-wall-surface-strong': rgba(surfaceBase, Math.min(0.94, surfaceAlpha + 0.12)),
+        'dsa-wall-border': decision.ink === 'light' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.14)',
+      }
+    }
+
+    /** 壁纸层自己的样式（不含页面让位）：渲染层直接贴到 `style` 上。 */
+    function layerStyle(preset) {
+      const p = resolvePreset(preset)
+      return [
+        `filter: blur(${p.blur}px) saturate(${p.saturate})`,
+        // 模糊会把边缘吸进来一圈透明，放大一点补掉。
+        `transform: scale(${p.blur > 0 ? 1.06 : 1})`,
+      ].join('; ')
+    }
+
+    /**
+     * 服务端也用它夹取（与浏览器算出来的完全同源）。
+     * @param {{ preset?: string, scrim?: number, blur?: number, saturate?: number, opacity?: number, text?: string, surface?: string }} tweak
+     * @returns {{ preset: string, scrim: number, blur: number, saturate: number, opacity: number, text: string, surface: string }}
+     */
+    function sanitizeTweak(tweak = {}) {
+      const p = resolvePreset(tweak)
+      return {
+        preset: p.id,
+        scrim: Math.round(p.scrim * 1000) / 1000,
+        blur: Math.round(p.blur),
+        saturate: Math.round(p.saturate * 1000) / 1000,
+        opacity: Math.round(clampRange(Number.isFinite(p.opacity) ? p.opacity : 0.72, SCREEN_LIMITS.opacity) * 1000) / 1000,
+        text: p.text ?? 'auto',
+        surface: p.surface ?? 'solid',
+      }
+    }
+// <<< INLINE lib/wallpaper.mjs
+
     const DICT_ZH = {
       nav: '启动动画',
       title: '开机动画',
@@ -50,6 +447,23 @@ window.__ModuleLoader__.load({
       image: '图片',
       use: '使用',
       using: '使用中',
+      // ── 主题（壁纸/视频铺进界面）──
+      catTheme: '主题',
+      wallpaper: '当壁纸',
+      setAsWallpaper: '设为界面壁纸',
+      wallEnable: '界面壁纸',
+      wallNote: '把视频或图片铺在界面背后。文字大小与字体不受影响，只动配色。',
+      wallPreset: '观感预设',
+      wallPresetHint: '一键套用整套配色',
+      wallContrast: '当前文字对比度',
+      wallScrim: '遮罩厚度',
+      wallBlur: '壁纸模糊',
+      wallSaturate: '色彩浓度',
+      wallPick: '壁纸素材',
+      wallPickHint: '视频与图片都能当壁纸',
+      wallUse: '当壁纸',
+      wallUsing: '壁纸使用中',
+      wallSaved: '已设为界面壁纸',
       removeBuiltin: '从列表移除（内置素材保留在包内）',
       removeUploaded: '删除文件',
       removed: '已从列表移除',
@@ -143,6 +557,23 @@ window.__ModuleLoader__.load({
       image: 'Image',
       use: 'Use',
       using: 'In use',
+      // ── Theme (video/image behind the UI) ──
+      catTheme: 'Theme',
+      wallpaper: 'Wallpaper',
+      setAsWallpaper: 'Use as interface wallpaper',
+      wallEnable: 'Interface wallpaper',
+      wallNote: 'Puts a video or image behind the whole interface. Text size and font are untouched — only colors change.',
+      wallPreset: 'Look preset',
+      wallPresetHint: 'One tap applies the whole palette',
+      wallContrast: 'Text contrast',
+      wallScrim: 'Scrim',
+      wallBlur: 'Blur',
+      wallSaturate: 'Saturation',
+      wallPick: 'Wallpaper media',
+      wallPickHint: 'Videos and images both work',
+      wallUse: 'Use as wallpaper',
+      wallUsing: 'Wallpaper in use',
+      wallSaved: 'Set as interface wallpaper',
       removeBuiltin: 'Remove from the list (the file stays in the package)',
       removeUploaded: 'Delete the file',
       removed: 'Removed from the list',
@@ -226,6 +657,9 @@ window.__ModuleLoader__.load({
       mp4: 'video/mp4,video/webm,video/ogg',
       wall: 'image/gif,image/apng,image/webp,image/png,image/jpeg',
       audio: 'audio/mpeg,audio/wav,audio/mp4,audio/aac,audio/flac,audio/ogg,audio/opus',
+      // 主题页签不接收上传（素材走上面两个分类），但上传 input 始终挂着，
+      // 缺这个键会让 accept 变成 undefined（浏览器就什么都能选了）。
+      theme: '',
     }
     /** 分类状态 → 包内目录 id（host scanLibrary 的分类键）。 */
     const CATEGORY_ID = { mp4: 'MP4', wall: '图片', audio: '音频' }
@@ -360,6 +794,28 @@ window.__ModuleLoader__.load({
 .dsa-set-card:hover .dsa-set-aplay, .dsa-set-card:focus-within .dsa-set-aplay, .dsa-set-aplay[data-on="1"] { display: flex; }
 .dsa-set-aplay:hover { background: var(--dsw-alias-brand-primary); }
 .dsa-set-aplay:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+/* ── 主题页签：预设九宫格 ── */
+/* 每格都是一张"迷你界面"：底色是当前壁纸、字色是预设算出来的墨色。
+   九宫格（auto-fill 自适应）与素材卡片同一套栅格节拍，视觉上属于同一个页面。 */
+.dsa-set-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin-top: 12px; }
+.dsa-set-preset { position: relative; display: flex; flex-direction: column; gap: 5px; padding: 8px 8px 7px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 10px; background: var(--dsw-alias-bg-layer-1); cursor: pointer; text-align: left; font: inherit; color: inherit; transition: border-color 120ms ease; }
+.dsa-set-preset:hover { border-color: var(--dsw-alias-border-l2); }
+.dsa-set-preset:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+.dsa-set-preset[aria-pressed="true"] { border-color: var(--dsw-alias-brand-primary); }
+/* 预览块：底纹模仿"壁纸 + 幕"，上面的 Aa 就是读者会看到的字色。 */
+.dsa-set-preset-art { position: relative; display: flex; align-items: center; justify-content: center; height: 34px; border-radius: 6px; overflow: hidden;
+  background: repeating-linear-gradient(115deg, #4a6b8a 0 6px, #2b3a55 6px 12px, #7c93b8 12px 18px); }
+.dsa-set-preset-scrim { position: absolute; inset: 0; }
+.dsa-set-preset-ink { position: relative; font-size: 15px; font-weight: 600; letter-spacing: 0.02em; }
+.dsa-set-preset-name { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsa-set-preset-ratio { font-size: 10.5px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
+/* 卡片右上角的「当壁纸」：与删除键同位置节拍，悬停才出现（平时别抢视线）。 */
+.dsa-set-card-wall { position: absolute; top: 6px; right: 6px; z-index: 3; display: none; align-items: center; justify-content: center; height: 22px; padding: 0 8px; border: none; border-radius: 7px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 11px; line-height: 1; cursor: pointer; }
+.dsa-set-card-wall:hover { background: var(--dsw-alias-brand-primary); }
+.dsa-set-card-wall:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+/* 删除键在右上角，壁纸键让到它左边 —— 两个都在悬停时出现，不能叠在一起。 */
+.dsa-set-card:hover .dsa-set-card-wall, .dsa-set-card:focus-within .dsa-set-card-wall { display: flex; }
+.dsa-set-card-wall { right: 36px; }
 /* ── 更新公告（Release 正文渲染：抬头 + 小标题 + 要点条目）── */
 .dsa-set-ann { display: flex; flex-direction: column; gap: 6px; max-width: 720px; }
 .dsa-set-ann-head { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary); }
@@ -1650,6 +2106,295 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 壁纸主题层：把视频/图片铺在 DSH 界面背后，并**接管背景色让页面让位**。
+     *
+     * 为什么不是"在 DOM 最后面塞一个 div"：DSH 的三列是**不透明**的（`--dsw-alias-bg-base`
+     * 与 `--dsw-specific-sidebar-fill` 都是实色），无论节点放哪、z-index 多少，壁纸都会被
+     * 挡住。正确顺序是：
+     *
+     *   ① 挂一层固定的 `<img>` / `<video>`（pointer-events:none，盖在最底）；
+     *   ② 在 `body` 上把若干 `--dsw-*` 背景 token 改成半透明/透明 —— 页面于是"让开"，
+     *      壁纸透出来。**只动背景与文字颜色，绝不动 `--dsh-*` 字号/字族**（那是用户自己的
+     *      设置，改它就是"影响用户看字"）。
+     *
+     * 文字看不看得清不靠滑杆碰运气：取样 → 算对比度 → 反推幕浓度，算法在
+     * `lib/wallpaper.mjs`（内联在本文件顶部），这里只负责把结论贴上页。
+     *
+     * @param {{ t: (key: string) => string, onDecision?: (info: object) => void }} options 文案 + 回调。
+     * @returns {{ load: () => Promise<void>, sync: (cfg: object) => void, destroy: () => void }} 层控制。
+     */
+    function createWallpaperLayer(options) {
+      const onDecision = options.onDecision
+      /** 当前状态：来自 manage 的 wallpaper 段（形状见 index.js resolveWallpaper）。 */
+      let cfg = null
+      /** 上一次铺的是哪一份素材：`file|kind` —— 变了才重挂 DOM。 */
+      let mountedKey = ''
+      /** 壁纸层容器（固定定位，盖在最底）。 */
+      let base = null
+      /** 幕（半透明覆盖层）与素材本体分开：改浓度只需要改幕的 opacity。 */
+      let scrimEl = null
+      let mediaEl = null
+      /** 我们写过的 body 内联样式名：还原时逐个删掉，绝不整份清空（会误删别人的）。 */
+      const appliedProps = new Set()
+      /** 最后一次决策（设置页要显示"当前对比度"）。 */
+      let lastDecision = null
+      /**
+       * 深色/浅色主题切换时要重新算吗？
+       *
+       * 不需要：决策只取决于**壁纸画面**，与用户的浅色/深色偏好无关（偏好绝不推翻
+       * "亮壁纸配深色字"这种结论）。所以这里没有 `data-ds-dark-theme` 的监听。
+       */
+      let alive = true
+
+      const ensureStyle = () => {
+        if (base !== null) return
+        base = document.createElement('div')
+        base.className = 'dsa-wall'
+        base.setAttribute('aria-hidden', 'true')
+        base.style.cssText = [
+          'position:fixed',
+          'inset:0',
+          // 低于三列（AppFrame 的子列没有 z-index，同一个层叠上下文里按顺序叠）：
+          // 用负数保证它永远在最底下，用户拖页面/滚动都不会浮上来。
+          'z-index:-1',
+          'pointer-events:none',
+          // 独立层叠上下文：否则 z-index:-1 会掉到 body 背景之下，什么都看不见。
+          'isolation:isolate',
+          'overflow:hidden',
+          'background:#000',
+        ].join(';')
+        mediaEl = document.createElement('img')
+        mediaEl.className = 'dsa-wall-cover'
+        mediaEl.alt = ''
+        mediaEl.style.cssText = [
+          'position:absolute',
+          'inset:0',
+          'width:100%',
+          'height:100%',
+          'object-fit:cover',
+          'display:block',
+        ].join(';')
+        scrimEl = document.createElement('div')
+        scrimEl.className = 'dsa-wall-scrim'
+        scrimEl.style.cssText = ['position:absolute', 'inset:0', 'background:#000', 'opacity:0'].join(';')
+        base.appendChild(mediaEl)
+        base.appendChild(scrimEl)
+        document.body.appendChild(base)
+      }
+
+      const dropMedia = () => {
+        if (base === null) return
+        // 视频要显式 pause + 清 src，否则元素移除后解码器仍可能挂一会儿。
+        if (mediaEl !== null && mediaEl.tagName === 'VIDEO') {
+          try {
+            mediaEl.pause()
+            mediaEl.removeAttribute('src')
+            mediaEl.load()
+          } catch {
+            /* 已经停了 */
+          }
+        }
+        base.remove()
+        base = null
+        mediaEl = null
+        scrimEl = null
+        mountedKey = ''
+      }
+
+      /** 把一份 `{ name → value }` 写到 body 内联样式，并记下名字。 */
+      const applyVars = (vars) => {
+        const style = document.body.style
+        for (const [name, value] of Object.entries(vars)) {
+          style.setProperty(name, value)
+          appliedProps.add(name)
+        }
+      }
+
+      /** 还原：只删我们写过的那些，不动 DSH 自己写的那批。 */
+      const clearVars = () => {
+        const style = document.body.style
+        for (const name of appliedProps) style.removeProperty(name)
+        appliedProps.clear()
+      }
+
+      /**
+       * 让位变量表：把"页面自己画的底色"改成能透出壁纸的值。
+       *
+       * 这些**只出现在壁纸开启时**，关掉立即还原。注意 `--dsw-alias-label-*` 是字的颜色，
+       * 它必须跟着决策走 —— 这是"文字永远看得清"的落点。
+       *
+       * @param {Record<string, string>} tokens deriveTokens 的输出。
+       * @returns {Record<string, string>}
+       */
+      const layoutVars = (tokens) => ({
+        // 三列与底栏的实色底 → 透明（壁纸从底下透出来）。
+        '--dsw-alias-bg-base': 'transparent',
+        '--dsw-specific-sidebar-fill': 'transparent',
+        // 卡片、菜单、输入框这些"面上的面"不能全透，否则文字直接叠在壁纸上。
+        '--dsw-alias-bg-layer-1': tokens['dsa-wall-surface'],
+        '--dsw-alias-bg-layer-2': tokens['dsa-wall-surface-strong'],
+        '--dsw-alias-bg-overlay': tokens['dsa-wall-surface-strong'],
+        // 字色：由对比度决策决定（浅色字 / 深色字两套）。
+        '--dsw-alias-label-primary': tokens['dsa-wall-ink'],
+        '--dsw-alias-label-secondary': tokens['dsa-wall-ink-dim'],
+        '--dsw-alias-label-tertiary': tokens['dsa-wall-ink-faint'],
+        '--dsw-alias-label-caption': tokens['dsa-wall-ink-faint'],
+        '--dsw-alias-border-l1': tokens['dsa-wall-border'],
+        '--dsw-alias-border-l2': tokens['dsa-wall-border'],
+      })
+
+      /**
+       * 拿当前素材当作画面样本 → 决策 → 贴页。
+       *
+       * 内置素材带 `hint`（出厂代表色），所以第一帧之前就能定色；上传的素材没有 hint，
+       * 退到"按深色保底"（绝大多数壁纸是暗的，先按暗的排，取样到了再纠正）。
+       */
+      const decideAndApply = (analysis) => {
+        if (cfg === null) return
+        const preset = { preset: cfg.preset, scrim: cfg.scrim, blur: cfg.blur, saturate: cfg.saturate }
+        const decision = decideTheme(analysis, resolvePreset(preset))
+        const tokens = deriveTokens(decision, resolvePreset(preset))
+        lastDecision = { ...decision, analysis }
+        applyVars(layoutVars(tokens))
+        if (base !== null) {
+          base.style.filter = `blur(${resolvePreset(preset).blur}px) saturate(${resolvePreset(preset).saturate})`
+          // 模糊会把边缘吸进来一圈透明，放大一点补掉。
+          base.style.transform = `scale(${resolvePreset(preset).blur > 0 ? 1.06 : 1})`
+          if (scrimEl !== null) {
+            // 幕的颜色跟墨色走：浅色字压暗幕，深色字压亮幕。
+            scrimEl.style.background = decision.ink === 'light' ? '#000' : '#fff'
+            scrimEl.style.opacity = String(decision.scrim)
+          }
+        }
+        if (typeof onDecision === 'function') onDecision(lastDecision)
+      }
+
+      /** 从一张已加载的图/视频帧取样（缩到 32×18 —— 决策只需要平均观感）。 */
+      const sampleFrom = (el) => {
+        try {
+          const canvas = document.createElement('canvas')
+          canvas.width = 32
+          canvas.height = 18
+          const ctx = canvas.getContext('2d', { willReadFrequently: true })
+          if (ctx === null) return null
+          ctx.drawImage(el, 0, 0, 32, 18)
+          return analyzePixels(ctx.getImageData(0, 0, 32, 18).data)
+        } catch {
+          // 跨域/解码失败：保留 hint 的结论，不因为取样失败把界面弄花。
+          return null
+        }
+      }
+
+      /** 挂素材本体；图与视频分两路（视频要静音循环 + 失败降级）。 */
+      const mountMedia = () => {
+        if (cfg === null || base === null) return
+        const key = `${cfg.file}|${cfg.kind}|${cfg.preset}|${cfg.scrim}|${cfg.blur}|${cfg.saturate}`
+        if (key === mountedKey) return
+        mountedKey = key
+        const old = mediaEl
+        const next = cfg.kind === 'video' ? document.createElement('video') : document.createElement('img')
+        next.className = 'dsa-wall-cover'
+        next.style.cssText = old.style.cssText
+        next.setAttribute('aria-hidden', 'true')
+        if (next.tagName === 'VIDEO') {
+          next.muted = true
+          next.loop = true
+          next.autoplay = true
+          next.playsInline = true
+          next.preload = 'auto'
+          // 尊重系统"减少动态效果"：退到静帧（后台标签页也照此处理，见 visibilitychange）。
+          if (window.matchMedia !== undefined && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            next.autoplay = false
+            next.loop = false
+          }
+        }
+        next.src = cfg.src
+        next.onloadeddata = () => {
+          if (!alive) return
+          // 图/视频都取一次样：hint 只是"第一时间不要闪错色"，实际画面才是结论。
+          const analysis = sampleFrom(next)
+          if (analysis !== null) decideAndApply(analysis)
+        }
+        next.onerror = () => {
+          // 素材坏了：把壁纸撤掉，界面回到原生外观 —— 比留一片黑好。
+          clearAll()
+        }
+        base.replaceChild(next, old)
+        mediaEl = next
+      }
+
+      const clearAll = () => {
+        clearVars()
+        dropMedia()
+        lastDecision = null
+        if (typeof onDecision === 'function') onDecision(null)
+      }
+
+      /** 应用一份新的 wallpaper 配置（来自 manage）。 */
+      const sync = (next) => {
+        if (!alive) return
+        const changed =
+          cfg === null ||
+          cfg.enabled !== next.enabled ||
+          cfg.file !== next.file ||
+          cfg.preset !== next.preset ||
+          cfg.scrim !== next.scrim ||
+          cfg.blur !== next.blur ||
+          cfg.saturate !== next.saturate
+        cfg = next
+        if (next.enabled !== true || next.src === '') {
+          clearAll()
+          return
+        }
+        ensureStyle()
+        // 先用出厂代表色定一版（视频的首帧还没到，先把字色摆对）。
+        const hint = Array.isArray(next.hint) ? next.hint : []
+        const analysis = hint.length > 0 ? analyzeColors(hint) : null
+        if (changed || lastDecision === null) decideAndApply(analysis)
+        mountMedia()
+        if (mediaEl !== null && mediaEl.tagName === 'VIDEO' && mediaEl.paused && mediaEl.autoplay) {
+          const played = mediaEl.play()
+          if (played !== undefined && typeof played.catch === 'function') played.catch(() => {})
+        }
+      }
+
+      /** 后台标签页/失焦：暂停视频 —— 别在用户看不见的时候烧 GPU。 */
+      const onVisibility = () => {
+        if (mediaEl === null || mediaEl.tagName !== 'VIDEO') return
+        if (document.hidden) {
+          try {
+            mediaEl.pause()
+          } catch {
+            /* 已暂停 */
+          }
+        } else if (mediaEl.autoplay) {
+          const played = mediaEl.play()
+          if (played !== undefined && typeof played.catch === 'function') played.catch(() => {})
+        }
+      }
+      document.addEventListener('visibilitychange', onVisibility)
+
+      return {
+        async load() {
+          try {
+            const res = await fetch(MANAGE, { cache: 'no-store' })
+            const payload = await res.json()
+            if (alive && payload && payload.wallpaper) sync(payload.wallpaper)
+          } catch {
+            /* 拿不到就当作没开壁纸：界面保持原生 */
+          }
+        },
+        sync,
+        destroy() {
+          alive = false
+          document.removeEventListener('visibilitychange', onVisibility)
+          clearAll()
+          cfg = null
+        },
+      }
+    }
+
+    /**
      * 多只宠物的管理器。
      *
      * 职责只有三件：**哪几只该活着**（按 `pet.pets[].enabled` 增删实例）、
@@ -2211,6 +2956,72 @@ window.__ModuleLoader__.load({
         const isReleaseCat = category === 'release'
         // 宠物页签同理：长得像分类，其实是"宠物设置 + 动作预览"。
         const isPetCat = category === 'pet'
+        // 主题页签：壁纸/视频铺进界面。同样是设置页，不是素材库。
+        const isThemeCat = category === 'theme'
+
+        /**
+         * 壁纸主题状态：`state.wallpaper` 是宿主的真相，`liveDecision` 是浏览器侧
+         * 实际算出来的对比度（背景层按 `dsa:wall-decision` 广播）。
+         *
+         * 两者分开的原因：预设卡片要用"真算一遍"的结论来预览 —— 同一张壁纸上
+         * 七个预设各是什么效果，光看名字看不出来，能算出对比度就看出来了。
+         */
+        const wallpaper = state && state.wallpaper ? state.wallpaper : null
+        const [liveDecision, setLiveDecision] = React.useState(null)
+        React.useEffect(() => {
+          const onDecision = (event) => setLiveDecision(event.detail || null)
+          window.addEventListener('dsa:wall-decision', onDecision)
+          // 挂载时主动问一次：背景层可能早就算完了（它比设置页先起来）。
+          window.dispatchEvent(new CustomEvent('dsa:wall-query'))
+          return () => window.removeEventListener('dsa:wall-decision', onDecision)
+        }, [])
+        /** 壁纸开着才谈得上调它自己的参数（与开机动画的 cfg.enabled 无关）。 */
+        const wallpaperOn = wallpaper !== null && wallpaper.enabled === true
+
+        /**
+         * 对**当前这张壁纸**算一遍每个预设：拿背景层已经取样到的画面摘要，
+         * 逐个 decideTheme → 得到"字色 + 幕浓度 + 实际对比度"。
+         *
+         * 画面摘要（`analysis`）是唯一的外部输入：没有它就先给 null，
+         * 卡片只显示预设自身的观感，不编造数字。
+         */
+        const presetPreview = (presetId) => {
+          const analysis = liveDecision && liveDecision.analysis ? liveDecision.analysis : null
+          if (analysis === null) return null
+          const resolved = resolvePreset({ preset: presetId, scrim: 'auto', blur: 'auto', saturate: 'auto' })
+          try {
+            return decideTheme(analysis, resolved)
+          } catch {
+            return null
+          }
+        }
+
+        const wallCfg = (patch, okText) => postJson(send, patch, okText)
+
+        /**
+         * 卡片右上角的「当壁纸」小按钮（悬停才出现）。
+         *
+         * 和卡片主体那个"设为开机动画"是**两个动作**：同一段素材可以只做开机动画、
+         * 只做界面壁纸，或者两样都做。所以这里不复用 `use` 那条 POST，而是直接写
+         * `wallpaperFile` 并把壁纸总开关打开 —— 用户点它的意思就是"我现在要看到它"。
+         */
+        const wallBtn = (file) =>
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dsa-set-card-wall',
+              'aria-label': `${t('setAsWallpaper')} ${file.name}`,
+              title: t('setAsWallpaper'),
+              disabled: busy,
+              onClick: (event) => {
+                event.stopPropagation()
+                if (busy) return
+                postJson(send, { wallpaperFile: file.path, wallpaperEnabled: true }, t('wallSaved'))
+              },
+            },
+            t('wallpaper'),
+          )
 
         /**
          * 标题旁的版本小字。
@@ -2433,7 +3244,7 @@ window.__ModuleLoader__.load({
                     { className: 'dsa-set-grid' },
                     files.map((file) => {
                       const active = activeFile === file.path
-                      const isVideo = VIDEO_EXT.test(file.name)
+                      const video = VIDEO_EXT.test(file.name)
                       const hidden = previewHidden.includes(file.path)
                       return h(
                         'div',
@@ -2450,15 +3261,18 @@ window.__ModuleLoader__.load({
                               if (!active) postJson(send, { use: file.path }, t('saved'))
                             },
                           },
+                          // 右上角「当壁纸」：把这段素材设为界面主题（与"设为开机动画"独立）。
+                          // 视频卡片也能用 —— 视频壁纸正是这个功能的主角。
+                          wallBtn(file),
                           hidden
                             ? h('div', { className: 'dsa-set-card-ph' }, displayName(file.name))
-                            : thumbEl(file.path, isVideo, 'dsa-set-card-media', (event) => {
+                            : thumbEl(file.path, video, 'dsa-set-card-media', (event) => {
                                 event.currentTarget.style.display = 'none'
                               }),
                           h(
                             'span',
                             { className: active ? 'dsa-set-card-using' : 'dsa-set-card-type' },
-                            active ? t('using') : isVideo ? t('video') : t('image'),
+                            active ? t('using') : video ? t('video') : t('image'),
                           ),
                           // 来源标记：内置与上传可能同名（用户上传过同一段素材时），
                           // 只显示素材名会让人分不清选的是哪一个 —— 内置随包走、上传在 DSH_HOME。
@@ -2468,7 +3282,7 @@ window.__ModuleLoader__.load({
                             'span',
                             { className: 'dsa-set-card-name', title: displayName(file.name) },
                             displayName(file.name),
-                            isVideo && typeof file.duration === 'number'
+                            video && typeof file.duration === 'number'
                               ? h('span', { className: 'dsa-set-card-src' }, durationLabel(file.duration))
                               : null,
                             h(
@@ -2695,6 +3509,215 @@ window.__ModuleLoader__.load({
                       ),
                     ),
               )
+        /**
+         * 壁纸面板：开关 + 预设 + 微调 + 素材（所有 MP4 与图片）。
+         *
+         * 布局顺序跟着**用户的思考顺序**走：先决定"要不要壁纸"，再挑素材，
+         * 然后挑"整体观感"（预设），最后才是"手痒想微调"的滑杆。
+         * 预设卡片上直接写着算出来的对比度 —— 用户选的不是名字，是"看得清"。
+         */
+        const wallPanel = (() => {
+          const cfg = wallpaper || {
+            enabled: false,
+            file: '',
+            src: '',
+            kind: '',
+            name: '',
+            preset: DEFAULT_PRESET_ID,
+            scrim: 0.5,
+            blur: 0,
+            saturate: 1,
+          }
+          // 素材候选：MP4 与壁纸两个分类合起来，视频在前（视频壁纸是这个功能的主角）。
+          // 分类 id 是目录名（`MP4` / `图片`），不是页签名 —— 认错了整块素材区就是空的。
+          const wallFiles = []
+          for (const id of ['MP4', '图片']) {
+            const cat = state ? (state.library || []).find((entry) => entry.id === id) : null
+            if (cat) for (const file of cat.files) wallFiles.push(file)
+          }
+          const activePreset = PRESETS.find((item) => item.id === cfg.preset) || PRESETS[0]
+          // 滑杆读的是"预设 + 微调"合起来的真值：用户拖到的就是他会看到的。
+          const shown = resolvePreset({ preset: cfg.preset, scrim: cfg.scrim, blur: cfg.blur, saturate: cfg.saturate })
+          /**
+           * 幕浓度的滑杆下限：用户可以把幕调薄，但**不能薄到字看不清**。
+           * 这是"壁纸不影响用户看字"这条承诺在 UI 上的落点 —— 刻度到顶就是 0.92，
+           * 但下限由当前画面的决策给出（拿不到画面摘要时用预设值兜底）。
+           */
+          const floor = liveDecision && typeof liveDecision.scrim === 'number' ? liveDecision.scrim : activePreset.scrim
+          const liveContrast = liveDecision && typeof liveDecision.contrast === 'number' ? liveDecision.contrast : null
+
+          const slider = (key, label, min, max, step, value, unit) =>
+            h(
+              'div',
+              { className: 'dsa-set-row' },
+              h('div', { className: 'dsa-set-label' }, label),
+              h(
+                'div',
+                { className: 'dsa-set-right' },
+                h('span', { className: 'dsa-set-sec' }, `${Math.round(value * (unit === '%' ? 100 : 1))}${unit === '%' ? '%' : unit}`),
+                h('input', {
+                  type: 'range',
+                  className: 'dsa-set-range',
+                  min,
+                  max,
+                  step,
+                  value,
+                  'aria-label': label,
+                  disabled: busy || !cfg.enabled,
+                  onChange: (event) => {
+                    const next = Number(event.target.value)
+                    if (Number.isFinite(next)) wallCfg({ [key]: next }, t('saved'))
+                  },
+                  // 壁纸关着时这三根都没有可调的对象（cfg.enabled 是开机动画的开关，与它无关）。
+                  disabled: busy || !wallpaperOn,
+                }),
+              ),
+            )
+
+          /**
+           * 预设卡片：九宫格里的一格。
+           *
+           * 画面上那两条字是**真的预览**，不是装饰：底色按当前壁纸的决策上色，
+           * 字色是决策算出来的墨色 —— 用户看这一格就等于看"换成这个预设之后标题栏长什么样"。
+           */
+          const presetCard = (preset) => {
+            const decision = presetPreview(preset.id)
+            const active = cfg.preset === preset.id
+            const ink = decision ? (decision.ink === 'light' ? '#ffffff' : '#111111') : activePreset.text === 'light' ? '#ffffff' : '#111111'
+            const scrimAlpha = decision ? decision.scrim : preset.scrim
+            const surface = decision ? decision.ink : preset.text === 'light' ? 'light' : 'dark'
+            return h(
+              'button',
+              {
+                key: preset.id,
+                type: 'button',
+                className: 'dsa-set-preset',
+                'aria-pressed': active ? 'true' : 'false',
+                'data-tone': surface,
+                disabled: busy,
+                title: decision ? `${preset.name} · ${decision.contrast.toFixed(2)}:1` : preset.name,
+                onClick: () => wallCfg({ wallpaperPreset: preset.id }, t('saved')),
+              },
+              h(
+                'span',
+                { className: 'dsa-set-preset-art', 'aria-hidden': 'true' },
+                h('span', { className: 'dsa-set-preset-scrim', style: { background: surface === 'light' ? '#000' : '#fff', opacity: String(scrimAlpha) } }),
+                h('span', { className: 'dsa-set-preset-ink', style: { color: ink } }, 'Aa'),
+              ),
+              h('span', { className: 'dsa-set-preset-name' }, preset.name),
+              decision ? h('span', { className: 'dsa-set-preset-ratio' }, `${decision.contrast.toFixed(1)}:1`) : null,
+            )
+          }
+
+          return h(
+            'div',
+            { className: 'dsa-set-panel', role: 'tabpanel', 'aria-label': t('catTheme') },
+            h('div', { className: 'dsa-set-desc' }, t('wallNote')),
+            // ── ① 开关 ──
+            h(
+              'div',
+              { className: 'dsa-set-row' },
+              h(
+                'div',
+                { className: 'dsa-set-label' },
+                cfg.enabled ? `${t('wallEnable')} · ${cfg.name}` : t('wallEnable'),
+              ),
+              h(
+                'div',
+                { className: 'dsa-set-right' },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dsa-set-switch',
+                    role: 'switch',
+                    'aria-checked': cfg.enabled ? 'true' : 'false',
+                    'aria-label': t('wallEnable'),
+                    disabled: busy || cfg.file === '',
+                    onClick: () => wallCfg({ wallpaperEnabled: !cfg.enabled }, t('saved')),
+                  },
+                  h('span', { className: 'dsa-set-knob' }),
+                ),
+              ),
+            ),
+            // ── ② 预设：一键套用整套观感 ──
+            h(
+              'div',
+              { className: 'dsa-set-stack' },
+              h(
+                'div',
+                { className: 'dsa-set-stack-head' },
+                h('div', { className: 'dsa-set-label' }, t('wallPreset')),
+                h(
+                  'div',
+                  { className: 'dsa-set-right' },
+                  h(
+                    'span',
+                    { className: 'dsa-set-hint' },
+                    liveContrast === null ? t('wallPresetHint') : `${t('wallContrast')} ${liveContrast.toFixed(2)}:1`,
+                  ),
+                ),
+              ),
+              h('div', { className: 'dsa-set-presets' }, PRESETS.map(presetCard)),
+            ),
+            // ── ③ 微调 ──
+            slider('wallpaperScrim', t('wallScrim'), Number(floor.toFixed(2)), SCREEN_LIMITS.scrim[1], 0.02, shown.scrim, '%'),
+            slider('wallpaperBlur', t('wallBlur'), SCREEN_LIMITS.blur[0], SCREEN_LIMITS.blur[1], 1, shown.blur, 'px'),
+            slider('wallpaperSaturate', t('wallSaturate'), SCREEN_LIMITS.saturate[0], SCREEN_LIMITS.saturate[1], 0.05, shown.saturate, '×'),
+            // ── ④ 素材：所有视频与图片都能当壁纸 ──
+            h(
+              'div',
+              { className: 'dsa-set-stack' },
+              h(
+                'div',
+                { className: 'dsa-set-stack-head' },
+                h('div', { className: 'dsa-set-label' }, t('wallPick')),
+                h('div', { className: 'dsa-set-right' }, h('span', { className: 'dsa-set-hint' }, t('wallPickHint'))),
+              ),
+              wallFiles.length === 0
+                ? h('div', { className: 'dsa-set-empty' }, t('libEmpty'))
+                : h(
+                    'div',
+                    { className: 'dsa-set-grid' },
+                    wallFiles.map((file) => {
+                      const active = cfg.file === file.path
+                      const video = VIDEO_EXT.test(file.name)
+                      return h(
+                        'div',
+                        { className: 'dsa-set-card', key: `wall-${file.path}` },
+                        h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dsa-set-card-hit',
+                            'aria-pressed': active ? 'true' : 'false',
+                            'aria-label': `${file.name} — ${active ? t('using') : t('wallUse')}`,
+                            disabled: busy,
+                            onClick: () => {
+                              if (!active) wallCfg({ wallpaperFile: file.path, wallpaperEnabled: true }, t('wallSaved'))
+                            },
+                          },
+                          thumbEl(file.path, video, 'dsa-set-card-media', (event) => {
+                            event.currentTarget.style.display = 'none'
+                          }),
+                          h(
+                            'span',
+                            { className: active ? 'dsa-set-card-using' : 'dsa-set-card-type' },
+                            active ? t('wallUsing') : video ? t('video') : t('image'),
+                          ),
+                          h(
+                            'span',
+                            { className: 'dsa-set-card-name', title: displayName(file.name) },
+                            displayName(file.name),
+                          ),
+                        ),
+                      )
+                    }),
+                  ),
+            ),
+          )
+        })()
+
         const petPanel = h(
           'div',
           { className: 'dsa-set-panel', role: 'tabpanel', 'aria-label': t('catPet') },
@@ -2933,6 +3956,9 @@ window.__ModuleLoader__.load({
             [
               { id: 'mp4', label: t('catMp4') },
               { id: 'wall', label: t('catWall') },
+              // 主题：壁纸/视频铺进界面。与"壁纸"（开机动画的素材分类）同源不同事，
+              // 所以分成两个页签 —— 一个管素材，一个管界面长什么样。
+              { id: 'theme', label: t('catTheme') },
               { id: 'audio', label: t('catAudio') },
               { id: 'pet', label: t('catPet') },
               { id: 'release', label: t('catRelease') },
@@ -2956,7 +3982,7 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
-          isReleaseCat ? releasePanel : isPetCat ? petPanel : categoryPanel,
+          isReleaseCat ? releasePanel : isPetCat ? petPanel : isThemeCat ? wallPanel : categoryPanel,
           // 上传输入随分类切换 accept。
           h('input', {
             ref: fileRef,
@@ -3048,7 +4074,35 @@ window.__ModuleLoader__.load({
           window.addEventListener('dsa:pet-query', onPetQuery)
           void petLayer.load()
 
+          // ── 壁纸主题：常驻背景层，和设置页无关（关掉设置页它还在）──
+          //
+          // 与宠物浮层同一套桥：设置页写完盘 POST 一次，回包广播成
+          // `dsa:wall-sync`，背景层立刻跟着改；设置页也监听它刷新自己的卡片状态。
+          const wallLayer = createWallpaperLayer({
+            t,
+            onDecision: (info) => {
+              window.dispatchEvent(new CustomEvent('dsa:wall-decision', { detail: info }))
+            },
+          })
+          const onWallSync = (event) => {
+            const detail = event.detail
+            if (detail !== null && typeof detail === 'object') wallLayer.sync(detail)
+          }
+          const onWallQuery = () => {
+            void wallLayer.load()
+          }
+          window.addEventListener('dsa:wall-sync', onWallSync)
+          window.addEventListener('dsa:wall-query', onWallQuery)
+          void wallLayer.load()
+
           return () => {
+            window.removeEventListener('dsa:wall-sync', onWallSync)
+            window.removeEventListener('dsa:wall-query', onWallQuery)
+            try {
+              wallLayer.destroy()
+            } catch {
+              /* 页面卸载时可能已被清掉 */
+            }
             window.removeEventListener('dsa:pet-sync', onPetSync)
             window.removeEventListener('dsa:pet-play', onPetPlay)
             window.removeEventListener('dsa:pet-category', onPetCategory)

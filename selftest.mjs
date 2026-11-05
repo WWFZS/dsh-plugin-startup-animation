@@ -940,5 +940,123 @@ await check('pet.json 的 sound：包内文件优先、空串静音、缺省回�
   fs.rmSync(root, { recursive: true, force: true })
 })
 
+console.log('== 壁纸主题契约 ==')
+
+/**
+ * 写一份临时 DSH_HOME 配置，再用真实 loadConfig 读回来 —— 断言的是"用户写盘之后
+ * 浏览器到底拿到什么"，而不是函数签名长什么样。
+ */
+const wallpaperConfig = (boot) => {
+  const home = path.join(tmp, `wall-home-${Math.random().toString(36).slice(2)}`)
+  fs.mkdirSync(home, { recursive: true })
+  fs.writeFileSync(path.join(home, 'startup-animation.json'), JSON.stringify({ boot }))
+  const { client, warnings } = loadConfig({ packageRoot, homeDir: home, route: '/asset' })
+  fs.rmSync(home, { recursive: true, force: true })
+  return { wallpaper: client.wallpaper, warnings }
+}
+
+await check('默认不铺壁纸：装上新版不会突然换掉用户的界面外观', () => {
+  const { wallpaper } = wallpaperConfig({})
+  assert.equal(wallpaper.enabled, false)
+  assert.equal(wallpaper.src, '')
+  assert.equal(wallpaper.preset, 'readable')
+})
+
+await check('壁纸与开机动画各自独立：设了壁纸不动开机动画的素材', () => {
+  const home = path.join(tmp, `wall-indep-${Math.random().toString(36).slice(2)}`)
+  fs.mkdirSync(home, { recursive: true })
+  fs.writeFileSync(
+    path.join(home, 'startup-animation.json'),
+    JSON.stringify({ boot: { file: 'builtin/图片/漫威-漫威宇宙.jpg', wallpaperFile: 'builtin/MP4/多重影像.mp4' } }),
+  )
+  const { client } = loadConfig({ packageRoot, homeDir: home, route: '/asset' })
+  fs.rmSync(home, { recursive: true, force: true })
+  // 同一份配置里两条素材并行存在：改壁纸不会覆盖开机动画的 file，反之亦然。
+  // 开机动画的素材走 `mode`/`src`（css 模式 = 内置动画，没有独立文件），
+  // 壁纸走自己的 `wallpaper.file` —— 两条互不相干。
+  assert.equal(client.wallpaper.file, 'builtin/MP4/多重影像.mp4', '壁纸素材没读到')
+  assert.equal(client.mode, 'image', '开机动画的素材没有跟着 file 变')
+  // 壁纸的 src 永远指向文件（带 ?path=），开机动画的 src 是"选好了就用这个路由"，
+  // 两者形状不同 —— 说明它们是两条独立通道，不是同一个字段的两种写法。
+  assert.match(client.wallpaper.src, /\?path=/)
+  assert.equal(client.src, '/asset')
+})
+
+await check('图片可以当壁纸，kind=image', () => {
+  const { wallpaper } = wallpaperConfig({ wallpaperEnabled: true, wallpaperFile: 'builtin/图片/漫威-漫威宇宙.jpg' })
+  assert.equal(wallpaper.enabled, true)
+  assert.equal(wallpaper.kind, 'image')
+  assert.match(wallpaper.src, /^\/asset\?path=/)
+})
+
+await check('视频可以当壁纸，kind=video', () => {
+  const { wallpaper } = wallpaperConfig({ wallpaperEnabled: true, wallpaperFile: 'builtin/MP4/多重影像.mp4' })
+  assert.equal(wallpaper.enabled, true)
+  assert.equal(wallpaper.kind, 'video')
+})
+
+await check('音频不能当壁纸：拒绝并告警，壁纸保持关闭', () => {
+  const audio = fs.readdirSync(path.join(packageRoot, 'builtin', '音频')).find((name) => name.endsWith('.mp3'))
+  const { wallpaper, warnings } = wallpaperConfig({ wallpaperEnabled: true, wallpaperFile: `builtin/音频/${audio}` })
+  assert.equal(wallpaper.enabled, false)
+  assert.equal(wallpaper.src, '')
+  assert.ok(warnings.some((line) => line.includes('wallpaper.file')), '没有告警')
+})
+
+await check('开关注入但没有素材 → 不算开启（没有可铺的东西）', () => {
+  const { wallpaper } = wallpaperConfig({ wallpaperEnabled: true })
+  assert.equal(wallpaper.enabled, false)
+})
+
+await check('预设与微调：认得的 id 保留，越界的值被夹取', () => {
+  const { wallpaper } = wallpaperConfig({
+    wallpaperPreset: 'matte',
+    wallpaperScrim: 5,
+    wallpaperBlur: -3,
+    wallpaperSaturate: 9,
+  })
+  assert.equal(wallpaper.preset, 'matte')
+  assert.equal(wallpaper.scrim, 0.92, '幕浓度没有夹到上限')
+  assert.equal(wallpaper.blur, 0, '模糊没有夹到下限')
+  assert.equal(wallpaper.saturate, 1.6, '饱和没有夹到上限')
+})
+
+await check('认不出的预设 id 退回默认值（不产生第二份数据源）', () => {
+  const { wallpaper } = wallpaperConfig({ wallpaperPreset: 'not-a-preset' })
+  assert.equal(wallpaper.preset, 'readable')
+})
+
+await check('内置素材带出厂取色（首帧之前就能定字色）', () => {
+  const { wallpaper } = wallpaperConfig({ wallpaperFile: 'builtin/MP4/多重影像.web.mp4' })
+  // 变体名（.web.mp4）也要查到同一份取色。
+  assert.ok(Array.isArray(wallpaper.hint) && wallpaper.hint.length >= 3, '内置视频没有取色提示')
+  for (const hex of wallpaper.hint) assert.match(hex, /^#[0-9a-f]{6}$/i)
+})
+
+await check('每个内置壁纸/视频都有取色条目', () => {
+  const missing = []
+  for (const [dir, filter] of [
+    ['图片', (name) => !name.startsWith('.')],
+    ['MP4', (name) => name.endsWith('.mp4') && !name.endsWith('.web.mp4')],
+  ]) {
+    for (const name of fs.readdirSync(path.join(packageRoot, 'builtin', dir))) {
+      if (!filter(name)) continue
+      const { wallpaper } = wallpaperConfig({ wallpaperFile: `builtin/${dir}/${name}` })
+      if (!Array.isArray(wallpaper.hint) || wallpaper.hint.length === 0) missing.push(`${dir}/${name}`)
+    }
+  }
+  assert.deepEqual(missing, [], `这些素材没有取色条目：${missing.join(', ')}`)
+})
+
+await check('manageStatus 带回 wallpaper 段（设置页的数据源）', () => {
+  const home = path.join(tmp, `wall-status-${Math.random().toString(36).slice(2)}`)
+  fs.mkdirSync(home, { recursive: true })
+  const status = manageStatus({ packageRoot, homeDir: home })
+  assert.ok(status.wallpaper && typeof status.wallpaper === 'object', 'manageStatus 没有 wallpaper')
+  assert.equal(status.wallpaper.enabled, false)
+  assert.ok(Array.isArray(status.library), '素材库还在（壁纸面板要复用它）')
+  fs.rmSync(home, { recursive: true, force: true })
+})
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)
 process.exit(failures === 0 ? 0 : 1)

@@ -37,6 +37,8 @@ import {
   writeJsonAtomic,
   writeProfileManifest,
 } from './lib/self-manage.mjs'
+import { PRESETS, SCREEN_LIMITS, sanitizeTweak } from './lib/wallpaper.mjs'
+import { builtinColors } from './lib/wallpaper-colors.mjs'
 
 /** Cordis 诊断用的插件名。 */
 export const name = 'startup-animation'
@@ -598,6 +600,21 @@ export const DEFAULT_CONFIG = Object.freeze({
    * 不会因为缺配置就把所有老宠物重置一遍，也不会出现"删了包，配置里还留着"的死数据。
    */
   petPets: [],
+  // ── 壁纸主题（把视频/图片铺在 DSH 界面背后，并接管背景色让页面让位）──
+  /**
+   * 壁纸总开关。默认关：装上新版不该突然换掉用户的界面外观。
+   * 与开机动画的 `enabled` **完全独立** —— 同一个素材可以只在开机时出现、
+   * 只在界面里出现、或两边都用。
+   */
+  wallpaperEnabled: false,
+  /** 壁纸素材：'' = 不铺；绝对路径或包内相对路径 = 自己的文件（与开机动画共用素材库）。 */
+  wallpaperFile: '',
+  /** 出厂预设 id（见 lib/wallpaper.mjs 的 PRESETS）；可被下面几项微调覆盖。 */
+  wallpaperPreset: 'readable',
+  /** 微调：没写的字段取预设值，写了就夹进安全区间。'auto' = 跟随预设。 */
+  wallpaperScrim: 'auto',
+  wallpaperBlur: 'auto',
+  wallpaperSaturate: 'auto',
 })
 
 /** 素材扩展名 → 运行时呈现方式。不支持的扩展名只让该素材降级，不影响动画本身。 */
@@ -870,6 +887,7 @@ export function loadConfig(options) {
       ? durationSec * 1000
       : clampNumber(raw.minMs, d.minMs, 0, 30000)
 
+  // 变量名沿用旧称呼 `client`：多处调用方依赖它（浏览器拿到的就是这一份）。
   const client = {
     version: VERSION,
     enabled: raw.enabled !== false,
@@ -893,9 +911,70 @@ export function loadConfig(options) {
     endlessMs: clampNumber(raw.endlessMs, d.endlessMs, 3000, 60000),
     skipLabel: pickString(raw.skipLabel, ''),
     soundLabel: pickString(raw.soundLabel, ''),
+    /** 壁纸主题：与开机动画各自独立的一份配置。 */
+    wallpaper: resolveWallpaper(raw, options, warnings),
   }
 
   return { client, assetPath, warnings, raw, sources }
+}
+
+/**
+ * 解析壁纸域：开关 + 素材类型校验 + 预设/微调的夹取。
+ *
+ * 与开机动画的 `file` 共用素材库，但**各自记各自的引用**：改壁纸不会动开机动画，
+ * 反之亦然。素材不存在/类型不对时只降级（壁纸关掉），不抛错 —— 开机动画照常。
+ *
+ * @param {Record<string, unknown>} raw 合并后的配置段。
+ * @param {{ packageRoot: string, route: string }} options 位置。
+ * @param {string[]} warnings 收集告警。
+ * @returns {Record<string, unknown>} 给浏览器的壁纸配置。
+ */
+function resolveWallpaper(raw, options, warnings) {
+  const d = DEFAULT_CONFIG
+  const enabledRaw = raw.wallpaperEnabled === true
+  const file = pickString(raw.wallpaperFile, d.wallpaperFile)
+  /** 素材通过校验才允许开；没素材时"开关开着"没有意义。 */
+  let src = ''
+  let kind = ''
+  let name = ''
+  if (file !== '') {
+    try {
+      const abs = resolveAssetFile(file, options.packageRoot)
+      const assetKind = ASSET_KINDS[path.extname(abs).toLowerCase()]
+      if (assetKind === undefined || assetKind === 'audio') {
+        warnings.push(
+          `wallpaper.file: unsupported type "${path.extname(abs) || '?'}" — 壁纸支持 mp4/webm/ogv 视频与 gif/apng/webp/png/jpg 图片，已忽略`,
+        )
+      } else {
+        src = `${options.route}?path=${encodeURIComponent(file)}`
+        // 'still'（png/jpg）走静态图分支：它不循环、不用 video 元素。
+        kind = assetKind === 'video' ? 'video' : 'image'
+        name = path.basename(abs)
+      }
+    } catch (error) {
+      warnings.push(`wallpaper.file: ${describe(error)} — 已忽略`)
+    }
+  }
+  const tweak = sanitizeTweak({
+    preset: pickString(raw.wallpaperPreset, d.wallpaperPreset),
+    scrim: Number.isFinite(raw.wallpaperScrim) ? raw.wallpaperScrim : undefined,
+    blur: Number.isFinite(raw.wallpaperBlur) ? raw.wallpaperBlur : undefined,
+    saturate: Number.isFinite(raw.wallpaperSaturate) ? raw.wallpaperSaturate : undefined,
+  })
+  return {
+    // 三项同时成立才算"真的在铺壁纸"：省得浏览器侧再判一遍。
+    enabled: enabledRaw && src !== '',
+    file,
+    src,
+    kind,
+    name,
+    /**
+     * 出厂取色提示（只有内置素材有）：浏览器拿第一帧之前就能定好字色，
+     * 不会先闪一下错色的界面。空数组 = 交给运行时取样。
+     */
+    hint: name === '' ? [] : builtinColors(name),
+    ...tweak,
+  }
 }
 
 /**
@@ -2092,6 +2171,14 @@ export function manageStatus(options) {
     audioVolume: client.audioVolume,
     /** 用户从列表移除的内置素材（tombstone）。 */
     deleted,
+    /**
+     * 壁纸主题域：开关 + 素材 + 预设/微调（都已夹取过）。
+     *
+     * 客户端拿到它就够铺壁纸了：`src` 是拼好的素材路由（复用 Range/ETag），
+     * `kind` 决定用 <video> 还是 <img>，预设项是**下限**——真正的幕浓度由
+     * 浏览器按 `lib/wallpaper.mjs` 对画面取样后算出来。
+     */
+    wallpaper: client.wallpaper,
     /** 素材库：内置 + 上传合并，上传按扩展名自动归入 MP4/图片/音频分类；已排除 tombstone。 */
     library: scanLibrary(options.packageRoot, deleted, options.homeDir),
     limitBytes: MEDIA_LIMIT_BYTES,
@@ -2633,6 +2720,40 @@ export function apply(ctx) {
                     }
                     patch.durationSec = clampDurationSec(body.durationSec)
                   }
+                  // ── 壁纸主题域 ──
+                  // 数值一律服务端夹取不报 400：滑杆拖出来的数常带小数，夹好即可。
+                  // `wallpaperPreset` 只认 PRESETS 里的 id，认不出来的退回默认值 ——
+                  // 预设是代码里的常量表，不接受用户自定义 id（那会变成第二份数据源）。
+                  if (typeof body.wallpaperEnabled === 'boolean') patch.wallpaperEnabled = body.wallpaperEnabled
+                  if (typeof body.wallpaperFile === 'string') {
+                    // 与开机动画同一套引用规则：相对路径必须落在包内（逃逸防护在写入时由
+                    // resolveAssetFile 兜底，这里先挡掉明显越界的 ../）。
+                    const next = body.wallpaperFile.replace(/\\/g, '/')
+                    if (next === '' || !next.split('/').includes('..')) patch.wallpaperFile = body.wallpaperFile
+                  }
+                  if (typeof body.wallpaperPreset === 'string') {
+                    patch.wallpaperPreset = PRESETS.some((item) => item.id === body.wallpaperPreset)
+                      ? body.wallpaperPreset
+                      : undefined
+                  }
+                  for (const [key, limits] of [
+                    ['wallpaperScrim', SCREEN_LIMITS.scrim],
+                    ['wallpaperBlur', SCREEN_LIMITS.blur],
+                    ['wallpaperSaturate', SCREEN_LIMITS.saturate],
+                  ]) {
+                    const value = body[key]
+                    // 'auto' = 回到预设值（写盘时删掉这一项，读的时候自然回落）。
+                    if (value === 'auto') {
+                      patch[key] = undefined
+                      continue
+                    }
+                    if (value === undefined) continue
+                    if (typeof value !== 'number' || !Number.isFinite(value)) {
+                      reply(res, 400, { ok: false, error: `${key} 必须是数字或 'auto'` })
+                      return
+                    }
+                    patch[key] = Math.max(limits[0], Math.min(limits[1], value))
+                  }
                   // ── 宠物域：总开关 / 每只的开关、大小、位置 ──
                   // 三个 per-pet 键都带 pack id，只改那一只。数值照旧"服务端夹取不给商用"：
                   // 越界的值就地夹好，不报错 —— 拖到边缘/拖滑杆时客户端算出的数偶尔带小数。
@@ -2685,7 +2806,7 @@ export function apply(ctx) {
                     patch.petPets = mergePetState(patch.petPets ?? petsNow, change.pack, next)
                   }
                   if (Object.keys(patch).length === 0) {
-                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "petEnabled", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
+                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "wallpaperEnabled", "wallpaperFile", "wallpaperPreset", "wallpaperScrim", "wallpaperBlur", "wallpaperSaturate", "petEnabled", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
                     return
                   }
                   try {

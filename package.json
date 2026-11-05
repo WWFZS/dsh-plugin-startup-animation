@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-startup-animation",
-  "version": "1.24.2",
+  "version": "1.25.0",
   "type": "module",
   "description": "Animated full-screen startup screen shown while DeepSeek Harness boots — click to skip. Ships a built-in MP4/wallpaper/audio library and accepts your own files. 开机动画 / 启动动画：启动 Harness 时显示全屏动画，随包内置视频、壁纸与开机音频，也可以用自己的素材。",
   "license": "MIT",
@@ -47,6 +47,8 @@
     "client.js",
     "cordis.patch.yml",
     "lib/self-manage.mjs",
+    "lib/wallpaper.mjs",
+    "lib/wallpaper-colors.mjs",
     "runtime/boot.css",
     "runtime/boot.js",
     "builtin/MP4/*.web.mp4",
@@ -63,8 +65,9 @@
     "builtin/宠物/**/*"
   ],
   "scripts": {
-    "test": "node selftest.mjs && node tools/boot-runtime.mjs && node tools/client-test.mjs && node lib/self-manage-test.mjs && node lib/e2e-uninstall.mjs && node tools/boot-css-test.mjs && node tools/host-smoke.mjs",
+    "test": "node selftest.mjs && node lib/wallpaper-test.mjs && node tools/sync-wallpaper-inline.mjs --check && node tools/boot-runtime.mjs && node tools/client-test.mjs && node lib/self-manage-test.mjs && node lib/e2e-uninstall.mjs && node tools/boot-css-test.mjs && node tools/host-smoke.mjs",
     "test:unit": "node selftest.mjs",
+    "test:wallpaper": "node lib/wallpaper-test.mjs",
     "test:boot": "node tools/boot-runtime.mjs",
     "test:client": "node tools/client-test.mjs",
     "test:self": "node lib/self-manage-test.mjs",

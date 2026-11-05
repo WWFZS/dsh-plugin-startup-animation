@@ -192,6 +192,7 @@ async function loadClient(options = {}) {
       innerHeight: 800,
       // 真实窗口上这两个就是全局函数的别名，垫片里补上（宠物浮层切动画时会用）。
       setTimeout: (fn, ms) => setTimeout(fn, ms),
+      clearTimeout: (id) => clearTimeout(id),
       requestAnimationFrame: (fn) => setTimeout(() => fn(0), 16),
       cancelAnimationFrame: (id) => clearTimeout(id),
       // 宠物浮层用 window 事件和设置页通信（两边不在同一棵渲染树上）。
@@ -222,6 +223,7 @@ async function loadClient(options = {}) {
           style: {},
           dataset: {},
           classList: { add() {}, remove() {} },
+          children: [],
           setAttribute(name, value) {
             attrs[name] = String(value)
           },
@@ -229,15 +231,25 @@ async function loadClient(options = {}) {
             return name in attrs ? attrs[name] : null
           },
           appendChild() {},
+          replaceChild() {},
+          removeAttribute() {},
           remove() {},
           addEventListener() {},
           removeEventListener() {},
           play: () => Promise.resolve(),
           pause() {},
+          load() {},
         }
       },
       head: { appendChild() {} },
-      body: { appendChild() {} },
+      body: {
+        appendChild() {},
+        style: { setProperty() {}, removeProperty() {} },
+      },
+      // 壁纸层要监听页面可见性（后台标签页暂停视频）。
+      addEventListener() {},
+      removeEventListener() {},
+      hidden: false,
     },
     fetch: (url, init) => {
       const path = String(url)
@@ -730,11 +742,11 @@ const openPetTab = async (render) => {
   return render()
 }
 
-await check('页签顺序：MP4 / 壁纸 / 音频 / 宠物 / 更新公告', async () => {
+await check('页签顺序：MP4 / 壁纸 / 主题 / 音频 / 宠物 / 更新公告', async () => {
   const { render } = await loadClient({ status: petStatus() })
   const tree = await render()
   const labels = findAll(tree, 'dsa-set-tab').map((tab) => tab.children[0])
-  assert.deepEqual(labels, ['MP4', '壁纸', '音频', '宠物', '更新公告'], `页签顺序不对：${labels.join(' / ')}`)
+  assert.deepEqual(labels, ['MP4', '壁纸', '主题', '音频', '宠物', '更新公告'], `页签顺序不对：${labels.join(' / ')}`)
 })
 
 await check('宠物页签：开关 + 大小 + 宠物卡 + 动作区', async () => {
@@ -1327,6 +1339,129 @@ await check('拿不到 Release 正文（离线）→ 公告页只显示"检查�
   assert.ok(all.includes('检查不到更新'), `离线时该是安静的提示：${all.join(' | ')}`)
   // 没有版本号就没有抬头 —— 宁可少一行，也不拼出"v 更新了什么"。
   assert.ok(!all.some((text) => text.includes('v 更新')), `不该出现拼凑的抬头：${all.join(' | ')}`)
+})
+
+const themeStatus = (wallpaper) => ({
+  ok: true,
+  version: '1.25.0',
+  enabled: true,
+  mode: 'video',
+  src: '/dsh-startup-animation/asset',
+  custom: true,
+  name: '多重影像.mp4',
+  file: 'builtin/MP4/多重影像.mp4',
+  builtin: true,
+  deleted: [],
+  library: [
+    { id: 'MP4', files: [{ path: 'builtin/MP4/多重影像.mp4', name: '多重影像.mp4', size: 100 }] },
+    { id: '图片', files: [{ path: 'builtin/图片/漫威-漫威宇宙.jpg', name: '漫威-漫威宇宙.jpg', size: 100 }] },
+  ],
+  wallpaper: {
+    enabled: true,
+    file: 'builtin/MP4/多重影像.mp4',
+    src: '/dsh-startup-animation/asset?path=builtin%2FMP4%2F%E5%A4%9A%E9%87%8D%E5%BD%B1%E5%83%8F.mp4',
+    kind: 'video',
+    name: '多重影像.mp4',
+    preset: 'readable',
+    scrim: 0.52,
+    blur: 0,
+    saturate: 1,
+    hint: ['#12161f', '#2b3a55', '#7c93b8', '#05070c'],
+    ...wallpaper,
+  },
+  cfg: {},
+})
+
+const openThemeTab = async (render) => {
+  const tree = await render()
+  findAll(tree, 'dsa-set-tab')
+    .find((tab) => tab.children[0] === '主题')
+    .props.onClick()
+  return render()
+}
+
+await check('主题页签：开关 + 预设卡 + 微调滑杆 + 素材卡片', async () => {
+  const { render, calls } = await loadClient({ status: themeStatus() })
+  const tree = await openThemeTab(render)
+  const all = texts(tree)
+  // 开关：带 aria-checked 的那一个，且读出来是"开着"。
+  const switches = findAll(tree, 'dsa-set-switch').filter((node) => node.props['aria-label'] === '界面壁纸')
+  assert.equal(switches.length, 1, `主题页签的开关数量不对：${switches.length}`)
+  assert.equal(switches[0].props['aria-checked'], 'true')
+  // 预设：7 套出厂预设（含"可读优先"），每格一个按钮。
+  const presets = findAll(tree, 'dsa-set-preset')
+  assert.equal(presets.length, 7, `预设数量不对：${presets.length}`)
+  assert.ok(all.includes('可读优先'), `没有"可读优先"：${all.join(' | ')}`)
+  assert.ok(all.includes('暗夜釉色'), `没有"暗夜釉色"：${all.join(' | ')}`)
+  // 当前预设那格是按下态，其余不是。
+  assert.equal(presets.filter((node) => node.props['aria-pressed'] === 'true').length, 1, '按下态数量不对')
+  // 三个滑杆：遮罩/模糊/色彩。
+  const ranges = findAll(tree, 'dsa-set-range').filter((node) => ['遮罩厚度', '壁纸模糊', '色彩浓度'].includes(node.props['aria-label']))
+  assert.equal(ranges.length, 3, `滑杆数量不对：${ranges.length}`)
+  // 素材：视频与图片都在（视频排在前面）。名字在 aria-label 里，不在纯文本里。
+  const cards = findAll(tree, 'dsa-set-card-hit')
+  assert.equal(cards.length, 2, `素材卡片数量不对：${cards.length}`)
+  const cardNames = cards.map((node) => node.props['aria-label']).join(' | ')
+  assert.ok(cardNames.includes('多重影像.mp4') && cardNames.includes('漫威-漫威宇宙.jpg'), `素材没列全：${cardNames}`)
+})
+
+await check('主题页签：点预设卡 → 只写 wallpaperPreset', async () => {
+  const { render, calls } = await loadClient({ status: themeStatus() })
+  const tree = await openThemeTab(render)
+  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
+  assert.ok(matte, '找不到"重磨砂"预设')
+  matte.props.onClick()
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.ok(post, '点预设没有发 POST')
+  assert.deepEqual(JSON.parse(post.init.body), { wallpaperPreset: 'matte' })
+})
+
+await check('主题页签：点素材卡 → 写 wallpaperFile 并顺手打开壁纸', async () => {
+  const { render, calls } = await loadClient({ status: themeStatus({ enabled: false, file: '', src: '', kind: '' }) })
+  const tree = await openThemeTab(render)
+  const card = findAll(tree, 'dsa-set-card-hit').find((node) => {
+    const label = node.props['aria-label'] || ''
+    return label.includes('漫威')
+  })
+  assert.ok(card, '找不到图片素材卡')
+  card.props.onClick()
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.deepEqual(JSON.parse(post.init.body), {
+    wallpaperFile: 'builtin/图片/漫威-漫威宇宙.jpg',
+    wallpaperEnabled: true,
+  })
+})
+
+await check('主题页签：遮罩滑杆的下限不低于"算出来的安全值"', async () => {
+  const { render } = await loadClient({ status: themeStatus({ scrim: 0.3 }) })
+  const tree = await openThemeTab(render)
+  const scrim = findByClass(tree, 'dsa-set-range').find((node) => node.props['aria-label'] === '遮罩厚度')
+  assert.ok(scrim, '没有遮罩滑杆')
+  // 没有画面摘要时用预设值兜底 —— 但必须有下限，不能拖到 0（拖到 0 字就看不见了）。
+  assert.ok(Number(scrim.props.min) > 0, `遮罩下限是 ${scrim.props.min}，字会看不清`)
+})
+
+await check('主题页签：壁纸关闭时滑杆禁用（没有壁纸可调）', async () => {
+  const { render } = await loadClient({ status: themeStatus({ enabled: false }) })
+  const tree = await openThemeTab(render)
+  for (const range of findAll(tree, 'dsa-set-range').filter((node) => ['遮罩厚度', '壁纸模糊', '色彩浓度'].includes(node.props['aria-label']))) {
+    assert.equal(range.props.disabled, true, `${range.props['aria-label']} 在壁纸关闭时仍可拖`)
+  }
+})
+
+await check('MP4/壁纸卡片上的「当壁纸」按钮：写 wallpaperFile 且不动 use', async () => {
+  const status = themeStatus()
+  // 主题页签的夹具只给素材库，卡片要的是开机动画域那份（两边读同一个 library）。
+  const { render, calls } = await loadClient({ status: { ...status, library: status.library } })
+  const tree = await render()
+  const buttons = findByClass(tree, 'dsa-set-card-wall')
+  assert.ok(buttons.length > 0, '卡片上没有「当壁纸」按钮')
+  buttons[0].props.onClick({ stopPropagation() {} })
+  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  const body = JSON.parse(post.init.body)
+  assert.equal(body.wallpaperEnabled, true)
+  assert.ok(typeof body.wallpaperFile === 'string' && body.wallpaperFile !== '', '没有写素材')
+  assert.equal(body.use, undefined, '不该顺手改开机动画的素材')
 })
 
 console.log('')
