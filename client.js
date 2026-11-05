@@ -296,6 +296,11 @@ window.__ModuleLoader__.load({
       }
       if (count === 0) return null
       const mean = { r: r / count, g: g / count, b: b / count }
+      // 亮度分位数：平均色只说明"整体偏亮还是偏暗"，说明不了"画面里最亮的一块有多亮"。
+      // 面板能不能做得很透，全看后者 —— 壁纸上那块最亮的区域正好垫在面板下面时，
+      // 它才是最坏情况。用 p95/p5 取两端，比 max/min 稳（单点高光、字幕白边不算数）。
+      const sorted = lums.slice().sort((x, y) => x - y)
+      const pick = (q) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))))]
       let variance = 0
       for (const lum of lums) variance += (lum - relativeLuminance(mean)) ** 2
       variance /= lums.length
@@ -307,6 +312,9 @@ window.__ModuleLoader__.load({
         // 分散度（亮度标准差）：越大说明画面明暗夹杂，只在平均色上算对比度是骗子，
         // 幕必须更厚才能让**每一块**区域都清楚。
         spread: Math.sqrt(variance),
+        // 两端分位亮度（0–1 的 y，不是 0–255）。
+        p95: pick(0.95),
+        p05: pick(0.05),
         samples: count,
       }
     }
@@ -398,6 +406,10 @@ window.__ModuleLoader__.load({
         surface: preset.surface ?? 'solid',
         contrast: Math.round(contrast * 100) / 100,
         reason: keeps ? 'keep' : preset.text === 'auto' ? 'auto' : 'forced',
+        // 画面最亮/最暗那一档的亮度（取不到分位就退回平均亮度）。
+        // 下游用它判断"面板能透到什么程度"：壁纸整体偏暗，就该让面板更透。
+        p95: Number.isFinite(safe.p95) ? safe.p95 : safe.luminance,
+        p05: Number.isFinite(safe.p05) ? safe.p05 : safe.luminance,
       }
     }
 
@@ -511,17 +523,35 @@ window.__ModuleLoader__.load({
       const scrimmedLo = mixColor({ r: 0, g: 0, b: 0 }, decision.scrim, scrimRgb)
       const scrimmedHi = mixColor({ r: 255, g: 255, b: 255 }, decision.scrim, scrimRgb)
       const glassInk = parseHex(inkLight ? INK.light : INK.dark) ?? scrimmedLo
-      const wallWorst = contrastRatio(scrimmedLo, glassInk) <= contrastRatio(scrimmedHi, glassInk) ? scrimmedLo : scrimmedHi
+      // 最坏壁纸色 = **这张壁纸**压过幕之后最亮/最暗的那一块（p95/p05），而不是纯黑/纯白。
+      //
+      // 之前按裸极端色反推，等于假设"壁纸随时可能是纯白"，面板就被算得死实 ——
+      // 用户看到的就是"参数全拉到底，壁纸还是透不出来"。但壁纸是确定的：它最亮的
+      // 那一块有多少亮度，是从画面里量出来的。按量出来的反推，暗壁纸的面板才敢做透。
+      //
+      // 兜底：没有画面摘要（视频还没解码）时退回纯极端色，宁可保守也不出错。
+      //
+      // 具体做法：把 p95/p05 这个 0–1 的亮度还原成一块 0–255 的灰（这才是"最亮那块
+      // 长什么样"的近似），再压上同一层幕 —— 幕是按墨色方向加的，在两端颜色上
+      // 只会把范围再收窄一点。
+      const lumToRgb = (lum) => {
+        const v = Math.round(Math.sqrt(clampRange(lum, [0, 1])) * 255)
+        return { r: v, g: v, b: v }
+      }
+      const hasPercentiles = Number.isFinite(decision.p95) && Number.isFinite(decision.p05)
+      const wallLo = mixColor(hasPercentiles ? lumToRgb(decision.p05) : { r: 0, g: 0, b: 0 }, decision.scrim, scrimRgb)
+      const wallHi = mixColor(hasPercentiles ? lumToRgb(decision.p95) : { r: 255, g: 255, b: 255 }, decision.scrim, scrimRgb)
+      const wallWorst = contrastRatio(wallLo, glassInk) <= contrastRatio(wallHi, glassInk) ? wallLo : wallHi
       // 列底能"藏"多少，由**玻璃厚度**决定 —— 这是它存在的唯一理由。
       //
       // 只看 4.5:1 的话，算出来的不透明度几乎永远落在下限 0.35（窗子太宽），滑杆也就
       // 永远看不出反应 —— 这正是用户说的"玻璃厚度没效果"。所以这里把玻璃厚度翻译成
       // **面板能藏住多少壁纸**：玻璃越厚，成品色越靠近玻璃色、越远离壁纸。
       //
-      // 上下限都压在 0.55–0.9：0.55 保证成品始终看得出玻璃色，0.9 保证再厚也还剩一点
-      // 壁纸透上来（否则跟没开壁纸一样）。安全性算出来更高时以安全值为准。
+      // 上下限都压在 0.55–0.95：0.55 保证成品始终看得出玻璃色，0.95 是"还能再多藏一点"的
+      // 上限 —— 到不了 1，永远留一丁点壁纸色。安全性算出来更高时以安全值为准。
       const SHELL_MIN = 0.55
-      const SHELL_MAX = 0.9
+      const SHELL_MAX = 0.95
       const shellTarget = SHELL_MIN + clampRange(glassAlpha, [0, 1]) * (SHELL_MAX - SHELL_MIN)
       // 悬停/选中的高亮面：不参与可读性主线，但也不能是"纯白或纯黑"跳变 —— 壁纸越亮，
       // 高亮就该越淡，否则白面板上的白色悬停块会直接吞掉壁纸。
