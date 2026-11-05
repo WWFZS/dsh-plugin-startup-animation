@@ -461,7 +461,7 @@ window.__ModuleLoader__.load({
       wallPick: '壁纸素材',
       wallPickHint: '视频与图片都能当壁纸',
       wallUse: '当壁纸',
-      wallUsing: '壁纸使用中',
+      wallUsing: '主题使用中',
       wallSaved: '已设为界面壁纸',
       removeBuiltin: '从列表移除（内置素材保留在包内）',
       removeUploaded: '删除文件',
@@ -570,7 +570,7 @@ window.__ModuleLoader__.load({
       wallPick: 'Wallpaper media',
       wallPickHint: 'Videos and images both work',
       wallUse: 'Use as wallpaper',
-      wallUsing: 'Wallpaper in use',
+      wallUsing: 'Theme in use',
       wallSaved: 'Set as interface wallpaper',
       removeBuiltin: 'Remove from the list (the file stays in the package)',
       removeUploaded: 'Delete the file',
@@ -2118,6 +2118,23 @@ window.__ModuleLoader__.load({
      * @param {{ t: (key: string) => string, onDecision?: (info: object) => void }} options 文案 + 回调。
      * @returns {{ load: () => Promise<void>, sync: (cfg: object) => void, destroy: () => void }} 层控制。
      */
+    /** 壁纸层的诊断输出：`localStorage.dsaDebug='1'` 后刷新页面才说话，平时一句不刷。 */
+    let wallDebug = null
+    const debugOn = () => {
+      // 开关只读一次：这函数在拖滑杆时每帧都会被叫到，不能每帧去碰 localStorage。
+      if (wallDebug === null) {
+        try {
+          wallDebug = window.localStorage.getItem('dsaDebug') === '1'
+        } catch {
+          wallDebug = false
+        }
+      }
+      return wallDebug === true
+    }
+    const wallLog = (...args) => {
+      if (debugOn()) console.log('[dsa-wall]', ...args)
+    }
+
     function createWallpaperLayer(options) {
       const onDecision = options.onDecision
       /** 每次决策都要贴到页上的颜色变量（不含字色通道之外的任何排版变量）。 */
@@ -2201,9 +2218,6 @@ window.__ModuleLoader__.load({
       }
 
       /**
-      }
-
-      /**
        * 把"壁纸层骨架 + 颜色变量"整段写进样式表。
        *
        * @param {Record<string, string>} tokens deriveTokens 的输出。
@@ -2212,22 +2226,28 @@ window.__ModuleLoader__.load({
       const paintCss = (tokens, resolved) => {
         const vars = layoutVars(tokens)
         const css = [
-          // 层叠：AppFrame 的子列（sidebarCol/centerCol/bottomRow）都是定位元素或 grid 子项，
-          // z-index 全在 0 以上；负数是唯一"永远垫底、又不脱离 body 定位"的位置。
-          // isolation 让负 z-index 停在自己这一层，不会钻到 body 背景下面（钻下去就看不见了）。
-          '.dsa-wall{position:fixed;inset:0;z-index:-1;pointer-events:none;isolation:isolate;overflow:hidden;background:#000;',
+          // 层叠：负 z-index 是唯一"垫在所有列之下、又不脱离 body 定位"的位置。
+          // 它画在画布背景之上、正常流内容之下 —— 正好是壁纸该待的地方。
+          '.dsa-wall{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;background:#000;',
           `filter:blur(${resolved.blur}px) saturate(${resolved.saturate});transform:scale(${resolved.blur > 0 ? 1.06 : 1});}`,
           '.dsa-wall-cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}',
           '.dsa-wall-scrim{position:absolute;inset:0;}',
+          // 画布本身也放空。body 的底色就是 var(--dsw-alias-bg-base)，令牌顶掉之后它自己就透了，
+          // 这行是兜底（主题插件的首帧 CSS 会直接写死 background-color）。
+          'html,body{background:transparent !important;}',
           'body{',
+          // 全部带 !important：内核把主题令牌以**内联样式**写在 body 上（ThemePresenter），
+          // 普通作者声明必输给内联。这里只压 body 这一个元素上的同名变量，组件写在自己
+          // 元素上的局部变量照旧继承生效 —— 单向让位，不去和组件硬碰。
           Object.entries(vars)
-            .map(([name, value]) => `${name}:${value};`)
+            .map(([name, value]) => `${name}:${value} !important;`)
             .join(''),
           '}',
         ].join('')
         if (css === lastCss) return
         lastCss = css
         ensureLive().textContent = css
+        wallLog('paint', base === null ? '还没有层' : base.isConnected ? '已挂' : '未挂', css.slice(0, 120))
       }
 
       /** 还原：把那条样式表清空 —— 应用自己写的变量一个都不动，壁纸层也一并消失。 */
@@ -2284,6 +2304,35 @@ window.__ModuleLoader__.load({
           scrimEl.style.opacity = String(decision.scrim)
         }
         if (typeof onDecision === 'function') onDecision(lastDecision)
+      }
+
+      /**
+       * 排查用：把"到底铺上去了没有"压成几行能对照的事实。
+       *
+       * 只在 `localStorage.dsaDebug === '1'` 时说话。查的是三个独立的层次：
+       *   ① 让位到底有没有生效 —— frame 的实算底色是不是透了；
+       *   ② 壁纸层在不在、尺寸对不对；
+       *   ③ 那条样式表在不在、有没有内容。
+       * 三者一对，就能分清是"层没挂"、"挂了但被盖住"还是"变量没顶掉"。
+       */
+      const probe = () => {
+        if (!debugOn()) return
+        try {
+          const overlay = document.querySelector('[data-shell-overlay]')
+          const frame = overlay === null ? null : overlay.parentElement
+          const read = (el, name) => (el === null ? '找不到' : getComputedStyle(el).getPropertyValue(name).trim() || '空')
+          const rect = base === null ? null : base.getBoundingClientRect()
+          wallLog('probe', {
+            'frame 底色': read(frame, 'background-color'),
+            'frame 看的令牌': read(frame, '--dsw-alias-bg-base'),
+            'body 底色': getComputedStyle(document.body).backgroundColor,
+            '层尺寸': rect === null ? '还没有层' : `${Math.round(rect.width)}×${Math.round(rect.height)}`,
+            '样式表': sheetEl === null ? '没有' : `${sheetEl.textContent.length} 字符`,
+            '视频在放': mediaEl !== null && mediaEl.tagName === 'VIDEO' ? !mediaEl.paused : '不是视频',
+          })
+        } catch (error) {
+          wallLog('probe 失败', error)
+        }
       }
 
       /** 从一张已加载的图/视频帧取样（缩到 32×18 —— 决策只需要平均观感）。 */
@@ -2362,6 +2411,7 @@ window.__ModuleLoader__.load({
           cfg.blur !== next.blur ||
           cfg.saturate !== next.saturate
         cfg = next
+        wallLog('sync', { enabled: next.enabled, src: next.src, changed })
         if (next.enabled !== true || next.src === '') {
           clearAll()
           return
@@ -2372,6 +2422,11 @@ window.__ModuleLoader__.load({
         const analysis = hint.length > 0 ? analyzeColors(hint) : null
         if (changed || lastDecision === null) decideAndApply(analysis)
         mountMedia()
+        probe()
+        // 布局稳定后再探一次：首帧时 frame 可能还在挂载中，早看会误判"层没铺上"。
+        window.setTimeout(() => {
+          if (alive && cfg !== null && cfg.enabled === true) probe()
+        }, 1200)
         if (mediaEl !== null && mediaEl.tagName === 'VIDEO' && mediaEl.paused && mediaEl.autoplay) {
           const played = mediaEl.play()
           if (played !== undefined && typeof played.catch === 'function') played.catch(() => {})
@@ -2399,9 +2454,10 @@ window.__ModuleLoader__.load({
           try {
             const res = await fetch(MANAGE, { cache: 'no-store' })
             const payload = await res.json()
+            wallLog('load', res.status, payload && payload.wallpaper)
             if (alive && payload && payload.wallpaper) sync(payload.wallpaper)
-          } catch {
-            /* 拿不到就当作没开壁纸：界面保持原生 */
+          } catch (error) {
+            wallLog('load 失败', error)
           }
         },
         /**

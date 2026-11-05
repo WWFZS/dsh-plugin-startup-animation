@@ -222,6 +222,7 @@ async function loadClient(options = {}) {
         return {
           style: {},
           dataset: {},
+          textContent: '',
           classList: { add() {}, remove() {} },
           children: [],
           setAttribute(name, value) {
@@ -241,7 +242,9 @@ async function loadClient(options = {}) {
           load() {},
         }
       },
-      head: { appendChild() {} },
+      // 壁纸层会把"壁纸骨架 + 让位变量"写进一条 <style>。
+      // 记下元素本身（而不是当下的文本）：文本是创建之后才赋上去的。
+      head: { appendChild: (el) => calls.push({ type: 'style', el }) },
       body: {
         appendChild() {},
         style: { setProperty() {}, removeProperty() {} },
@@ -1469,6 +1472,26 @@ await check('主题滑杆：拖动只本地跟手，松手才落盘一次', asyn
   const after = calls.filter((call) => call.type === 'fetch' && call.init?.method === 'POST')
   assert.equal(after.length, 1, `松手后应该只落盘一次，实际 ${after.length} 次`)
   assert.equal(JSON.parse(after[0].init.body).wallpaperScrim, 0.6)
+})
+
+await check('主题壁纸：让位变量必须带 !important（内核把令牌写成 body 内联样式）', async () => {
+  const { calls } = await loadClient({ status: themeStatus() })
+  // 壁纸层在 apply 里异步拉一次 manage，等它铺完。
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  const sheets = calls.filter((call) => call.type === 'style')
+  assert.ok(sheets.length > 0, '壁纸层没有写出样式表')
+  const css = sheets[sheets.length - 1].el.textContent
+  // 内核的 ThemePresenter 用 body.style.setProperty 落地令牌；不带 !important 的作者声明
+  // 必输给内联，令牌顶不掉 → 页面不透明 → 壁纸永远看不见（这就是之前"设了没反应"的根因）。
+  assert.match(
+    css,
+    /--dsw-alias-bg-base:\s*transparent\s*!important/,
+    `让位变量没带 !important，会被 body 内联样式压住：${css.slice(0, 200)}`,
+  )
+  // 画布本身也要放空：首帧 CSS 直接写死 background-color。
+  assert.match(css, /html,body\{background:transparent !important/, 'body 底色没放空')
+  // 绝不碰字号的通道。
+  assert.ok(!/font-size|font-family|--dsh-content-font-size/.test(css), `样式表里混进了排版变量：${css}`)
 })
 
 console.log('')
