@@ -255,7 +255,6 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 宠物形象来自社区二创项目 [dsh-pet](https://github.com/PC2005-cloud/dsh-pet)，按原作者要求
 完整声明如下：
 
-- **代码**：MIT
 - **素材（动画 / 提示词 / 源视频）**：允许开源使用，**禁止商用**
 - **二次创作约定**：基于本项目的衍生 / 改版 / 换皮作品，在 GitHub 仓库、产品官网等公开
   渠道上须附上原作者 GitHub 地址 <https://github.com/PC2005-cloud/dsh-pet>
@@ -266,7 +265,7 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
   （署名 · 非商业 · 相同方式共享）。声明原文：「大肥鱼是遵守 CC BY-NC-SA 4.0 协议的形象，
   不可以以任何形式商业化。若您非常喜爱该形象，希望其拥有实体，您可以自行定制。」
 
-噜噜动作设计是本项目自有素材，授权跟随上方「代码：MIT」。
+噜噜动作设计是本项目原创素材，授权跟随上方。
 
 ### 配置文件
 
