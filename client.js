@@ -102,7 +102,6 @@ window.__ModuleLoader__.load({
       petSearch: '搜索动作',
       petNoMatch: '没有匹配的动作',
       petNow: '正在演',
-      petCredit: '素材',
       petLoop: '循环',
       petOnce: '单次',
       petReset: '归位',
@@ -196,7 +195,6 @@ window.__ModuleLoader__.load({
       petSearch: 'Search actions',
       petNoMatch: 'No matching action',
       petNow: 'Now playing',
-      petCredit: 'Art by',
       petLoop: 'loop',
       petOnce: 'once',
       petReset: 'Reset position',
@@ -330,8 +328,6 @@ window.__ModuleLoader__.load({
 .dsa-set-chip[data-on="1"] { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); }
 .dsa-set-chip:disabled { opacity: 0.55; cursor: default; pointer-events: none; }
 .dsa-set-now { margin-top: 10px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); }
-.dsa-set-credit { margin-top: 4px; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
-.dsa-set-credit a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .dsa-set-empty { font-size: 12.5px; color: var(--dsw-alias-label-tertiary); padding: 10px 0; }
 /* ── 当前素材预览（设置区素材行）── */
 .dsa-set-cur { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -2699,20 +2695,6 @@ window.__ModuleLoader__.load({
                       ),
                     ),
               )
-        const petCredit =
-          petPack && petPack.credit
-            ? h(
-                'div',
-                { className: 'dsa-set-credit' },
-                `${t('petCredit')} `,
-                h(
-                  'a',
-                  { href: petPack.credit.url, target: '_blank', rel: 'noreferrer noopener' },
-                  petPack.credit.name || petPack.credit.author || petPack.credit.url,
-                ),
-                petPack.credit.license ? ` · ${petPack.credit.license}` : '',
-              )
-            : null
         const petPanel = h(
           'div',
           { className: 'dsa-set-panel', role: 'tabpanel', 'aria-label': t('catPet') },
@@ -2790,7 +2772,6 @@ window.__ModuleLoader__.load({
                   )
                 : h('div', { className: 'dsa-set-acts' }, petClips.map(petClipCard)),
             petNow ? h('div', { className: 'dsa-set-now' }, `${t('petNow')} ${petNow.name}`) : null,
-            petCredit,
           ),
         )
 

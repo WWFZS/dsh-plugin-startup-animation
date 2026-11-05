@@ -899,14 +899,11 @@ await check('多只可以同时开着：每只各自的开关互不影响', asyn
   )
 })
 
-await check('素材署名：带原作者链接', async () => {
+await check('素材署名：不占设置页', async () => {
   const { render } = await loadClient({ status: petStatus([MAID_PACK], { enabled: true }) })
   const petTree = await openPetTab(render)
-  const credit = findAll(petTree, 'dsa-set-credit')[0]
-  assert.ok(credit, '没有署名行')
-  const link = findByProp(credit, 'href')[0]
-  assert.equal(link.props.href, 'https://github.com/PC2005-cloud/dsh-pet', '没有链回原作者')
-  assert.ok(texts(credit).join(' ').includes('CC BY-NC-SA 4.0'), '没有写许可证')
+  assert.equal(findAll(petTree, 'dsa-set-credit').length, 0, '署名行还在，作者信息由 README 负责')
+  assert.equal(texts(petTree).join(' ').includes('CC BY-NC-SA 4.0'), false, '许可证不应出现在界面上')
 })
 
 await check('打开宠物开关 → 写回 petEnabled:true', async () => {
