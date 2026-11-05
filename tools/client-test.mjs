@@ -1505,12 +1505,16 @@ await check('主题壁纸：让位变量必须带 !important（内核把令牌�
   assert.ok(sheets.length > 0, '壁纸层没有写出样式表')
   const css = sheets[sheets.length - 1].el.textContent
   // 内核的 ThemePresenter 用 body.style.setProperty 落地令牌；不带 !important 的作者声明
-  // 必输给内联，令牌顶不掉 → 页面不透明 → 壁纸永远看不见（这就是之前"设了没反应"的根因）。
+  // 必输给内联，令牌顶不掉 → 列底还是内核那套实色 → 壁纸永远看不见。
+  //
+  // 列底现在是**半透明玻璃**（rgba），不是 transparent："透"要让壁纸看得见，同时面板底
+  // 还得站得住字 —— 完全不透明等于没铺壁纸，完全透明等于字直接压在画面上。
   assert.match(
     css,
-    /--dsw-alias-bg-base:\s*transparent\s*!important/,
+    /--dsw-alias-bg-base:\s*rgba\([^)]*\)\s*!important/,
     `让位变量没带 !important，会被 body 内联样式压住：${css.slice(0, 200)}`,
   )
+  assert.match(css, /--dsw-specific-sidebar-fill:\s*rgba\([^)]*\)\s*!important/, '侧栏底没接管')
   // 画布本身也要放空：首帧 CSS 直接写死 background-color（深色主题是 #151517）。
   // body 必须显式 transparent —— 少它一份，壁纸就被那层实色盖死。
   assert.match(css, /body\{background:transparent !important/, 'body 底色没放空')
@@ -1546,8 +1550,9 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   const tree = await openThemeTab(render)
   const before = calls.filter((call) => call.type === 'style')
   const beforeCss = before.length > 0 ? before[before.length - 1].el.textContent : ''
-  // 起始是「可读优先」（面板模糊 24px）：浮层那一档按 24×1.25=30px 排。
-  assert.ok(beforeCss.includes('blur(30px)'), `起始预设（可读优先）的浮层模糊不对：${beforeCss.slice(0, 160)}`)
+  // 起始是「可读优先」：浮层只叠一层固定的小模糊（8px），不做景深分层了 ——
+  // 在列上叠大半径 backdrop-filter 会把列自己的底色糊成一团，界面反而更看不见。
+  assert.ok(beforeCss.includes('backdrop-filter:blur(4px)'), `浮层模糊不对：${beforeCss.slice(0, 160)}`)
   const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
   assert.ok(matte, '找不到「重磨砂」预设')
   matte.props.onClick()
@@ -1555,8 +1560,9 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   // 状态原样吐回来（它不模拟写盘），再等下去就等于断言"回包把画面盖回去"。
   const after = calls.filter((call) => call.type === 'style')
   const css = after[after.length - 1].el.textContent
-  // 重磨砂的核心观感是大模糊：36×1.25 = 45 撞到 40 的上限，所以浮层落在 40px。
-  assert.ok(css.includes('blur(40px)'), `点了「重磨砂」界面没重画：${css.slice(0, 160)}`)
+  // 「重磨砂」和「可读优先」在面板色上是同一块白（参考实现亦然），差别落在磨砂上：
+  // 壁纸层的模糊从 24px 变成 36px 就是这套预设的签名。
+  assert.ok(css.includes('filter:blur(36px)'), `点了「重磨砂」界面没重画：${css.slice(0, 200)}`)
   assert.notEqual(css, beforeCss, '样式表没变，说明只是换了卡片')
 })
 

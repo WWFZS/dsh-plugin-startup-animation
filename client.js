@@ -96,6 +96,15 @@ window.__ModuleLoader__.load({
     const FLOOR_BASE = Object.freeze({ light: '#ffffff', dark: '#0b0d12' })
 
     /**
+     * 三列（侧栏 / 会话区 / 底栏）的不透明度下限。
+     *
+     * 再低就不是"玻璃"而是"没有"了：壁纸直接扎在字后面，任何前景色都救不回来。
+     * 参考实现里 `sidebarFullClear` 这类"全透明"档也是要用户自己开的危险开关，
+     * 这里干脆不给那扇门 —— 观感靠预设与模糊去调，不靠把面板做没。
+     */
+    const WALL_ALPHA_MIN = 0.35
+
+    /**
      * 出厂预设。除了幕（`scrim`）、壁纸模糊（`blur`）、色彩浓度（`saturate`），
      * 每个预设还带一套**玻璃配方**，这正是"七套预设看起来完全不一样"的来源：
      *
@@ -492,6 +501,10 @@ window.__ModuleLoader__.load({
       const whiteOnGlass = contrastRatio(parseHex(INK.light), parseHex(g1.final))
       const darkOnGlass = contrastRatio(parseHex(INK.dark), parseHex(g1.final))
       const inkLight = darkOnGlass > whiteOnGlass ? false : whiteOnGlass > darkOnGlass ? true : g1.lum < 0.18
+      // 列底不透明度：按最坏壁纸反推（浅色主题对纯黑壁纸、深色对纯白）。
+      // 列是壁纸透上来的唯一通道，它必须自己扛住可读性，不能指望壁纸"刚好够暗"。
+      const wallWorst = dark ? { r: 255, g: 255, b: 255 } : { r: 0, g: 0, b: 0 }
+      const wallAlpha = solveWallAlpha(parseHex(g1.final) ?? wallWorst, parseHex(inkLight ? INK.light : INK.dark) ?? wallWorst, wallWorst)
       const ink = inkLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(14, 16, 22, 0.95)'
       const dim = inkLight ? 'rgba(255, 255, 255, 0.76)' : 'rgba(14, 16, 22, 0.70)'
       const faint = inkLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(14, 16, 22, 0.54)'
@@ -514,6 +527,14 @@ window.__ModuleLoader__.load({
         'dsa-wall-blur-2': layerBlur(surfaceBlur, 1.25),
         'dsa-wall-blur-3': layerBlur(surfaceBlur, 1.5),
         'dsa-wall-accent': accent,
+        // 三列的不透明度：**按最坏壁纸反推**，不是抄死。
+        //
+        // 列底是壁纸透上来的唯一通道，所以它必须自己扛得住：壁纸最亮（浅色主题）或最暗
+        // （深色主题）的像素压在这层上时，字还得 ≥4.5:1。面板越亮的预设透得越少 ——
+        // 白玻璃透在白壁上就是一片白（参考实现的 sidebarAlpha / glassAlpha 是同一回事，
+        // 只是它是手调的，我们把它算出来）。
+        'dsa-wall-wall-alpha': String(wallAlpha),
+        'dsa-wall-wall': rgba(g1Rgb(g1.final), wallAlpha),
         'dsa-wall-border': inkLight ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.12)',
         // 壁纸层自己的垫底色：画面没送到屏上时退化成这个颜色，而不是白闪。
         // 往地板色压六成；纯白壁纸再单独压暗一档 —— 混色的目标就是地板色本身，
@@ -533,6 +554,33 @@ window.__ModuleLoader__.load({
     /** `#rrggbb` → rgb 对象（glassMix 的输出必然可解析，解析不了就退回黑）。 */
     function g1Rgb(hex) {
       return parseHex(hex) ?? { r: 0, g: 0, b: 0 }
+    }
+
+    /**
+     * 反推"三列该有多不透明"，让壁纸透上来的同时字站得住。
+     *
+     * 列底 = 玻璃色 @alpha 压在壁纸之上。壁纸取**最坏的那一档**（浅色主题取纯黑、
+     * 深色主题取纯白），因为用户可能换任何一张壁纸，而这条线不能靠运气。
+     * 二分出"刚好过 4.5:1"的那一档，再留 0.02 余量防取整误差。
+     *
+     * @param {{ r: number, g: number, b: number }} glass 玻璃色（面板色）
+     * @param {{ r: number, g: number, b: number }} ink 字色
+     * @param {{ r: number, g: number, b: number }} worst 最坏壁纸色
+     * @returns {number} 0.35–1 之间的不透明度
+     */
+    function solveWallAlpha(glass, ink, worst) {
+      const at = (alpha) => contrastRatio(mixRgb(worst, glass, alpha), ink)
+      if (at(WALL_ALPHA_MIN) >= CONTRAST_BODY) return WALL_ALPHA_MIN
+      if (at(1) < CONTRAST_BODY) return 1
+      let lo = WALL_ALPHA_MIN
+      let hi = 1
+      for (let i = 0; i < 30; i += 1) {
+        const mid = (lo + hi) / 2
+        if (at(mid) >= CONTRAST_BODY) hi = mid
+        else lo = mid
+      }
+      // 向上取整到 0.01：往下取会让面板比安全线还透。
+      return Math.min(1, Math.ceil((hi + 0.02) * 100) / 100)
     }
 
     /**
@@ -2474,7 +2522,10 @@ window.__ModuleLoader__.load({
           // 层叠：负 z-index 是唯一"垫在所有列之下、又不脱离 body 定位"的位置。
           // 它画在画布背景之上、正常流内容之下 —— 正好是壁纸该待的地方。
           '.dsa-wall{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;background:#000;',
-          `filter:blur(${resolved.blur}px) saturate(${resolved.saturate});transform:scale(${resolved.blur > 0 ? 1.06 : 1});}`,
+          // 壁纸层自己的模糊走「最磨砂的那个"沙"档」：三列上不能再叠 backdrop-filter
+          // （会把列自己的底色糊成一团），所以整套观感的"磨砂感"只能在这里体现。
+          // 用 surfaceBlur 而不是壁纸模糊（blur）—— 后者是用户想调"壁纸本身多虚"的旋钮。
+          `filter:blur(${resolved.surfaceBlur}px) saturate(${resolved.saturate});transform:scale(${resolved.surfaceBlur > 0 ? 1.06 : 1});}`,
           '.dsa-wall-cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}',
           '.dsa-wall-scrim{position:absolute;inset:0;}',
           // 画布本身也放空。body 的底色就是 var(--dsw-alias-bg-base)，令牌顶掉之后它自己就透了，
@@ -2486,27 +2537,15 @@ window.__ModuleLoader__.load({
           `html{background-color:${tokens['dsa-wall-underlay']} !important;}`,
           'html,body{background-image:none !important;}',
           `body{background:transparent !important;}`,
-          // 玻璃：每个承载文字的面都吃一层背后的模糊。
+          // 玻璃：只给浮层留一点点"磨砂"的触感。
           //
-          // 这是"透出壁纸"和"看得清字"能同时成立的另一半 —— 玻璃色（上面那组令牌）负责
-          // 保证最低覆盖率，backdrop-filter 负责让透出来的那层壁纸**有质感**而不只是一张压暗的照片。
-          // `saturate` 稍微抬一点，模糊之后颜色才不会发灰。
-          //
-          // 选择器只认内核稳定的那一类：Shell 里每个面都会继承 `--dsw-alias-bg-layer-N`
-          // 这类令牌，而**令牌是继承的、backdrop-filter 不是** —— 所以必须挂到真正承载文字
-          // 的元素上。挑了 sidebar / overlay 两个稳定锚点，加上 markdown 与气泡（那两处
-          // 有自己的类名但都挂在正文里，靠属性锚定不到的，交给下面那组通用选择器）。
-          //
-          // 不用 CSS module 哈希（会随内核版本变）。
-          // 浮层比底层面更糊：`data-shell-overlay` 是"所有浮层所在的那一层"，
-          // `data-shell-bottom` 是底栏。层越高透上来的壁纸越糊，界面才有"浮起来"的
-          // 前后关系 —— 颜色已经分不开了（面板亮度被可读性下限锁死），差别只能落在景深上。
-          `[data-shell-overlay]{backdrop-filter:blur(${tokens['dsa-wall-blur-3']}) saturate(1.15);`,
-          `-webkit-backdrop-filter:blur(${tokens['dsa-wall-blur-3']}) saturate(1.15);}`,
-          // 设置弹窗与菜单这类"面上的面"再叠一层：它们通常直接挂在 body 下、
-          // 靠 mask/backdrop 自己铺满整屏，透明度落在自己的容器上而不是 overlay 层。
-          `[role="dialog"],[role="menu"],[data-radix-popper-content-wrapper] > *{backdrop-filter:blur(${tokens['dsa-wall-blur-2']}) saturate(1.15);`,
-          `-webkit-backdrop-filter:blur(${tokens['dsa-wall-blur-2']}) saturate(1.15);}`,
+          // 半径固定 4px、只挂 shell.overlay 这一个锚点。**不能**在每一列上叠
+          // 不同半径的 backdrop-filter —— DSH 的每一列本身就有底色
+          // （`--dsw-specific-sidebar-fill` / `--dsw-alias-bg-base` / `--dsw-alias-bg-layer-*`），
+          // 在列上再叠，透上来的不是壁纸而是列自己的底色被糊成一团，界面彻底看不见。
+          // 壁纸要透上来，唯一可靠的办法是让列的底色本身半透明 —— 也就是下面那组
+          // 令牌里的 wallAlpha（参考实现的玻璃令牌也是 `color-mix(..., transparent)`）。
+          `[data-shell-overlay]{backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);}`,
           'body{',
           // 全部带 !important：内核把主题令牌以**内联样式**写在 body 上（ThemePresenter），
           // 普通作者声明必输给内联。这里只压 body 这一个元素上的同名变量，组件写在自己
@@ -2543,19 +2582,29 @@ window.__ModuleLoader__.load({
        * @returns {Record<string, string>}
        */
       const layoutVars = (tokens) => ({
-        // 三列与底栏：彻底留空，壁纸从底下直接透上来。
-        '--dsw-alias-bg-base': 'transparent',
-        '--dsw-specific-sidebar-fill': 'transparent',
-        // 面上的面：三级玻璃。层 1 是大面板（卡片、行、列表），层 2/3 是浮在它上面的
-        // 菜单、弹层、选中态。三层的**颜色**是同一个（面板亮度被可读性下限锁死，
-        // 想再拉开就只能往中间灰走，那会拿"看得清"换"有层次"）；层次交给上面的
-        // backdrop-filter：层越高，透过它看到的壁纸越糊。
+        // 三列与底栏：半透明，壁纸从这个缝里透上来。
+        //
+        // 这里**不是** `transparent`。彻底留空虽然最"透"，但壁纸的亮部会直接扎在字后面，
+        // 而列的底色是唯一能同时做到"壁纸可见"和"字站得住"的东西：给它一个不透明度
+        // （tokens['dsa-wall-wall-alpha']），壁纸就从这层底下透出来 —— 参考实现的玻璃
+        // 令牌全是 `color-mix(..., transparent)`，同一回事。
+        //
+        // 不透明度是按最坏壁纸算出来的（浅色主题对纯黑、深色主题对纯白），所以七套预设
+        // 各有各的值：面板越亮的预设，越不能透 —— 白玻璃透在白底上会把字吃掉。
+        '--dsw-alias-bg-base': tokens['dsa-wall-wall'],
+        '--dsw-specific-sidebar-fill': tokens['dsa-wall-wall'],
+        // 面上的面：层 1 是大面板（卡片、行、列表），层 2/3 是浮在它上面的菜单、弹层、
+        // 选中态。三层用同一个颜色：面板亮度被可读性下限锁死，再想拉开只能往中间灰走，
+        // 而中间灰上白字黑字都只有 4:1 —— 层次交给浮层自己背后的模糊（见样式表）。
         '--dsw-alias-bg-layer-1': tokens['dsa-wall-glass-1'],
         '--dsw-alias-bg-layer-2': tokens['dsa-wall-glass-2'],
         '--dsw-alias-bg-layer-3': tokens['dsa-wall-glass-3'],
-        // 面板背后那层"壁纸雾"：玻璃面本身偏纯色，靠它把画面的温度带回来。
+        // 面板背后那层"壁纸雾"。
+        //
+        // 不能拿 frost 当 `bg-overlay`：frost 是「玻璃面掺一点壁纸色」的中间调，
+        // 糊在浮层上就是整片看不见。浮层自己也得站得住字，所以跟层 2/3 用同一个玻璃色。
         '--dsw-alias-bg-conversation': tokens['dsa-wall-frost'],
-        '--dsw-alias-bg-overlay': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-bg-overlay': tokens['dsa-wall-glass-3'],
         '--dsw-alias-bg-module-platform': tokens['dsa-wall-glass-2'],
         '--dsw-alias-bg-multi-select': tokens['dsa-wall-glass-2'],
         // 抬高的按钮（侧栏「新建会话」、重命名输入框）：比最高那层再亮半档。
