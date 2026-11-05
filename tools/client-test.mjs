@@ -1316,7 +1316,9 @@ await check('更新公告页签：渲染 Release 正文，安装段/代码块不
   )
   // 加粗符号要去掉（设置页不渲染富文本）。
   assert.ok(all.some((text) => text.includes('不再跳转 GitHub 手动下载')), `加粗没剥干净：${all.join(' | ')}`)
-  assert.ok(!all.some((text) => text.includes('**')), '正文里留着 markdown 加粗符号')
+  // 只看**可见文本**：`<style>` 里的 CSS 统一用 `**` 当 class 选择器通配符，它不是正文。
+  const visible = findAll(panel, 'span').flatMap((node) => texts({ children: node.children }))
+  assert.ok(!visible.some((text) => text.includes('**')), `正文里留着 markdown 加粗符号：${visible.join(' | ')}`)
   // 安装链接与代码示例属于"怎么装"，不是"这次改了什么"。
   assert.ok(!all.some((text) => text.includes('example.com')), `安装链接混进了公告：${all.join(' | ')}`)
   assert.ok(!all.some((text) => text.includes('npm i ')), `代码块混进了公告：${all.join(' | ')}`)

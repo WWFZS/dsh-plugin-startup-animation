@@ -548,9 +548,13 @@ window.__ModuleLoader__.load({
       // 永远看不出反应 —— 这正是用户说的"玻璃厚度没效果"。所以这里把玻璃厚度翻译成
       // **面板能藏住多少壁纸**：玻璃越厚，成品色越靠近玻璃色、越远离壁纸。
       //
-      // 上下限都压在 0.55–0.95：0.55 保证成品始终看得出玻璃色，0.95 是"还能再多藏一点"的
-      // 上限 —— 到不了 1，永远留一丁点壁纸色。安全性算出来更高时以安全值为准。
-      const SHELL_MIN = 0.55
+      // 上下限都压在 0.3–0.95：0.3 是"壁纸看得清"的那一档（面板只剩三成，画面原样透上来），
+      // 0.95 是"还能再多藏一点"的上限 —— 到不了 1，永远留一丁点壁纸色。
+      //
+      // 0.3 这一档字是兜不住的（面板自己只有三成不透明），所以列底在**文字区域**会另叠
+      // 一层 `dsa-wall-reading`（见 deriveTokens）：壁纸面板保持清澈，字压在实底上。
+      // 安全性算出来更高时以安全值为准。
+      const SHELL_MIN = 0.3
       const SHELL_MAX = 0.95
       const shellTarget = SHELL_MIN + clampRange(glassAlpha, [0, 1]) * (SHELL_MAX - SHELL_MIN)
       // 悬停/选中的高亮面：不参与可读性主线，但也不能是"纯白或纯黑"跳变 —— 壁纸越亮，
@@ -571,6 +575,16 @@ window.__ModuleLoader__.load({
       // 透底量跟着**列底实际留了多少空**走：列底 alpha=1（安全值推满）时壁纸本来就看不见，
       // 再把雾掺进去只是让颜色偏脏；列底很透时（玻璃厚度 0）壁纸才是画面主角。
       const frost = mixRgb(g1Rgb(g1.final), parseHex(decision.tint) ?? g1Rgb(g1.final), clampRange(1 - wallAlpha, [0, GLASS_SHOW_THROUGH]))
+      // 文字保险层：贴在文字后面的一块实底（气泡、选中行、输入框里）。
+      //
+      // 为什么需要它：面板做到 0.3 时，壁纸原样透上来 —— 那才是"看得清壁纸"。但字压在这层
+      // 薄玻璃上，壁纸里一块亮区飘过去就可能把字吃掉。所以把"看画面"和"读文字"拆开：
+      // 面板保持清澈，只在字底下垫一层接近实色的底。它对壁纸的遮挡面积小得多，
+      // 视觉上仍是"壁纸铺满整个界面"，而字永远站在 ≥4.5:1 的面上。
+      const reading = mixRgb(g1Rgb(g1.final), parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light) ?? g1Rgb(g1.final), 0.12)
+      // 文字保险层多实：面板本身不够用时（wallAlpha 低于 0.6）才逐步实起来；
+      // 面板本来就够实的时候（0.85 以上）它退到和面板一样，界面上不多一层"补丁"。
+      const readingAlpha = clampRange(wallAlpha + (1 - wallAlpha) * 0.55, [0.5, 0.95])
       return {
         'dsa-wall-ink': ink,
         'dsa-wall-ink-dim': dim,
@@ -593,6 +607,10 @@ window.__ModuleLoader__.load({
         'dsa-wall-wall': rgba(g1Rgb(g1.final), wallAlpha),
         // 悬停/选中的高亮面：同样半透明，压在列底之上仍然透壁纸。
         'dsa-wall-hover': rgba(hover, 0.85),
+        // 文字后面的实底：只有"壁纸透得太狠、字真的会看不清"时才实起来，
+        // 其余时候跟着面板走（不能平白无故把气泡涂白）。
+        'dsa-wall-reading': rgba(reading, readingAlpha),
+        'dsa-wall-reading-alpha': String(Math.round(readingAlpha * 100) / 100),
         'dsa-wall-border': inkLight ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.12)',
         // 壁纸层自己的垫底色：画面没送到屏上时退化成这个颜色，而不是白闪。
         // 往地板色压六成；纯白壁纸再单独压暗一档 —— 混色的目标就是地板色本身，
@@ -1010,6 +1028,34 @@ window.__ModuleLoader__.load({
     const CATEGORY_ID = { mp4: 'MP4', wall: '图片', audio: '音频' }
 
     const STYLE = `
+/* ── 全局：壁纸开启时的"清晰区"（v1.26.8）──
+   主题令牌是**全局**的，一改，设置页也跟着变：下拉、按钮、输入框全变成玻璃色，
+   字也跟着翻面 —— 在设置页里调主题等于在看自己的倒影。
+
+   所以凡是我们自己画的界面，一律按**原生外观**上色：底色与字色都读插件自己的
+   --dsa-ui-* 变量（由壁纸层在开启时写入），而不是主题令牌。这些规则只落在
+   [data-dsa-ui] 作用域里，绝不外溢到宿主界面。 */
+.dsa-set-wrap {
+  color: var(--dsa-ui-ink, var(--dsw-alias-label-primary));
+  --dsa-ui-bg: var(--dsa-ui-bg-base, var(--dsw-alias-bg-base));
+  --dsa-ui-layer: var(--dsa-ui-bg-layer, var(--dsw-alias-bg-layer-1));
+  --dsa-ui-line: var(--dsa-ui-border, var(--dsw-alias-border-l1));
+  --dsa-ui-ink-2: var(--dsa-ui-ink-dim, var(--dsw-alias-label-secondary));
+  --dsa-ui-ink-3: var(--dsa-ui-ink-faint, var(--dsw-alias-label-tertiary));
+}[data-dsa-ui] .dsa-set-title, [data-dsa-ui] .dsa-set-label { color: var(--dsa-ui-ink); }
+[data-dsa-ui] .dsa-set-ver, [data-dsa-ui] .dsa-set-note { color: var(--dsa-ui-ink-3); }
+[data-dsa-ui] .dsa-set-desc { color: var(--dsa-ui-ink-2); }
+[data-dsa-ui] .dsa-set-tabs { background: var(--dsa-ui-layer); border-color: var(--dsa-ui-line); }
+[data-dsa-ui] .dsa-set-tab { color: var(--dsa-ui-ink-2); }
+[data-dsa-ui] .dsa-set-tab:hover, [data-dsa-ui] .dsa-set-tab[aria-selected="true"] { color: var(--dsa-ui-ink); }
+[data-dsa-ui] .dsa-set-tab[aria-selected="true"] { background: var(--dsa-ui-bg); }
+[data-dsa-ui] .dsa-set-row, [data-dsa-ui] .dsa-set-stack, [data-dsa-ui] .dsa-set-self { border-color: var(--dsa-ui-line); }
+[data-dsa-ui] .dsa-set-btn { color: var(--dsa-ui-ink); background: var(--dsa-ui-layer); border-color: var(--dsa-ui-line); }
+[data-dsa-ui] .dsa-set-btn:hover { background: var(--dsa-ui-bg); }
+[data-dsa-ui] .dsa-set-knob { background: var(--dsa-ui-bg); }
+/* 纵向滚动条会跟着主题变亮/变暗 —— 壁纸主题下它是一根浅色小棍，很扎眼。 */
+.dsa-set-wrap ::-webkit-scrollbar-thumb { background: var(--dsa-ui-line); }
+
 .dsa-set-wrap { display: flex; flex-direction: column; gap: 4px; }
 .dsa-set-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 2px; }
 .dsa-set-title { font-size: 15px; font-weight: 600; color: var(--dsw-alias-label-primary); margin: 0; }
@@ -2513,8 +2559,44 @@ window.__ModuleLoader__.load({
       /** 我们写进那条样式表的内容 —— 和上一份一样就整段跳过，这是拖滑杆不卡的关键。 */
       let lastCss = ''
 
+      /**
+       * 抄一份**原生外观**：内核写在 body 内联样式上的那批令牌，此刻还是原值。
+       *
+       * 为什么需要：主题令牌是全局的，壁纸一开，设置页也跟着变成半透明玻璃色 ——
+       * 用户在设置页里调主题，看到的却是调暗之后的自己。插件自己的界面必须按原生
+       * 外观画，否则越调越看不清。这份快照写进 `--dsa-native-*`，只被
+       * `[data-dsa-ui]` 作用域消费，绝不外溢到宿主界面。
+       */
+      const snapshotNative = () => {
+        try {
+          const read = (name, fallback) => {
+            const value = getComputedStyle(document.body).getPropertyValue(name).trim()
+            return value === '' ? fallback : value
+          }
+          const map = {
+            '--dsa-native-bg': read('--dsw-alias-bg-base', '#ffffff'),
+            '--dsa-native-layer': read('--dsw-alias-bg-layer-1', '#f2f4f7'),
+            '--dsa-native-border': read('--dsw-alias-border-l1', 'rgba(0, 0, 0, 0.12)'),
+            '--dsa-native-ink': read('--dsw-alias-label-primary', '#0f1115'),
+            '--dsa-native-ink-dim': read('--dsw-alias-label-secondary', '#5b616b'),
+            '--dsa-native-ink-faint': read('--dsw-alias-label-tertiary', '#8b919b'),
+          }
+          for (const [name, value] of Object.entries(map)) {
+            document.documentElement.style.setProperty(name, value)
+          }
+          wallLog('原生外观快照', map)
+        } catch (error) {
+          // 读不到就退回 CSS 里的兜底色，设置页仍是实底，不会跟着壁纸翻面。
+          wallLog('原生外观快照失败', error)
+        }
+      }
+
       const ensureStyle = () => {
         if (base !== null) return
+        // 先把"原生外观"抄一份存起来。必须在**第一次写让位令牌之前**做，而且整个页面
+        // 生命周期只做一次：那时读到的就是内核真正的不透明底色。
+        // 设置页要按原生外观上色（见 paintCss 里的 --dsa-ui-*），靠的就是这份快照。
+        snapshotNative()
         base = document.createElement('div')
         base.className = 'dsa-wall'
         base.setAttribute('aria-hidden', 'true')
@@ -2609,6 +2691,18 @@ window.__ModuleLoader__.load({
           Object.entries(vars)
             .map(([name, value]) => `${name}:${value} !important;`)
             .join(''),
+          // 插件自己的界面（设置页）按**原生外观**上色：主题令牌是全局的，一改，设置页
+          // 也跟着变成玻璃色、字跟着翻面 —— 在设置页里调主题等于在看自己的倒影。
+          // 这几个变量只被 [data-dsa-ui] 作用域消费，不会外溢到宿主界面。
+          //
+          // 原生底色直接读内核写的不透明值（`--dsa-native-*`，由 client.js 启动时写入），
+          // 所以哪怕主题令牌已经被我们顶成半透明，设置页里仍是干干净净的实底。
+          `--dsa-ui-bg-base:var(--dsa-native-bg, #ffffff) !important;`,
+          `--dsa-ui-bg-layer:var(--dsa-native-layer, #f2f4f7) !important;`,
+          `--dsa-ui-border:var(--dsa-native-border, rgba(0, 0, 0, 0.12)) !important;`,
+          `--dsa-ui-ink:var(--dsa-native-ink, #0f1115) !important;`,
+          `--dsa-ui-ink-dim:var(--dsa-native-ink-dim, #5b616b) !important;`,
+          `--dsa-ui-ink-faint:var(--dsa-native-ink-faint, #8b919b) !important;`,
           '}',
         ].join('')
         if (css === lastCss) return
@@ -4510,7 +4604,7 @@ window.__ModuleLoader__.load({
 
         return h(
           'div',
-          { className: 'dsa-set-wrap', 'data-busy': busy ? '1' : '0' },
+          { className: 'dsa-set-wrap', 'data-dsa-ui': '1', 'data-busy': busy ? '1' : '0' },
           h('style', null, STYLE),
           // ── 标题栏：标题 + 版本小字 + 立即刷新（页面重载 → 运行时读到实时配置）──
           h(
