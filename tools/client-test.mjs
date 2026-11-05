@@ -1550,9 +1550,11 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   const tree = await openThemeTab(render)
   const before = calls.filter((call) => call.type === 'style')
   const beforeCss = before.length > 0 ? before[before.length - 1].el.textContent : ''
-  // 起始是「可读优先」：浮层只叠一层固定的小模糊（8px），不做景深分层了 ——
-  // 在列上叠大半径 backdrop-filter 会把列自己的底色糊成一团，界面反而更看不见。
-  assert.ok(beforeCss.includes('backdrop-filter:blur(4px)'), `浮层模糊不对：${beforeCss.slice(0, 160)}`)
+  // 任何面板上都不许再叠背后模糊：它会糊掉列里自己的正文 —— 这正是
+  // "设置页的字清楚、对话窗口整个是模糊的"那个 bug 的根。
+  assert.ok(!/backdrop-filter:\s*blur/.test(beforeCss), `样式表里又出现了背后模糊：${beforeCss.slice(0, 200)}`)
+  // 但壁纸层自己该糊：磨砂感只能落在壁纸层上，才不影响字。
+  assert.ok(beforeCss.includes('filter:blur(24px)'), `壁纸层没吃到预设的磨砂半径：${beforeCss.slice(0, 200)}`)
   const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
   assert.ok(matte, '找不到「重磨砂」预设')
   matte.props.onClick()

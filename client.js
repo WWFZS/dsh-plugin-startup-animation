@@ -2537,15 +2537,10 @@ window.__ModuleLoader__.load({
           `html{background-color:${tokens['dsa-wall-underlay']} !important;}`,
           'html,body{background-image:none !important;}',
           `body{background:transparent !important;}`,
-          // 玻璃：只给浮层留一点点"磨砂"的触感。
-          //
-          // 半径固定 4px、只挂 shell.overlay 这一个锚点。**不能**在每一列上叠
-          // 不同半径的 backdrop-filter —— DSH 的每一列本身就有底色
-          // （`--dsw-specific-sidebar-fill` / `--dsw-alias-bg-base` / `--dsw-alias-bg-layer-*`），
-          // 在列上再叠，透上来的不是壁纸而是列自己的底色被糊成一团，界面彻底看不见。
-          // 壁纸要透上来，唯一可靠的办法是让列的底色本身半透明 —— 也就是下面那组
-          // 令牌里的 wallAlpha（参考实现的玻璃令牌也是 `color-mix(..., transparent)`）。
-          `[data-shell-overlay]{backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);}`,
+          // 一条规则都不留 backdrop-filter：它糊的是元素背后的**所有内容，包括列里自己的
+          // 正文**。之前把它挂在 shell.overlay / 三列上，用户看到的就是"设置页的字清楚，
+          // 对话窗口整个是模糊的"。壁纸要透上来，只靠列的底色半透明（下面的 wallAlpha）；
+          // 想要"磨砂"的质感，让壁纸层自己去糊（`filter:blur()` 在壁纸层上，不影响字）。
           'body{',
           // 全部带 !important：内核把主题令牌以**内联样式**写在 body 上（ThemePresenter），
           // 普通作者声明必输给内联。这里只压 body 这一个元素上的同名变量，组件写在自己
