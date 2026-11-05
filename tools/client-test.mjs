@@ -1546,8 +1546,8 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   const tree = await openThemeTab(render)
   const before = calls.filter((call) => call.type === 'style')
   const beforeCss = before.length > 0 ? before[before.length - 1].el.textContent : ''
-  // 起始是「可读优先」：壁纸本体不糊（只在有玻璃面板时才 blur）。
-  assert.ok(beforeCss.includes('blur(0px)'), `起始预设（可读优先）应该是零模糊：${beforeCss.slice(0, 160)}`)
+  // 起始是「可读优先」（面板模糊 24px）：浮层那一档按 24×1.25=30px 排。
+  assert.ok(beforeCss.includes('blur(30px)'), `起始预设（可读优先）的浮层模糊不对：${beforeCss.slice(0, 160)}`)
   const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
   assert.ok(matte, '找不到「重磨砂」预设')
   matte.props.onClick()
@@ -1555,8 +1555,8 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   // 状态原样吐回来（它不模拟写盘），再等下去就等于断言"回包把画面盖回去"。
   const after = calls.filter((call) => call.type === 'style')
   const css = after[after.length - 1].el.textContent
-  // 重磨砂的核心观感是大模糊：36px 必须真的写进样式表，而不是只改了卡片。
-  assert.ok(css.includes('blur(36px)'), `点了「重磨砂」界面没重画：${css.slice(0, 160)}`)
+  // 重磨砂的核心观感是大模糊：36×1.25 = 45 撞到 40 的上限，所以浮层落在 40px。
+  assert.ok(css.includes('blur(40px)'), `点了「重磨砂」界面没重画：${css.slice(0, 160)}`)
   assert.notEqual(css, beforeCss, '样式表没变，说明只是换了卡片')
 })
 

@@ -423,39 +423,96 @@ window.__ModuleLoader__.load({
     /** 垫底色的"过亮夹子"：壁纸太亮时往这个暗色方向压，保证掉层时不会闪白。 */
     const UNDERLAY_CAP = Object.freeze({ r: 18, g: 20, b: 26 })
 
+    /**
+     * 面板背后那道**实景模糊**能给出的曝光。
+     *
+     * 玻璃面是不透明的（地板色 + 一点釉，见下），壁纸的颜色**只**通过面板后面的
+     * `backdrop-filter: blur()` 透上来。而模糊只是把壁纸糊匀，它**不会**把壁纸的曝光
+     * 带进面板：一块压暗到 `#1a1a1a` 的面板，底下是什么颜色的壁纸，看得见的部分都还是
+     * `#1a1a1a` 的调子。所以"壁纸透过面板能看见多少"由这个数决定 —— 它是模糊之后
+     * 面板色与真实壁纸色的混合比，与玻璃面的透明度是两件事。
+     *
+     * 0.55 是拿来对齐参考实现观感的：它的玻璃面是**半透明**的玻璃色，壁纸颜色本来就
+     * 透得很足；我们这边面板必须不透明（否则截屏/掉层时会穿帮成一片透明），就只能由
+     * 这一层补回同样的"壁纸感"。
+     */
+    const GLASS_SHOW_THROUGH = 0.55
+
     function deriveTokens(decision, preset = {}, opts = {}) {
       const dark = opts.dark === true
+      // 玻璃配方只出现在预设里（七套各自一套釉色）。预设没给釉色时不能拿**壁纸的画面色**
+      // 顶替 —— 那是壁纸的主色，压成不透明面板会变成一整块纯色块（深色壁纸 ⇒ 全黑界面）。
+      // 这种情形退回"当前主题的原生釉"：浅色白釉、深色近黑釉。
+      const nativeTint = dark ? FLOOR_BASE.dark : FLOOR_BASE.light
       // 地板色永远站在字色那一侧：深色主题压近黑、浅色主题压白。
       // 这条与"墨色"（字是亮还是暗）是两件事 —— 地板保的是"面板底足够实"，
       // 墨色保的是"字在面板上够亮"。两者混用会在金色壁纸上翻车。
       const floorRgb = parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light)
       const floor = dark ? READABILITY_FLOOR_DARK : READABILITY_FLOOR
-      const tintRgb = parseHex(preset.glassTint) ?? parseHex(decision.tint) ?? { r: 255, g: 255, b: 255 }
+      const tintRgb = parseHex(preset.glassTint) ?? parseHex(nativeTint) ?? { r: 255, g: 255, b: 255 }
+      // 玻璃色必须**先钳到可读**再下锅：`glassTint` 可能是直接传进来的裸配方（单测、外部
+      // 调用都不走 PRESETS），不能指望它是出厂的七种之一。#00c800 这种本身就是 2.27:1 的
+      // 釉色如果原样掺进去，任何 alpha 都救不回来。
+      const safeTintRgb = clampSurfaceColor(tintRgb, dark, decision.tint)
       const glassAlpha = clampRange(Number.isFinite(preset.glassAlpha) ? preset.glassAlpha : 0.4, SCREEN_LIMITS.glass)
       const surfaceBlur = Math.round(clampRange(Number.isFinite(preset.surfaceBlur) ? preset.surfaceBlur : 20, SCREEN_LIMITS.surfaceBlur))
       const accent = preset.accent ?? '#4f8cff'
-      // 三级玻璃：层 2 / 层 3 在层 1 之上再抬亮一档，抬亮的方式是**多掺一点玻璃色**，
-      // 不是硬加不透明度 —— 这样"面上的面"有层次，而不是一块实色盖住。
-      const g1 = glassMix(floorRgb, floor, tintRgb, glassAlpha)
-      const g2 = glassMix(floorRgb, floor, tintRgb, Math.min(1, glassAlpha * 1.12))
-      const g3 = glassMix(floorRgb, floor, tintRgb, Math.min(1, glassAlpha * 1.28))
-      // 字色：地板决定了面板底的亮度，字必须站到它的**对面**。
-      // 这一条比 decideTheme 的墨色更硬：墨色管的是壁纸，这里管的是面板。
-      // 两者打架时以面板为准 —— 字压在面板上，不是压在壁纸上。
-      const inkLight = g1.lum < 0.35
+      // 地板色 = 预设的玻璃色经亮度钳制：色相听预设的（七套各有自己的调子），亮度必须
+      // 过 4.6:1 那条线。直接拿玻璃色当釉去混白/黑地板是不行的 —— 两者都往中间走，
+      // 深色主题下白色釉在 0.59 的地板上只剩 `#333539`，比宿主原生底色还亮，
+      // 七套预设于是糊成同一片灰，这就是"参数全拉低也看不见"。
+      //
+      // 最透那一档（玻璃厚度滑杆拉到 0）用的釉色比例极小，只要地板本身够深就守得住；
+      // 层 2/3 掺的釉更多，所以它们各自再钳一次 —— 但**幅度要小**：钳得太狠，
+      // 深色主题下三层会被压成同一个近黑色，"面上的面"就没有层次了。
+      const baseRgb = clampSurfaceColor(safeTintRgb, dark, decision.tint)
+      const alpha1 = glassAlpha
+      const alpha2 = Math.min(1, glassAlpha * 1.35 + 0.04)
+      const alpha3 = Math.min(1, glassAlpha * 1.7 + 0.08)
+      const g1 = glassMix(baseRgb, safeTintRgb, alpha1)
+      // 三级玻璃：层 2 / 层 3 是浮在层 1 之上的浮层（菜单、弹窗、选中态）。
+      //
+      // 它们的差别**不是颜色**，而是背后模糊的**清晰度**：浮层越靠前，透过它的壁纸
+      // 越糊、越看不清 —— 这正是真实玻璃桌面的观感来源（参考实现里每层一个权重，
+      // 我们换成一个更容易理解的量：模糊半径）。
+      //
+      // 为什么不靠改颜色来分层：面板底色的亮度被可读性下限锁死了（钳制之后亮釉基本都
+      // 顶到纯白、暗釉顶到近黑），再想拉开就只能往中间灰走 —— 而中间灰上白字黑字都
+      // 只有 4:1 左右，等于拿"看得清"去换"有层次"。这笔账不划算。
+      const layerBlur = (base, factor) => {
+        const value = Math.round(clampRange(base * factor, SCREEN_LIMITS.surfaceBlur))
+        return `${value}px`
+      }
+      // 字色：按**实际对比度**验出来（谁清楚用谁），不是按面板亮度猜。
+      // 面板只有一层，所以字色只需要对这一次负责；浮层的区别落在模糊半径上。
+      //
+      // 有一条护栏：`#ffffff` 面板上"白字"和"黑字"的对比度是 1.00 对 18.88，比较本身不会错；
+      // 但灰面板（比如 #808080）上两者可能只差 0.01，此时按亮度兜底，避免因为取整抖动
+      // 把字色和面刷成同一个颜色。
+      const whiteOnGlass = contrastRatio(parseHex(INK.light), parseHex(g1.final))
+      const darkOnGlass = contrastRatio(parseHex(INK.dark), parseHex(g1.final))
+      const inkLight = darkOnGlass > whiteOnGlass ? false : whiteOnGlass > darkOnGlass ? true : g1.lum < 0.18
       const ink = inkLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(14, 16, 22, 0.95)'
       const dim = inkLight ? 'rgba(255, 255, 255, 0.76)' : 'rgba(14, 16, 22, 0.70)'
       const faint = inkLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(14, 16, 22, 0.54)'
+      // 面板背后要糊成什么样：把**真实壁纸色**按 GLASS_SHOW_THROUGH 掺进玻璃面 ——
+      // 这就是面板后面看到的那层"壁纸雾"，也是七套预设肉眼能分开的最后一把力。
+      const frost = mixRgb(g1Rgb(g1.final), parseHex(decision.tint) ?? g1Rgb(g1.final), GLASS_SHOW_THROUGH)
       return {
         'dsa-wall-ink': ink,
         'dsa-wall-ink-dim': dim,
         'dsa-wall-ink-faint': faint,
         'dsa-wall-scrim': String(decision.scrim),
         'dsa-wall-glass-1': g1.final,
-        'dsa-wall-glass-2': g2.final,
-        'dsa-wall-glass-3': g3.final,
-        'dsa-wall-glass-solid': toHex(mixRgb(g1Rgb(g1.final), floorRgb, floor * 0.5)),
+        'dsa-wall-glass-2': g1.final,
+        'dsa-wall-glass-3': g1.final,
+        'dsa-wall-glass-solid': toHex(mixRgb(g1Rgb(g1.final), parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light) ?? g1Rgb(g1.final), floor * 0.5)),
+        'dsa-wall-frost': toHex(frost),
         'dsa-wall-surface-blur': `${surfaceBlur}px`,
+        // 浮层的模糊：层越高，透过它看到的壁纸越糊 —— 这才是"浮起来的"观感。
+        'dsa-wall-blur-1': `${surfaceBlur}px`,
+        'dsa-wall-blur-2': layerBlur(surfaceBlur, 1.25),
+        'dsa-wall-blur-3': layerBlur(surfaceBlur, 1.5),
         'dsa-wall-accent': accent,
         'dsa-wall-border': inkLight ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.12)',
         // 壁纸层自己的垫底色：画面没送到屏上时退化成这个颜色，而不是白闪。
@@ -468,7 +525,7 @@ window.__ModuleLoader__.load({
             0.6,
           ),
         ),
-        // 对比度实报（字 vs 玻璃面）：预设卡和滑杆提示都读它。
+        // 对比度实报（字 vs 面板）：预设卡和滑杆提示都读它。
         'dsa-wall-contrast': String(Math.round(contrastRatio(parseHex(inkLight ? INK.light : INK.dark), parseHex(g1.final)) * 100) / 100),
       }
     }
@@ -479,23 +536,93 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 生成一条玻璃色：地板色 @floor 压在玻璃色之上。
+     * 生成一条玻璃色：**钳制过亮度的地板色**打底，再掺一点预设自己的釉色。
      *
-     * 两步都是纯算术（不依赖浏览器的 color-mix），所以 node 里能直接单测出最终对比度：
+     * 三步纯算术（不依赖浏览器的 color-mix），所以 node 里能直接单测出最终对比度：
      *
-     *   1. 玻璃色按 alpha 掺进地板色   → 面板的"釉"
-     *   2. 结果再被地板色抬到 floor   → 可读性下限，权重不归任何滑杆管
+     *   1. 地板色 = 玻璃色经亮度钳制（`clampSurfaceColor`）→ 色相听预设，亮度过 4.6:1
+     *   2. 釉色按 alpha 掺进地板色              → 面板的"釉"，七套预设在这一步分开
+     *   3. 字色取步骤 2 的亮度                 → 深釉配白字、亮釉配黑字
      *
-     * @param {{ r: number, g: number, b: number }} floorRgb
-     * @param {number} floor 0–1
-     * @param {{ r: number, g: number, b: number }} tintRgb
-     * @param {number} alpha 玻璃自身的覆盖权重
+     * 可读性下限由**步骤 1** 兑现：地板色本身就已经过线，釉色不管怎么掺，字色
+     * 都会跟着面板亮度翻到对面，所以"玻璃厚度拉到 0 也看不清"这种事不会发生。
+     *
+     * @param {{ r: number, g: number, b: number }} baseRgb 已钳制的地板色
+     * @param {{ r: number, g: number, b: number }} tintRgb 预设的釉色
+     * @param {number} alpha 釉色权重
      * @returns {{ final: string, lum: number }} 最终色 + 它的相对亮度（供渲染层判断要不要翻字色）。
      */
-    function glassMix(floorRgb, floor, tintRgb, alpha) {
-      const base = mixRgb(floorRgb, tintRgb, alpha)
-      const final = mixRgb(base, floorRgb, floor)
+    function glassMix(baseRgb, tintRgb, alpha) {
+      const final = mixRgb(baseRgb, tintRgb, alpha)
       return { final: toHex(final), lum: relativeLuminance(final) }
+    }
+
+    /**
+     * 把预设的釉色钳到"在当前主题下当面板底还看得清字"的亮度上。
+     *
+     * 判据是**界面真实合成**：面板背后是壁纸（已被 scrim / 地板压过），玻璃厚度拉到 0
+     * 那档仍会透出一点点壁纸色，所以判的是 `面板 (1−s) + 壁纸 s` 的亮度，然后再看
+     * 白字与黑字里哪个能到 4.6:1（比 4.5 多留 0.1 给 hex 量化）。
+     *
+     * - 深色主题：太亮的釉会被往黑压（`#ffffff → #3d3e3e`）；
+     * - 浅色主题：太暗的釉会被往白提（`#0d1524 → #d0d2d5`）。
+     *
+     * 保住色相的**方向**：七套预设仍是七种调子，只是亮度过线，不会糊成一片灰。
+     * 参考实现把这一项叫 `weClampSurfaceColor`，判的是同一条网格（正文 vs 面板合成到
+     * 最坏背衬 ≥4.5:1，最透档 alpha 取 0.10）。
+     *
+     * @param {{ r: number, g: number, b: number }} rgb 预设的玻璃色
+     * @param {boolean} dark 当前是不是深色主题
+     * @param {string} [backdropHex] 壁纸色（不传就用地板色）
+     * @param {number} [alpha] 这一层要掺多少釉（层 2/3 掺得更多，判据得跟着它走）
+     * @returns {{ r: number, g: number, b: number }}
+     */
+    function clampSurfaceColor(rgb, dark, backdropHex, alpha = 0) {
+      const backdrop = parseHex(backdropHex ?? '') ?? parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light) ?? { r: 0, g: 0, b: 0 }
+      // 最透那一档：玻璃厚度 0 时面板与壁纸的混合比（地板仍是硬的，权重不归滑杆管）。
+      const showThrough = 0.08
+      // 判据是**掺完这层釉之后**的合成亮度：
+      //   · 主题定方向（深色用白字、浅色用黑字）先判；
+      //   · 到不了 4.6:1 才允许翻面（深色主题的亮釉面板配深字）。翻面的代价是那层
+      //     上面要换一套字色，所以它被限制在原文就在 0.15–0.85 之间的"中间调"上 ——
+      //     纯黑/纯白这类极端色不翻，否则深色主题会被白釉整片刷成白色界面。
+      const composedOf = (color) => relativeLuminance(mixRgb(mixRgb(color, rgb, alpha), backdrop, showThrough))
+      const contrastPair = (lum) => ({ white: 1.05 / (lum + 0.05), black: (lum + 0.05) / 0.05 })
+      const passes = (color) => {
+        const { white, black } = contrastPair(composedOf(color))
+        if ((dark ? white : black) >= 4.6) return true
+        const lum = relativeLuminance(color)
+        const flippable = lum > 0.15 && lum < 0.9
+        return flippable && (dark ? black : white) >= 4.6
+      }
+      // 原色合格就原样用；不合格才沿"往纯黑/纯白"的轴找第一个合格点。
+      const target = dark ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 }
+      const blend = (t) => mixRgb(rgb, target, t)
+      // 原色合格就直接用（保住色相）。注意这里**不能只信 passes**：
+      // 判据允许"亮面配深字"的翻面，而字色是三层联合决定的，单层合格不代表整块面板
+      // 都能用同一套字色。所以直接沿轴扫，接受"可读且字色固定"的第一点。
+      // alpha≈0 时釉色几乎不参与合成，面板颜色就等于这个返回值本身 —— 于是要求
+      // **面板自己**也过线，否则"墙一样厚的玻璃拖到 0"就会露出 4:1 的灰面。
+      const passesSelf = (color) => {
+        const lum = relativeLuminance(color)
+        return Math.max(1.05 / (lum + 0.05), (lum + 0.05) / 0.05) >= 4.6
+      }
+      for (let i = 0; i <= 100; i += 1) {
+        const t = i / 100
+        const candidate = blend(t)
+        if (!passes(candidate)) continue
+        // 只收"面板本身对比度也够"的点。阈值 4.8 比 4.5 留余量：玻璃厚度拉到 0 时面板
+        // 颜色就等于这儿返回的值，擦线的点遇上一轮 hex 取整就会掉回线下。
+        const lum = relativeLuminance(candidate)
+        if (Math.max(1.05 / (lum + 0.05), (lum + 0.05) / 0.05) >= 4.8) return byte3(candidate)
+      }
+      // 主题那一侧怎么都到不了：退到最极端的那头，由调用方按实际亮度重定字色。
+      return byte3(blend(1))
+    }
+
+    /** 三个通道各自取整到 0–255。 */
+    function byte3(rgb) {
+      return { r: byte(rgb.r), g: byte(rgb.g), b: byte(rgb.b) }
     }
 
     /** 在 bg 上按 alpha 叠一层 fg。 */
@@ -2371,8 +2498,15 @@ window.__ModuleLoader__.load({
           // 有自己的类名但都挂在正文里，靠属性锚定不到的，交给下面那组通用选择器）。
           //
           // 不用 CSS module 哈希（会随内核版本变）。
-          `[data-shell-overlay],[data-shell-bottom]{backdrop-filter:blur(${tokens['dsa-wall-surface-blur']}) saturate(1.15);`,
-          `-webkit-backdrop-filter:blur(${tokens['dsa-wall-surface-blur']}) saturate(1.15);}`,
+          // 浮层比底层面更糊：`data-shell-overlay` 是"所有浮层所在的那一层"，
+          // `data-shell-bottom` 是底栏。层越高透上来的壁纸越糊，界面才有"浮起来"的
+          // 前后关系 —— 颜色已经分不开了（面板亮度被可读性下限锁死），差别只能落在景深上。
+          `[data-shell-overlay]{backdrop-filter:blur(${tokens['dsa-wall-blur-3']}) saturate(1.15);`,
+          `-webkit-backdrop-filter:blur(${tokens['dsa-wall-blur-3']}) saturate(1.15);}`,
+          // 设置弹窗与菜单这类"面上的面"再叠一层：它们通常直接挂在 body 下、
+          // 靠 mask/backdrop 自己铺满整屏，透明度落在自己的容器上而不是 overlay 层。
+          `[role="dialog"],[role="menu"],[data-radix-popper-content-wrapper] > *{backdrop-filter:blur(${tokens['dsa-wall-blur-2']}) saturate(1.15);`,
+          `-webkit-backdrop-filter:blur(${tokens['dsa-wall-blur-2']}) saturate(1.15);}`,
           'body{',
           // 全部带 !important：内核把主题令牌以**内联样式**写在 body 上（ThemePresenter），
           // 普通作者声明必输给内联。这里只压 body 这一个元素上的同名变量，组件写在自己
@@ -2413,10 +2547,14 @@ window.__ModuleLoader__.load({
         '--dsw-alias-bg-base': 'transparent',
         '--dsw-specific-sidebar-fill': 'transparent',
         // 面上的面：三级玻璃。层 1 是大面板（卡片、行、列表），层 2/3 是浮在它上面的
-        // 菜单、弹层、选中态 —— 一层比一层亮，于是"浮起来"这件事有视觉依据。
+        // 菜单、弹层、选中态。三层的**颜色**是同一个（面板亮度被可读性下限锁死，
+        // 想再拉开就只能往中间灰走，那会拿"看得清"换"有层次"）；层次交给上面的
+        // backdrop-filter：层越高，透过它看到的壁纸越糊。
         '--dsw-alias-bg-layer-1': tokens['dsa-wall-glass-1'],
         '--dsw-alias-bg-layer-2': tokens['dsa-wall-glass-2'],
         '--dsw-alias-bg-layer-3': tokens['dsa-wall-glass-3'],
+        // 面板背后那层"壁纸雾"：玻璃面本身偏纯色，靠它把画面的温度带回来。
+        '--dsw-alias-bg-conversation': tokens['dsa-wall-frost'],
         '--dsw-alias-bg-overlay': tokens['dsa-wall-glass-2'],
         '--dsw-alias-bg-module-platform': tokens['dsa-wall-glass-2'],
         '--dsw-alias-bg-multi-select': tokens['dsa-wall-glass-2'],
