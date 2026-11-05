@@ -523,13 +523,24 @@ window.__ModuleLoader__.load({
       const SHELL_MIN = 0.55
       const SHELL_MAX = 0.9
       const shellTarget = SHELL_MIN + clampRange(glassAlpha, [0, 1]) * (SHELL_MAX - SHELL_MIN)
-      const wallAlpha = Math.max(shellTarget, solveWallAlpha(parseHex(g1.final) ?? wallWorst, glassInk, wallWorst))
+      // 悬停/选中的高亮面：不参与可读性主线，但也不能是"纯白或纯黑"跳变 —— 壁纸越亮，
+      // 高亮就该越淡，否则白面板上的白色悬停块会直接吞掉壁纸。
+      const wallLum = relativeLuminance(parseHex(decision.tint) ?? g1Rgb(g1.final))
+      const hoverAlpha = clampRange(0.1 - wallLum * 0.08, [0.02, 0.1])
+      const hover = mixRgb(g1Rgb(g1.final), parseHex(decision.tint) ?? g1Rgb(g1.final), hoverAlpha)
+      const wallAlpha = Math.max(
+        shellTarget,
+        solveWallAlpha(parseHex(g1.final) ?? wallWorst, glassInk, wallWorst),
+      )
       const ink = inkLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(14, 16, 22, 0.95)'
       const dim = inkLight ? 'rgba(255, 255, 255, 0.76)' : 'rgba(14, 16, 22, 0.70)'
       const faint = inkLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(14, 16, 22, 0.54)'
-      // 面板背后要糊成什么样：把**真实壁纸色**按 GLASS_SHOW_THROUGH 掺进玻璃面 ——
+      // 面板背后要糊成什么样：把**真实壁纸色**按透底量掺进玻璃面 ——
       // 这就是面板后面看到的那层"壁纸雾"，也是七套预设肉眼能分开的最后一把力。
-      const frost = mixRgb(g1Rgb(g1.final), parseHex(decision.tint) ?? g1Rgb(g1.final), GLASS_SHOW_THROUGH)
+      //
+      // 透底量跟着**列底实际留了多少空**走：列底 alpha=1（安全值推满）时壁纸本来就看不见，
+      // 再把雾掺进去只是让颜色偏脏；列底很透时（玻璃厚度 0）壁纸才是画面主角。
+      const frost = mixRgb(g1Rgb(g1.final), parseHex(decision.tint) ?? g1Rgb(g1.final), clampRange(1 - wallAlpha, [0, GLASS_SHOW_THROUGH]))
       return {
         'dsa-wall-ink': ink,
         'dsa-wall-ink-dim': dim,
@@ -550,6 +561,8 @@ window.__ModuleLoader__.load({
         // 玻璃厚度决定"面板藏住多少壁纸"，安全性决定"最少要藏多少"，取严的那个。
         'dsa-wall-wall-alpha': String(Math.round(wallAlpha * 100) / 100),
         'dsa-wall-wall': rgba(g1Rgb(g1.final), wallAlpha),
+        // 悬停/选中的高亮面：同样半透明，压在列底之上仍然透壁纸。
+        'dsa-wall-hover': rgba(hover, 0.85),
         'dsa-wall-border': inkLight ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.12)',
         // 壁纸层自己的垫底色：画面没送到屏上时退化成这个颜色，而不是白闪。
         // 往地板色压六成；纯白壁纸再单独压暗一档 —— 混色的目标就是地板色本身，
@@ -581,6 +594,7 @@ window.__ModuleLoader__.load({
      * @param {{ r: number, g: number, b: number }} glass 玻璃色（面板色）
      * @param {{ r: number, g: number, b: number }} ink 字色
      * @param {{ r: number, g: number, b: number }} worst 最坏壁纸色
+     * @param {{ tintHex?: string, hoverHex?: string }} [opts] 真实壁纸色与悬停面（核对"实际画面"那一档）
      * @returns {number} 0.35–1 之间的不透明度
      */
     function solveWallAlpha(glass, ink, worst) {
@@ -640,16 +654,17 @@ window.__ModuleLoader__.load({
      * @param {number} [alpha] 这一层要掺多少釉（层 2/3 掺得更多，判据得跟着它走）
      * @returns {{ r: number, g: number, b: number }}
      */
-    function clampSurfaceColor(rgb, dark, backdropHex, alpha = 0) {
+    function clampSurfaceColor(rgb, dark, backdropHex, alpha = 0, showThrough = 0.08) {
       const backdrop = parseHex(backdropHex ?? '') ?? parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light) ?? { r: 0, g: 0, b: 0 }
-      // 最透那一档：玻璃厚度 0 时面板与壁纸的混合比（地板仍是硬的，权重不归滑杆管）。
-      const showThrough = 0.08
+      // 最透那一档：玻璃厚度 0 时面板与壁纸的混合比。壁纸越亮，透底越强，面板色就越要让位
+      // —— 由调用方按壁纸亮度传进来（列上真要透多少看 SHELL 那一档，这里是判据用的）。
+      const leak = showThrough
       // 判据是**掺完这层釉之后**的合成亮度：
       //   · 主题定方向（深色用白字、浅色用黑字）先判；
       //   · 到不了 4.6:1 才允许翻面（深色主题的亮釉面板配深字）。翻面的代价是那层
       //     上面要换一套字色，所以它被限制在原文就在 0.15–0.85 之间的"中间调"上 ——
       //     纯黑/纯白这类极端色不翻，否则深色主题会被白釉整片刷成白色界面。
-      const composedOf = (color) => relativeLuminance(mixRgb(mixRgb(color, rgb, alpha), backdrop, showThrough))
+      const composedOf = (color) => relativeLuminance(mixRgb(mixRgb(color, rgb, alpha), backdrop, leak))
       const contrastPair = (lum) => ({ white: 1.05 / (lum + 0.05), black: (lum + 0.05) / 0.05 })
       const passes = (color) => {
         const { white, black } = contrastPair(composedOf(color))
@@ -2534,11 +2549,14 @@ window.__ModuleLoader__.load({
         const css = [
           // 层叠：负 z-index 是唯一"垫在所有列之下、又不脱离 body 定位"的位置。
           // 它画在画布背景之上、正常流内容之下 —— 正好是壁纸该待的地方。
-          '.dsa-wall{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;background:#000;',
-          // 壁纸层自己的模糊走「最磨砂的那个"沙"档」：三列上不能再叠 backdrop-filter
-          // （会把列自己的底色糊成一团），所以整套观感的"磨砂感"只能在这里体现。
-          // 用 surfaceBlur 而不是壁纸模糊（blur）—— 后者是用户想调"壁纸本身多虚"的旋钮。
-          `filter:blur(${resolved.surfaceBlur}px) saturate(${resolved.saturate});transform:scale(${resolved.surfaceBlur > 0 ? 1.06 : 1});}`,
+          // 壁纸层自己的背景色用**垫底色**，不是纯黑：画面还没解码出来、或者视频卡住时，
+          // 露出来的应该是"有点像壁纸的颜色"，而不是一块黑 —— 黑底会把整个界面压暗，
+          // 用户看到的就是"壁纸没显示、界面也变得很闷"。
+          `.dsa-wall{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;background:${tokens['dsa-wall-underlay']};`,
+          // 磨砂只跟**壁纸模糊**这根滑杆走：它是用户唯一能控制的"壁纸本体多虚"。
+          // 这里绝不能用 surfaceBlur —— 那是预设的"面板磨砂"档，之前用它做主模糊，
+          // 结果可读优先预设一上来就把壁纸糊掉 24px，用户看到的是"背景不显示"。
+          `filter:blur(${resolved.blur}px) saturate(${resolved.saturate});transform:scale(${resolved.blur > 0 ? 1.06 : 1});}`,
           '.dsa-wall-cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}',
           '.dsa-wall-scrim{position:absolute;inset:0;}',
           // 画布本身也放空。body 的底色就是 var(--dsw-alias-bg-base)，令牌顶掉之后它自己就透了，
@@ -2641,8 +2659,8 @@ window.__ModuleLoader__.load({
         // 菜单 / 输入区 / 悬浮层：自成一个面，同样必须跟着走。
         '--dsw-specific-menu': tokens['dsa-wall-glass-3'],
         '--dsw-specific-input-major': tokens['dsa-wall-glass-2'],
-        '--dsw-alias-interactive-bg-hover': tokens['dsa-wall-glass-2'],
-        '--dsw-alias-interactive-bg-hover-solid': tokens['dsa-wall-glass-3'],
+        '--dsw-alias-interactive-bg-hover': tokens['dsa-wall-hover'],
+        '--dsw-alias-interactive-bg-hover-solid': tokens['dsa-wall-hover'],
         // 强调色：按钮、链接、选中态。预设自带，换预设立刻换调子。
         '--dsw-alias-brand-primary': tokens['dsa-wall-accent'],
         '--dsw-alias-link': tokens['dsa-wall-accent'],

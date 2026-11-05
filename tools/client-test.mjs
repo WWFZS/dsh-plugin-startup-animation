@@ -1574,7 +1574,9 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   // "设置页的字清楚、对话窗口整个是模糊的"那个 bug 的根。
   assert.ok(!/backdrop-filter:\s*blur/.test(beforeCss), `样式表里又出现了背后模糊：${beforeCss.slice(0, 200)}`)
   // 但壁纸层自己该糊：磨砂感只能落在壁纸层上，才不影响字。
-  assert.ok(beforeCss.includes('filter:blur(24px)'), `壁纸层没吃到预设的磨砂半径：${beforeCss.slice(0, 200)}`)
+  // **只由「壁纸模糊」那根管**（`blur`），不再吃预设的 surfaceBlur —— 用后者当主模糊
+  // 会让「可读优先」一上手就把壁纸糊掉 24px，用户看到的就是"背景不显示"。
+  assert.ok(beforeCss.includes('filter:blur(0px)'), `壁纸层不该被预设糊掉：${beforeCss.slice(0, 200)}`)
   const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
   assert.ok(matte, '找不到「重磨砂」预设')
   matte.props.onClick()
@@ -1582,9 +1584,11 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   // 状态原样吐回来（它不模拟写盘），再等下去就等于断言"回包把画面盖回去"。
   const after = calls.filter((call) => call.type === 'style')
   const css = after[after.length - 1].el.textContent
-  // 「重磨砂」和「可读优先」在面板色上是同一块白（参考实现亦然），差别落在磨砂上：
-  // 壁纸层的模糊从 24px 变成 36px 就是这套预设的签名。
-  assert.ok(css.includes('filter:blur(36px)'), `点了「重磨砂」界面没重画：${css.slice(0, 200)}`)
+  // 换预设必须真的换掉观感：三列底色（面板色 + 不透明度）跟着预设走。
+  assert.ok(
+    /--dsw-alias-bg-base:rgba\([^)]*,\s*[\d.]+\) !important/.test(css),
+    `三列底色没跟着预设生成半透明面板：${css.slice(-320)}`,
+  )
   assert.notEqual(css, beforeCss, '样式表没变，说明只是换了卡片')
 })
 
