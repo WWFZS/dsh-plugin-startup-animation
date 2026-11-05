@@ -36,7 +36,7 @@ window.__ModuleLoader__.load({
 
 // >>> INLINE lib/wallpaper.mjs（由 tools/sync-wallpaper-inline.mjs 生成，勿手改）
     // 真源：lib/wallpaper.mjs（与宿主、单测共用同一份算法，改那边再跑同步脚本）。
-    // 导出（供 client-test 校验）：CONTRAST_BODY, CONTRAST_LARGE, CONTRAST_SURFACE, INK, PRESETS, DEFAULT_PRESET_ID, SCREEN_LIMITS, parseHex, toHex, rgba, relativeLuminance, contrastRatio, pickInk, solveScrim, analyzePixels, analyzeColors, resolvePreset, decideTheme, deriveTokens, layerStyle, sanitizeTweak
+    // 导出（供 client-test 校验）：CONTRAST_BODY, CONTRAST_LARGE, CONTRAST_SURFACE, INK, READABILITY_FLOOR, READABILITY_FLOOR_DARK, FLOOR_BASE, PRESETS, DEFAULT_PRESET_ID, SCREEN_LIMITS, parseHex, toHex, rgba, relativeLuminance, contrastRatio, pickInk, solveScrim, analyzePixels, analyzeColors, resolvePreset, decideTheme, deriveTokens, layerStyle, sanitizeTweak
     /**
      * 壁纸主题的**纯决策层**：给一个画面（图/视频帧/取色样本），算出"文字要怎么配色、
      * 壁纸上面那层幕要压多厚、面板要不要变实"，以及出厂预设表。
@@ -72,23 +72,50 @@ window.__ModuleLoader__.load({
     const INK = Object.freeze({ light: '#ffffff', dark: '#111111' })
 
     /**
-     * 出厂预设。`surface` 只描述"面板底"的策略，`text` 描述"字色"的策略：
+     * 玻璃面的**可读性下限**（这一套观感的命根子）。
      *
-     * - `auto`       跟着画面算（分析结果说了算）
-     * - `light`/`dark` 强制浅色字/深色字，不因为画面变亮变暗
-     * - `keep`       完全不碰字色，交给 DSH 自己的主题
+     * 面板不再是"不透明实色块"，而是「玻璃色 @ 透明度 + 背景模糊」——壁纸被模糊后透上来。
+     * 透明度一高，壁纸上最亮/最暗的那块像素就会顶穿文字。夹透明度救不了：
      *
-     * `scrim` 是**下限**：算出来需要更厚的幕时，取更厚的那个（下限只为观感服务，
-     * 上限为可读性服务 —— 两者不冲突）。
+     * - 深色主题下玻璃是**白色釉面**，叠在最亮的壁纸像素上，无论多小的 alpha 都会合成到白，
+     *   白字恒为 1.00:1；
+     * - 浅色主题下夹 alpha 得夹到 0.44，高于滑杆能到的任何值，滑杆会被压死。
+     *
+     * 所以下限是**另外压一层固定的主题底色**，权重不归任何滑杆管：
+     *
+     *     有效覆盖 = floor + a×(1−floor) ≥ floor
+     *
+     * 数值来自实测网格（玻璃透明度 {0,15,30,45,60} × 主题 × 背景），取最坏底色算到 ≥4.5:1：
+     * 浅色侧精确解 0.44194 → 0.45，深色侧 0.58136 → 0.59。
+     * 这两条与参考实现（dsh-wallpaper-engine）的 READABILITY_FLOOR 同源。
+     */
+    const READABILITY_FLOOR = 0.45
+    const READABILITY_FLOOR_DARK = 0.59
+
+    /** 玻璃层之上那层"地板"的色：浅色主题压白、深色主题压黑 —— 永远站在字色那一侧。 */
+    const FLOOR_BASE = Object.freeze({ light: '#ffffff', dark: '#0b0d12' })
+
+    /**
+     * 出厂预设。除了幕（`scrim`）、壁纸模糊（`blur`）、色彩浓度（`saturate`），
+     * 每个预设还带一套**玻璃配方**，这正是"七套预设看起来完全不一样"的来源：
+     *
+     * - `glassTint`   玻璃面的色（面板/卡片/菜单/气泡都染它）
+     * - `glassAlpha`  玻璃面的不透明度 0–1
+     * - `surfaceBlur` 面板背后那层的模糊半径（px）—— 越大越像磨砂玻璃
+     * - `text`        字色策略：`auto` 跟着画面算 / `light`/`dark` 强制 / `keep` 不碰
+     * - `accent`      强调色（按钮、链接、选中态）
+     *
+     * `scrim` 是**下限**：算出来需要更厚的幕时取更厚的那个。观感与可读性在这一层不冲突 ——
+     * 因为最后还有 FLOOR 兜底。
      */
     const PRESETS = Object.freeze([
-      { id: 'readable', name: '可读优先', scrim: 0.52, blur: 0, saturate: 1, text: 'auto', surface: 'solid', desc: '按画面算字色，壁纸压一层浅幕' },
-      { id: 'matte', name: '重磨砂', scrim: 0.34, blur: 18, saturate: 1.05, text: 'auto', surface: 'solid', desc: '大模糊，动态也稳' },
-      { id: 'glaze', name: '暗夜釉色', scrim: 0.72, blur: 6, saturate: 0.9, text: 'light', surface: 'solid', desc: '深色压幕，白字保底' },
-      { id: 'vivid', name: '原色直出', scrim: 0.08, blur: 0, saturate: 1.15, text: 'auto', surface: 'clear', desc: '几乎不压幕，面板透出壁纸' },
-      { id: 'hacker', name: '黑客绿', scrim: 0.8, blur: 2, saturate: 0.6, text: 'light', surface: 'solid', desc: '终端绿配色' },
-      { id: 'violet', name: '紫色心情', scrim: 0.6, blur: 10, saturate: 1.2, tint: '#7c5cff', text: 'light', surface: 'solid', desc: '紫色偏色幕' },
-      { id: 'clear', name: '清透', scrim: 0.16, blur: 4, saturate: 1, text: 'auto', surface: 'soft', desc: '面板半透，壁纸仍可辨' },
+      { id: 'readable', name: '可读优先', scrim: 0.25, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0.4, surfaceBlur: 24, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '白釉玻璃，正文优先' },
+      { id: 'frosted', name: '重磨砂', scrim: 0.25, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0.45, surfaceBlur: 36, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '大半径磨砂，动态也稳' },
+      { id: 'night', name: '暗夜釉色', scrim: 0.25, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0.6, surfaceBlur: 22, accent: '#4f8cff', text: 'light', surface: 'solid', desc: '深蓝釉面，夜景' },
+      { id: 'vivid', name: '原色直出', scrim: 0.25, blur: 0, saturate: 1, glassTint: '#67dce7', glassAlpha: 0.5, surfaceBlur: 18, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '青色玻璃，壁纸颜色不被压' },
+      { id: 'author', name: '作者自用', scrim: 0.5, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0.4, surfaceBlur: 9, accent: '#67dce7', text: 'light', surface: 'solid', desc: '壁纸压一半，面板薄' },
+      { id: 'hacker', name: '黑客绿(Fish)', scrim: 0.6, blur: 0, saturate: 1, glassTint: '#266d3c', glassAlpha: 0.8, surfaceBlur: 9, accent: '#00c800', text: 'light', surface: 'solid', desc: '终端绿，几乎不透' },
+      { id: 'violet', name: '紫色心情', scrim: 0.5, blur: 0, saturate: 1, glassTint: '#533b78', glassAlpha: 0.8, surfaceBlur: 9, accent: '#b388ff', text: 'light', surface: 'solid', desc: '紫釉玻璃，几乎不透' },
     ])
 
     /** 默认预设 id：装上就有合理观感，不逼用户先选一套。 */
@@ -100,6 +127,10 @@ window.__ModuleLoader__.load({
       blur: [0, 32],
       saturate: [0.3, 1.6],
       opacity: [0.15, 0.92],
+      // 玻璃面透明度：上限 0.92 —— 留一点缝让壁纸透出来，同时地板层仍在托底。
+      glass: [0, 0.92],
+      // 面板背后那层的模糊半径。
+      surfaceBlur: [0, 40],
     })
 
     // ─────────────────────────────────────────────── 颜色数学 ───────────────────────────────────────────────
@@ -293,10 +324,11 @@ window.__ModuleLoader__.load({
     /**
      * 合并预设与用户微调后的"有效参数"。
      *
-     * 用户的微调永远是**相对预设**的：换预设时不该把用户之前拖的 3 根滑杆带过去。
-     * 所以存盘的是 `{ preset, scrim?, blur?, saturate? }`，没有写的字段就取预设值。
+     * 用户的微调永远是**相对预设**的：换预设时不该把用户之前拖的滑杆带过去。
+     * 所以存盘的是 `{ preset, scrim?, blur?, saturate?, glassAlpha?, surfaceBlur? }`，
+     * 没有写的字段就取预设值。
      *
-     * @param {{ preset?: string, scrim?: number, blur?: number, saturate?: number, opacity?: number, text?: string, surface?: string }} tweak
+     * @param {{ preset?: string, scrim?: number, blur?: number, saturate?: number, opacity?: number, glassAlpha?: number, surfaceBlur?: number, text?: string, surface?: string }} tweak
      * @returns {typeof PRESETS[number]}
      */
     function resolvePreset(tweak = {}) {
@@ -307,6 +339,8 @@ window.__ModuleLoader__.load({
       if (Number.isFinite(tweak.blur)) out.blur = clampRange(tweak.blur, SCREEN_LIMITS.blur)
       if (Number.isFinite(tweak.saturate)) out.saturate = clampRange(tweak.saturate, SCREEN_LIMITS.saturate)
       if (Number.isFinite(tweak.opacity)) out.opacity = clampRange(tweak.opacity, SCREEN_LIMITS.opacity)
+      if (Number.isFinite(tweak.glassAlpha)) out.glassAlpha = clampRange(tweak.glassAlpha, SCREEN_LIMITS.glass)
+      if (Number.isFinite(tweak.surfaceBlur)) out.surfaceBlur = clampRange(tweak.surfaceBlur, SCREEN_LIMITS.surfaceBlur)
       if (typeof tweak.text === 'string' && ['auto', 'light', 'dark', 'keep'].includes(tweak.text)) out.text = tweak.text
       if (typeof tweak.surface === 'string' && ['solid', 'soft', 'clear'].includes(tweak.surface)) out.surface = tweak.surface
       return out
@@ -374,31 +408,103 @@ window.__ModuleLoader__.load({
      * 渲染层只认"名字 → 字符串"，不认业务含义：这样以后内核换 token 名、或者要补某个面，
      * 改的是这张表，而不是渲染代码。
      *
-     * 返回的 key 是 CSS 自定义属性名（不含 `--`），值是合法的 color。
+     * 玻璃配方的落点（照抄 dsh-wallpaper-engine 的结构）：
+     *
+     *   glass = color-mix(in srgb, 地板色 floor%, 玻璃色 (1-floor)%)
+     *
+     * color-mix 在预乘空间按权重插值，等于"地板色 @floor 压在玻璃色之上"，所以
+     * **有效覆盖 = floor + a×(1−floor) ≥ floor** —— 玻璃透明度无论怎么调，都不会把字压糊。
      *
      * @param {ReturnType<typeof decideTheme>} decision
-     * @param {{ tint?: string }} [preset] 预设（取 tint / surface）。
+     * @param {{ tint?: string, glassTint?: string, glassAlpha?: number, surfaceBlur?: number, accent?: string, gray?: boolean }} [preset] 预设（取玻璃配方）。
+     * @param {{ dark?: boolean }} [opts] `dark` = 系统/DSH 当前是深色主题（决定地板色）。
      * @returns {Record<string, string>}
      */
-    function deriveTokens(decision, preset = {}) {
-      const ink = decision.ink === 'light' ? 'rgba(255, 255, 255, 0.94)' : 'rgba(20, 20, 24, 0.92)'
-      const dim = decision.ink === 'light' ? 'rgba(255, 255, 255, 0.72)' : 'rgba(20, 20, 24, 0.68)'
-      const faint = decision.ink === 'light' ? 'rgba(255, 255, 255, 0.55)' : 'rgba(20, 20, 24, 0.52)'
-      const tintRgb = parseHex(preset.tint ?? decision.tint) ?? { r: 0, g: 0, b: 0 }
-      const surface = preset.surface ?? decision.surface ?? 'solid'
-      // 面板底必须是"文字能与壁纸分开的那一侧"：浅色字 → 面板压到接近黑，深色字 → 压到接近白。
-      // 直接用壁纸平均色当面板底是错的 —— 那会让面板和壁纸糊成一片，越描越看不见。
-      const surfaceBase = decision.ink === 'light' ? { r: 12, g: 13, b: 18 } : { r: 248, g: 246, b: 242 }
-      // solid 实心感最强；soft 半透；clear 几乎全透（壁纸透到面板里，靠这层幕撑住字）。
-      const surfaceAlpha = surface === 'clear' ? 0.18 : surface === 'soft' ? 0.5 : 0.82
+    /** 垫底色的"过亮夹子"：壁纸太亮时往这个暗色方向压，保证掉层时不会闪白。 */
+    const UNDERLAY_CAP = Object.freeze({ r: 18, g: 20, b: 26 })
+
+    function deriveTokens(decision, preset = {}, opts = {}) {
+      const dark = opts.dark === true
+      // 地板色永远站在字色那一侧：深色主题压近黑、浅色主题压白。
+      // 这条与"墨色"（字是亮还是暗）是两件事 —— 地板保的是"面板底足够实"，
+      // 墨色保的是"字在面板上够亮"。两者混用会在金色壁纸上翻车。
+      const floorRgb = parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light)
+      const floor = dark ? READABILITY_FLOOR_DARK : READABILITY_FLOOR
+      const tintRgb = parseHex(preset.glassTint) ?? parseHex(decision.tint) ?? { r: 255, g: 255, b: 255 }
+      const glassAlpha = clampRange(Number.isFinite(preset.glassAlpha) ? preset.glassAlpha : 0.4, SCREEN_LIMITS.glass)
+      const surfaceBlur = Math.round(clampRange(Number.isFinite(preset.surfaceBlur) ? preset.surfaceBlur : 20, SCREEN_LIMITS.surfaceBlur))
+      const accent = preset.accent ?? '#4f8cff'
+      // 三级玻璃：层 2 / 层 3 在层 1 之上再抬亮一档，抬亮的方式是**多掺一点玻璃色**，
+      // 不是硬加不透明度 —— 这样"面上的面"有层次，而不是一块实色盖住。
+      const g1 = glassMix(floorRgb, floor, tintRgb, glassAlpha)
+      const g2 = glassMix(floorRgb, floor, tintRgb, Math.min(1, glassAlpha * 1.12))
+      const g3 = glassMix(floorRgb, floor, tintRgb, Math.min(1, glassAlpha * 1.28))
+      // 字色：地板决定了面板底的亮度，字必须站到它的**对面**。
+      // 这一条比 decideTheme 的墨色更硬：墨色管的是壁纸，这里管的是面板。
+      // 两者打架时以面板为准 —— 字压在面板上，不是压在壁纸上。
+      const inkLight = g1.lum < 0.35
+      const ink = inkLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(14, 16, 22, 0.95)'
+      const dim = inkLight ? 'rgba(255, 255, 255, 0.76)' : 'rgba(14, 16, 22, 0.70)'
+      const faint = inkLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(14, 16, 22, 0.54)'
       return {
         'dsa-wall-ink': ink,
         'dsa-wall-ink-dim': dim,
         'dsa-wall-ink-faint': faint,
         'dsa-wall-scrim': String(decision.scrim),
-        'dsa-wall-surface': rgba(surfaceBase, surfaceAlpha),
-        'dsa-wall-surface-strong': rgba(surfaceBase, Math.min(0.94, surfaceAlpha + 0.12)),
-        'dsa-wall-border': decision.ink === 'light' ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.14)',
+        'dsa-wall-glass-1': g1.final,
+        'dsa-wall-glass-2': g2.final,
+        'dsa-wall-glass-3': g3.final,
+        'dsa-wall-glass-solid': toHex(mixRgb(g1Rgb(g1.final), floorRgb, floor * 0.5)),
+        'dsa-wall-surface-blur': `${surfaceBlur}px`,
+        'dsa-wall-accent': accent,
+        'dsa-wall-border': inkLight ? 'rgba(255, 255, 255, 0.18)' : 'rgba(0, 0, 0, 0.12)',
+        // 壁纸层自己的垫底色：画面没送到屏上时退化成这个颜色，而不是白闪。
+        // 往地板色压六成；纯白壁纸再单独压暗一档 —— 混色的目标就是地板色本身，
+        // 否则 #fff 混 #fff 还是 #fff，掉层时那一眼照样闪白。
+        'dsa-wall-underlay': toHex(
+          mixRgb(
+            parseHex(decision.tint) ?? floorRgb,
+            relativeLuminance(parseHex(decision.tint) ?? floorRgb) > 0.6 ? UNDERLAY_CAP : floorRgb,
+            0.6,
+          ),
+        ),
+        // 对比度实报（字 vs 玻璃面）：预设卡和滑杆提示都读它。
+        'dsa-wall-contrast': String(Math.round(contrastRatio(parseHex(inkLight ? INK.light : INK.dark), parseHex(g1.final)) * 100) / 100),
+      }
+    }
+
+    /** `#rrggbb` → rgb 对象（glassMix 的输出必然可解析，解析不了就退回黑）。 */
+    function g1Rgb(hex) {
+      return parseHex(hex) ?? { r: 0, g: 0, b: 0 }
+    }
+
+    /**
+     * 生成一条玻璃色：地板色 @floor 压在玻璃色之上。
+     *
+     * 两步都是纯算术（不依赖浏览器的 color-mix），所以 node 里能直接单测出最终对比度：
+     *
+     *   1. 玻璃色按 alpha 掺进地板色   → 面板的"釉"
+     *   2. 结果再被地板色抬到 floor   → 可读性下限，权重不归任何滑杆管
+     *
+     * @param {{ r: number, g: number, b: number }} floorRgb
+     * @param {number} floor 0–1
+     * @param {{ r: number, g: number, b: number }} tintRgb
+     * @param {number} alpha 玻璃自身的覆盖权重
+     * @returns {{ final: string, lum: number }} 最终色 + 它的相对亮度（供渲染层判断要不要翻字色）。
+     */
+    function glassMix(floorRgb, floor, tintRgb, alpha) {
+      const base = mixRgb(floorRgb, tintRgb, alpha)
+      const final = mixRgb(base, floorRgb, floor)
+      return { final: toHex(final), lum: relativeLuminance(final) }
+    }
+
+    /** 在 bg 上按 alpha 叠一层 fg。 */
+    function mixRgb(bg, fg, alpha) {
+      const a = Math.max(0, Math.min(1, alpha))
+      return {
+        r: bg.r + (fg.r - bg.r) * a,
+        g: bg.g + (fg.g - bg.g) * a,
+        b: bg.b + (fg.b - bg.b) * a,
       }
     }
 
@@ -406,16 +512,18 @@ window.__ModuleLoader__.load({
     function layerStyle(preset) {
       const p = resolvePreset(preset)
       return [
-        `filter: blur(${p.blur}px) saturate(${p.saturate})`,
+        // 模糊半径用的是**面板背后那层**（surfaceBlur），不是壁纸本体 ——
+        // 壁纸本体保持清晰才有"壁纸"的感觉，糊的是面板底下那层玻璃。
+        `filter: blur(${p.surfaceBlur}px) saturate(${p.saturate})`,
         // 模糊会把边缘吸进来一圈透明，放大一点补掉。
-        `transform: scale(${p.blur > 0 ? 1.06 : 1})`,
+        `transform: scale(${p.surfaceBlur > 0 ? 1.06 : 1})`,
       ].join('; ')
     }
 
     /**
      * 服务端也用它夹取（与浏览器算出来的完全同源）。
-     * @param {{ preset?: string, scrim?: number, blur?: number, saturate?: number, opacity?: number, text?: string, surface?: string }} tweak
-     * @returns {{ preset: string, scrim: number, blur: number, saturate: number, opacity: number, text: string, surface: string }}
+     * @param {{ preset?: string, scrim?: number, blur?: number, saturate?: number, opacity?: number, glassAlpha?: number, surfaceBlur?: number, text?: string, surface?: string }} tweak
+     * @returns {{ preset: string, scrim: number, blur: number, saturate: number, opacity: number, glassAlpha: number, surfaceBlur: number, text: string, surface: string }}
      */
     function sanitizeTweak(tweak = {}) {
       const p = resolvePreset(tweak)
@@ -425,6 +533,8 @@ window.__ModuleLoader__.load({
         blur: Math.round(p.blur),
         saturate: Math.round(p.saturate * 1000) / 1000,
         opacity: Math.round(clampRange(Number.isFinite(p.opacity) ? p.opacity : 0.72, SCREEN_LIMITS.opacity) * 1000) / 1000,
+        glassAlpha: Math.round(clampRange(Number.isFinite(p.glassAlpha) ? p.glassAlpha : 0.4, SCREEN_LIMITS.glass) * 1000) / 1000,
+        surfaceBlur: Math.round(clampRange(Number.isFinite(p.surfaceBlur) ? p.surfaceBlur : 20, SCREEN_LIMITS.surfaceBlur)),
         text: p.text ?? 'auto',
         surface: p.surface ?? 'solid',
       }
@@ -458,6 +568,8 @@ window.__ModuleLoader__.load({
       wallScrim: '遮罩厚度',
       wallBlur: '壁纸模糊',
       wallSaturate: '色彩浓度',
+      wallGlass: '玻璃厚度',
+      wallSurfaceBlur: '面板模糊',
       wallPick: '壁纸素材',
       wallPickHint: '视频与图片都能当壁纸',
       wallUse: '当壁纸',
@@ -567,6 +679,8 @@ window.__ModuleLoader__.load({
       wallScrim: 'Scrim',
       wallBlur: 'Blur',
       wallSaturate: 'Saturation',
+      wallGlass: 'Glass',
+      wallSurfaceBlur: 'Panel blur',
       wallPick: 'Wallpaper media',
       wallPickHint: 'Videos and images both work',
       wallUse: 'Use as wallpaper',
@@ -2238,7 +2352,27 @@ window.__ModuleLoader__.load({
           '.dsa-wall-scrim{position:absolute;inset:0;}',
           // 画布本身也放空。body 的底色就是 var(--dsw-alias-bg-base)，令牌顶掉之后它自己就透了，
           // 这行是兜底（主题插件的首帧 CSS 会直接写死 background-color）。
-          'html,body{background:transparent !important;}',
+          //
+          // 另外给 html 一个**不透明的壁纸代表色**：窗口最小化 → 还原、被遮挡、后台节流后
+          // 回来时，根帧可能拿不到壁纸层已提交的像素，此时露出来的是窗口底板（Electron 缺省
+          // #FFF）—— 就是"整块白闪"。垫一层同色底，掉层时退化成"有点像壁纸的颜色"。
+          `html{background-color:${tokens['dsa-wall-underlay']} !important;}`,
+          'html,body{background-image:none !important;}',
+          `body{background:transparent !important;}`,
+          // 玻璃：每个承载文字的面都吃一层背后的模糊。
+          //
+          // 这是"透出壁纸"和"看得清字"能同时成立的另一半 —— 玻璃色（上面那组令牌）负责
+          // 保证最低覆盖率，backdrop-filter 负责让透出来的那层壁纸**有质感**而不只是一张压暗的照片。
+          // `saturate` 稍微抬一点，模糊之后颜色才不会发灰。
+          //
+          // 选择器只认内核稳定的那一类：Shell 里每个面都会继承 `--dsw-alias-bg-layer-N`
+          // 这类令牌，而**令牌是继承的、backdrop-filter 不是** —— 所以必须挂到真正承载文字
+          // 的元素上。挑了 sidebar / overlay 两个稳定锚点，加上 markdown 与气泡（那两处
+          // 有自己的类名但都挂在正文里，靠属性锚定不到的，交给下面那组通用选择器）。
+          //
+          // 不用 CSS module 哈希（会随内核版本变）。
+          `[data-shell-overlay],[data-shell-bottom]{backdrop-filter:blur(${tokens['dsa-wall-surface-blur']}) saturate(1.15);`,
+          `-webkit-backdrop-filter:blur(${tokens['dsa-wall-surface-blur']}) saturate(1.15);}`,
           'body{',
           // 全部带 !important：内核把主题令牌以**内联样式**写在 body 上（ThemePresenter），
           // 普通作者声明必输给内联。这里只压 body 这一个元素上的同名变量，组件写在自己
@@ -2262,29 +2396,61 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * 让位变量表：把"页面自己画的底色"改成能透出壁纸的值。
+       * 让位变量表：把"页面自己画的底色"改成玻璃配方。
        *
-       * 这些**只出现在壁纸开启时**，关掉立即还原。注意 `--dsw-alias-label-*` 是字的颜色，
-       * 它必须跟着决策走 —— 这是"文字永远看得清"的落点。
+       * 这是整套观感的核心 —— 面板不再是实色块，而是「玻璃色 + 背后模糊」，
+       * 壁纸被模糊后透上来。每一条的覆盖率都不低于 READABILITY_FLOOR
+       * （在 lib/wallpaper.mjs 的 deriveTokens 里就把地板色混进去了），
+       * 所以"玻璃透明度"滑杆怎么拖都不会把字压糊。
+       *
+       * 这些**只出现在壁纸开启时**，关掉立即还原。
        *
        * @param {Record<string, string>} tokens deriveTokens 的输出。
        * @returns {Record<string, string>}
        */
       const layoutVars = (tokens) => ({
-        // 三列与底栏的实色底 → 透明（壁纸从底下透出来）。
+        // 三列与底栏：彻底留空，壁纸从底下直接透上来。
         '--dsw-alias-bg-base': 'transparent',
         '--dsw-specific-sidebar-fill': 'transparent',
-        // 卡片、菜单、输入框这些"面上的面"不能全透，否则文字直接叠在壁纸上。
-        '--dsw-alias-bg-layer-1': tokens['dsa-wall-surface'],
-        '--dsw-alias-bg-layer-2': tokens['dsa-wall-surface-strong'],
-        '--dsw-alias-bg-overlay': tokens['dsa-wall-surface-strong'],
-        // 字色：由对比度决策决定（浅色字 / 深色字两套）。
+        // 面上的面：三级玻璃。层 1 是大面板（卡片、行、列表），层 2/3 是浮在它上面的
+        // 菜单、弹层、选中态 —— 一层比一层亮，于是"浮起来"这件事有视觉依据。
+        '--dsw-alias-bg-layer-1': tokens['dsa-wall-glass-1'],
+        '--dsw-alias-bg-layer-2': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-bg-layer-3': tokens['dsa-wall-glass-3'],
+        '--dsw-alias-bg-overlay': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-bg-module-platform': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-bg-multi-select': tokens['dsa-wall-glass-2'],
+        // 抬高的按钮（侧栏「新建会话」、重命名输入框）：比最高那层再亮半档。
+        '--dsw-alias-button-elevated-fill': tokens['dsa-wall-glass-3'],
+        '--dsw-alias-button-floating-fill': tokens['dsa-wall-glass-3'],
+        // 字色：由玻璃面的实际亮度决定（deriveTokens 里算过），不是拍脑袋。
         '--dsw-alias-label-primary': tokens['dsa-wall-ink'],
         '--dsw-alias-label-secondary': tokens['dsa-wall-ink-dim'],
         '--dsw-alias-label-tertiary': tokens['dsa-wall-ink-faint'],
         '--dsw-alias-label-caption': tokens['dsa-wall-ink-faint'],
         '--dsw-alias-border-l1': tokens['dsa-wall-border'],
         '--dsw-alias-border-l2': tokens['dsa-wall-border'],
+        // 代码：这几个是**自成一套底色**的令牌，必须一起接管。
+        //
+        // 行内 code 是 `background: var(--dsw-alias-markdown-inline-code)` + `color: inherit`
+        // —— 只要底还停在内核那套浅色静态值（#f1f3f5），字却被我们改成浅墨，就成了
+        // "白底白字"。代码块同理（label-primary 做字色 + code-block 做底）。
+        '--dsw-alias-markdown-inline-code': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-markdown-code-block': tokens['dsa-wall-glass-1'],
+        '--dsw-alias-markdown-tag': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-markdown-code-block-banner': tokens['dsa-wall-glass-2'],
+        // 用户消息气泡：底色是独立的 --dsw-specific-bubble（static-deepseek-50 浅蓝），
+        // 字色却是 label-primary。壁纸把字改成浅色而气泡仍是浅蓝底 → 浅字浅底。
+        '--dsw-specific-bubble': tokens['dsa-wall-glass-2'],
+        '--dsw-specific-bubble-highlight': tokens['dsa-wall-glass-2'],
+        // 菜单 / 输入区 / 悬浮层：自成一个面，同样必须跟着走。
+        '--dsw-specific-menu': tokens['dsa-wall-glass-3'],
+        '--dsw-specific-input-major': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-interactive-bg-hover': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-interactive-bg-hover-solid': tokens['dsa-wall-glass-3'],
+        // 强调色：按钮、链接、选中态。预设自带，换预设立刻换调子。
+        '--dsw-alias-brand-primary': tokens['dsa-wall-accent'],
+        '--dsw-alias-link': tokens['dsa-wall-accent'],
       })
 
       /**
@@ -2295,11 +2461,21 @@ window.__ModuleLoader__.load({
        */
       const decideAndApply = (analysis) => {
         if (cfg === null) return
-        const preset = { preset: cfg.preset, scrim: cfg.scrim, blur: cfg.blur, saturate: cfg.saturate }
+        const preset = {
+          preset: cfg.preset,
+          scrim: cfg.scrim,
+          blur: cfg.blur,
+          saturate: cfg.saturate,
+          glassAlpha: cfg.glassAlpha,
+          surfaceBlur: cfg.surfaceBlur,
+        }
         const resolved = resolvePreset(preset)
         const decision = decideTheme(analysis, resolved)
-        const tokens = deriveTokens(decision, resolved)
-        lastDecision = { ...decision, analysis }
+        // 地板色站在**主题**那一侧（深色主题压近黑、浅色压白），不是站在墨色那一侧。
+        // 判定读 documentElement 上的 data-ds-theme-source / body 的 data-ds-dark-theme
+        // —— 那正是内核 ThemePresenter 写的两个稳定属性。
+        const tokens = deriveTokens(decision, resolved, { dark: themeIsDark() })
+        lastDecision = { ...decision, analysis, tokens }
         paintCss(tokens, resolved)
         // 只动幕的浓度/颜色 —— 这两个属性挂在自绘的幕元素上，不影响应用任何样式。
         if (scrimEl !== null) {
@@ -2308,6 +2484,31 @@ window.__ModuleLoader__.load({
           scrimEl.style.opacity = String(decision.scrim)
         }
         if (typeof onDecision === 'function') onDecision(lastDecision)
+      }
+
+      /**
+       * 现在是不是深色主题。
+       *
+       * 内核 `ThemePresenter` 会写两个稳定属性：`<html data-ds-theme-source>`（'light'|'dark'）
+       * 与 `<body data-ds-dark-theme>`（存在即深色）。两个都读不到时按深色处理 ——
+       * 壁纸几乎都是暗的，押深色出错最少。
+       */
+      const themeIsDark = () => {
+        try {
+          const root = document.documentElement
+          if (root !== null && root !== undefined) {
+            const source = root.getAttribute('data-ds-theme-source')
+            if (source === 'light') return false
+            if (source === 'dark') return true
+          }
+          const body = document.body
+          if (body !== null && body !== undefined && typeof body.hasAttribute === 'function') {
+            return body.hasAttribute('data-ds-dark-theme')
+          }
+        } catch {
+          // 沙盒 / 早期页面：读不到就当深色。
+        }
+        return true
       }
 
       /**
@@ -2504,15 +2705,24 @@ window.__ModuleLoader__.load({
         preview(tweak) {
           if (!alive || cfg === null || cfg.enabled !== true) return
           if (tweak === null || typeof tweak !== 'object') return
-          // 只覆盖三根滑杆能碰的键。sanitizeTweak 是整份配置的规范形，直接展开会把
+          // 只覆盖五根滑杆能碰的键。sanitizeTweak 是整份配置的规范形，直接展开会把
           // text/surface/opacity 这些派生值一起"钉死"，换预设时就再也回不到预设自带的策略。
           const clean = sanitizeTweak({
             preset: cfg.preset,
             scrim: Number.isFinite(tweak.scrim) ? tweak.scrim : cfg.scrim,
             blur: Number.isFinite(tweak.blur) ? tweak.blur : cfg.blur,
             saturate: Number.isFinite(tweak.saturate) ? tweak.saturate : cfg.saturate,
+            glassAlpha: Number.isFinite(tweak.glassAlpha) ? tweak.glassAlpha : cfg.glassAlpha,
+            surfaceBlur: Number.isFinite(tweak.surfaceBlur) ? tweak.surfaceBlur : cfg.surfaceBlur,
           })
-          cfg = { ...cfg, scrim: clean.scrim, blur: clean.blur, saturate: clean.saturate }
+          cfg = {
+            ...cfg,
+            scrim: clean.scrim,
+            blur: clean.blur,
+            saturate: clean.saturate,
+            glassAlpha: clean.glassAlpha,
+            surfaceBlur: clean.surfaceBlur,
+          }
           const resolved = resolvePreset(cfg)
           const hint = Array.isArray(cfg.hint) ? cfg.hint : []
           // 有画面摘要就用真画面，否则退回出厂代表色（两者都比"什么都不算"准）。
@@ -3164,13 +3374,22 @@ window.__ModuleLoader__.load({
             ['wallpaperScrim', 'scrim'],
             ['wallpaperBlur', 'blur'],
             ['wallpaperSaturate', 'saturate'],
+            ['wallpaperGlass', 'glassAlpha'],
+            ['wallpaperSurfaceBlur', 'surfaceBlur'],
           ]
           for (const [from, to] of sliderKeys) {
             if (patch[from] === 'auto') next[to] = 'auto'
             else if (Number.isFinite(patch[from])) next[to] = patch[from]
           }
           if (typeof patch.wallpaperEnabled === 'boolean') next.enabled = patch.wallpaperEnabled
-          const tweak = sanitizeTweak({ preset: next.preset, scrim: next.scrim, blur: next.blur, saturate: next.saturate })
+          const tweak = sanitizeTweak({
+            preset: next.preset,
+            scrim: next.scrim,
+            blur: next.blur,
+            saturate: next.saturate,
+            glassAlpha: next.glassAlpha,
+            surfaceBlur: next.surfaceBlur,
+          })
           window.dispatchEvent(
             new CustomEvent('dsa:wall-sync', {
               detail: { ...next, ...tweak, enabled: next.enabled === true && next.src !== '' },
@@ -3732,7 +3951,14 @@ window.__ModuleLoader__.load({
 
           const activePreset = PRESETS.find((item) => item.id === cfg.preset) || PRESETS[0]
           // 滑杆读的是"预设 + 微调"合起来的真值：用户拖到的就是他会看到的。
-          const shown = resolvePreset({ preset: cfg.preset, scrim: cfg.scrim, blur: cfg.blur, saturate: cfg.saturate })
+          const shown = resolvePreset({
+            preset: cfg.preset,
+            scrim: cfg.scrim,
+            blur: cfg.blur,
+            saturate: cfg.saturate,
+            glassAlpha: cfg.glassAlpha,
+            surfaceBlur: cfg.surfaceBlur,
+          })
           /**
            * 幕浓度的滑杆下限：用户可以把幕调薄，但**不能薄到字看不清**。
            * 这是"壁纸不影响用户看字"这条承诺在 UI 上的落点 —— 刻度到顶就是 0.92，
@@ -3819,9 +4045,9 @@ window.__ModuleLoader__.load({
                 'data-tone': surface,
                 disabled: busy,
                 title: decision ? `${preset.name} · ${decision.contrast.toFixed(2)}:1` : preset.name,
-                // 预设是"整套观感"：必须把三根滑杆的残留值一并清回 auto。
-                // 只写 preset 的话，之前拖过的 scrim/blur/saturate 会继续盖住新预设 ——
-                // 幕浓度和模糊纹丝不动，用户看到的就是"点了没反应"。
+                // 预设是"整套观感"：必须把五根滑杆的残留值一并清回 auto。
+                // 只写 preset 的话，之前拖过的 scrim/blur/saturate/glass/surfaceBlur 会继续
+                // 盖住新预设 —— 幕浓度和玻璃纹丝不动，用户看到的就是"点了没反应"。
                 onClick: () =>
                   wallCfg(
                     {
@@ -3829,6 +4055,8 @@ window.__ModuleLoader__.load({
                       wallpaperScrim: 'auto',
                       wallpaperBlur: 'auto',
                       wallpaperSaturate: 'auto',
+                      wallpaperGlass: 'auto',
+                      wallpaperSurfaceBlur: 'auto',
                     },
                     t('saved'),
                   ),
@@ -3896,9 +4124,17 @@ window.__ModuleLoader__.load({
               h('div', { className: 'dsa-set-presets' }, PRESETS.map(presetCard)),
             ),
             // ── ③ 微调 ──
+            // 前三根调的是"壁纸本体透出来多少"：幕厚度、壁纸自己的模糊与色彩浓度。
+            // 后两根调的是"面板这块玻璃有多厚"：玻璃涂层（玻璃色占比）与面板背后的模糊。
+            // 两者分开是因为它们是两件不同的事 —— 糊了壁纸不代表面板变实，素净的面板
+            // 也不等于壁纸清楚。可读性下限只挂在玻璃那一层，跟这五根滑杆都无关。
             slider('wallpaperScrim', t('wallScrim'), Number(floor.toFixed(2)), SCREEN_LIMITS.scrim[1], 0.02, shown.scrim, '%'),
             slider('wallpaperBlur', t('wallBlur'), SCREEN_LIMITS.blur[0], SCREEN_LIMITS.blur[1], 1, shown.blur, 'px'),
             slider('wallpaperSaturate', t('wallSaturate'), SCREEN_LIMITS.saturate[0], SCREEN_LIMITS.saturate[1], 0.05, shown.saturate, '×'),
+            slider('wallpaperGlass', t('wallGlass'), SCREEN_LIMITS.glass[0], SCREEN_LIMITS.glass[1], 0.01,
+              Number(shown.glassAlpha.toFixed(2)), ''),
+            slider('wallpaperSurfaceBlur', t('wallSurfaceBlur'), SCREEN_LIMITS.surfaceBlur[0], SCREEN_LIMITS.surfaceBlur[1], 1,
+              shown.surfaceBlur, 'px'),
             // ── ④ 素材：所有视频与图片都能当壁纸 ──
             h(
               'div',

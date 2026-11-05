@@ -1010,15 +1010,19 @@ await check('开关注入但没有素材 → 不算开启（没有可铺的东�
 
 await check('预设与微调：认得的 id 保留，越界的值被夹取', () => {
   const { wallpaper } = wallpaperConfig({
-    wallpaperPreset: 'matte',
+    wallpaperPreset: 'frosted',
     wallpaperScrim: 5,
     wallpaperBlur: -3,
     wallpaperSaturate: 9,
+    wallpaperGlass: 4,
+    wallpaperSurfaceBlur: 999,
   })
-  assert.equal(wallpaper.preset, 'matte')
+  assert.equal(wallpaper.preset, 'frosted')
   assert.equal(wallpaper.scrim, 0.92, '幕浓度没有夹到上限')
   assert.equal(wallpaper.blur, 0, '模糊没有夹到下限')
   assert.equal(wallpaper.saturate, 1.6, '饱和没有夹到上限')
+  assert.equal(wallpaper.glassAlpha, 0.92, '玻璃透明度没有夹到上限')
+  assert.equal(wallpaper.surfaceBlur, 40, '面板模糊没有夹到上限')
 })
 
 await check('认不出的预设 id 退回默认值（不产生第二份数据源）', () => {

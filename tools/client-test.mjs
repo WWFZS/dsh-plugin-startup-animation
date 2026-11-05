@@ -1422,7 +1422,7 @@ await check('主题页签：预设卡上每格都有对比度数字（不依赖�
   }
 })
 
-await check('主题页签：点预设卡 → 写 preset 并把三根滑杆清回 auto', async () => {
+await check('主题页签：点预设卡 → 写 preset 并把玻璃/模糊/幕全部清回 auto', async () => {
   const { render, calls } = await loadClient({ status: themeStatus() })
   const tree = await openThemeTab(render)
   const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
@@ -1430,13 +1430,15 @@ await check('主题页签：点预设卡 → 写 preset 并把三根滑杆清回
   matte.props.onClick()
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
   assert.ok(post, '点预设没有发 POST')
-  // 只写 preset 是不够的：之前拖过的 scrim/blur/saturate 会继续盖住新预设，
-  // 幕浓度和模糊纹丝不动 → 用户看到的就是"点了没反应"。必须一并清回 auto。
+  // 只写 preset 是不够的：之前拖过的 scrim/blur/saturate/glassAlpha/surfaceBlur 会继续
+  // 盖住新预设，幕浓度和玻璃纹丝不动 → 用户看到的就是"点了没反应"。必须一并清回 auto。
   assert.deepEqual(JSON.parse(post.init.body), {
-    wallpaperPreset: 'matte',
+    wallpaperPreset: 'frosted',
     wallpaperScrim: 'auto',
     wallpaperBlur: 'auto',
     wallpaperSaturate: 'auto',
+    wallpaperGlass: 'auto',
+    wallpaperSurfaceBlur: 'auto',
   })
 })
 
@@ -1509,8 +1511,11 @@ await check('主题壁纸：让位变量必须带 !important（内核把令牌�
     /--dsw-alias-bg-base:\s*transparent\s*!important/,
     `让位变量没带 !important，会被 body 内联样式压住：${css.slice(0, 200)}`,
   )
-  // 画布本身也要放空：首帧 CSS 直接写死 background-color。
-  assert.match(css, /html,body\{background:transparent !important/, 'body 底色没放空')
+  // 画布本身也要放空：首帧 CSS 直接写死 background-color（深色主题是 #151517）。
+  // body 必须显式 transparent —— 少它一份，壁纸就被那层实色盖死。
+  assert.match(css, /body\{background:transparent !important/, 'body 底色没放空')
+  // html 上垫的是壁纸自己的代表色，而不是留空：掉层时退化成本色，不闪白。
+  assert.match(css, /html\{background-color:#[0-9a-f]{6} !important/, 'html 没垫壁纸底色')
   // 绝不碰字号的通道。
   assert.ok(!/font-size|font-family|--dsh-content-font-size/.test(css), `样式表里混进了排版变量：${css}`)
 })
@@ -1526,9 +1531,9 @@ await check('主题壁纸：换预设立刻广播给背景层（不用等回包�
   const immediate = calls.filter((call) => call.type === 'event' && call.name === 'dsa:wall-sync')
   assert.equal(immediate.length, 1, `点下去应该当场广播一次，实际 ${immediate.length} 次`)
   // 且这次带的是**重磨砂自己的**观感：残留的滑杆值不能盖住预设。
-  assert.equal(immediate[0].detail.preset, 'matte')
-  assert.equal(immediate[0].detail.scrim, 0.34, `预设自带的幕浓度被残留值盖住了：${immediate[0].detail.scrim}`)
-  assert.equal(immediate[0].detail.blur, 18, `预设自带的模糊被残留值盖住了：${immediate[0].detail.blur}`)
+  assert.equal(immediate[0].detail.preset, 'frosted')
+  assert.equal(immediate[0].detail.scrim, 0.25, `预设自带的幕浓度被残留值盖住了：${immediate[0].detail.scrim}`)
+  assert.equal(immediate[0].detail.surfaceBlur, 36, `预设自带的玻璃模糊被残留值盖住了：${immediate[0].detail.surfaceBlur}`)
   assert.equal(immediate[0].detail.enabled, true)
   // 回包到了再同步一次（服务器是唯一真相）。值一样，背景层会自己短路。
   await new Promise((resolve) => setTimeout(resolve, 30))
@@ -1541,6 +1546,7 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   const tree = await openThemeTab(render)
   const before = calls.filter((call) => call.type === 'style')
   const beforeCss = before.length > 0 ? before[before.length - 1].el.textContent : ''
+  // 起始是「可读优先」：壁纸本体不糊（只在有玻璃面板时才 blur）。
   assert.ok(beforeCss.includes('blur(0px)'), `起始预设（可读优先）应该是零模糊：${beforeCss.slice(0, 160)}`)
   const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
   assert.ok(matte, '找不到「重磨砂」预设')
@@ -1549,8 +1555,8 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   // 状态原样吐回来（它不模拟写盘），再等下去就等于断言"回包把画面盖回去"。
   const after = calls.filter((call) => call.type === 'style')
   const css = after[after.length - 1].el.textContent
-  // 重磨砂的核心观感是大模糊：18px 必须真的写进样式表，而不是只改了卡片。
-  assert.ok(css.includes('blur(18px)'), `点了「重磨砂」界面没重画：${css.slice(0, 160)}`)
+  // 重磨砂的核心观感是大模糊：36px 必须真的写进样式表，而不是只改了卡片。
+  assert.ok(css.includes('blur(36px)'), `点了「重磨砂」界面没重画：${css.slice(0, 160)}`)
   assert.notEqual(css, beforeCss, '样式表没变，说明只是换了卡片')
 })
 

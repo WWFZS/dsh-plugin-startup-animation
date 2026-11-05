@@ -326,16 +326,19 @@ const wallBytes = await call(wallOn.json().wallpaper.src)
 assert.equal(wallBytes.status, 200, '壁纸素材取不到流')
 assert.match(wallBytes.headers['content-type'], /^image\//)
 // 预设与微调：认得的值留下，越界的被夹住。
-const matteId = 'matte'
-const wallTune = await postJson({ wallpaperPreset: matteId, wallpaperScrim: 5, wallpaperBlur: 12 })
+const frostedId = 'frosted'
+const wallTune = await postJson({ wallpaperPreset: frostedId, wallpaperScrim: 5, wallpaperBlur: 12, wallpaperGlass: 9, wallpaperSurfaceBlur: 99 })
 assert.equal(wallTune.status, 200, wallTune.body.toString())
-assert.equal(wallTune.json().wallpaper.preset, matteId)
+assert.equal(wallTune.json().wallpaper.preset, frostedId)
 assert.equal(wallTune.json().wallpaper.scrim, 0.92, '幕浓度没被夹到上限')
 assert.equal(wallTune.json().wallpaper.blur, 12)
-// 'auto' = 交还给预设（matte 自带 0.34），而不是沿用刚才手调的 0.92。
-const wallAuto = await postJson({ wallpaperScrim: 'auto' })
+assert.equal(wallTune.json().wallpaper.glassAlpha, 0.92, '玻璃透明度没被夹到上限')
+assert.equal(wallTune.json().wallpaper.surfaceBlur, 40, '面板模糊没被夹到上限')
+// 'auto' = 交还给预设（frosted 自带 0.25 的幕、36px 的面板模糊），而不是沿用刚才手调的 0.92。
+const wallAuto = await postJson({ wallpaperScrim: 'auto', wallpaperGlass: 'auto', wallpaperSurfaceBlur: 'auto' })
 assert.equal(wallAuto.status, 200, wallAuto.body.toString())
-assert.equal(wallAuto.json().wallpaper.scrim, 0.34, "'auto' 没有回落到预设自带的幕浓度")
+assert.equal(wallAuto.json().wallpaper.scrim, 0.25, "'auto' 没有回落到预设自带的幕浓度")
+assert.equal(wallAuto.json().wallpaper.surfaceBlur, 36, "'auto' 没有回落到预设自带的面板模糊")
 // 认不出的预设 id 不落盘（写进去就是一份语义不明的手写数据），但不报错：
 // 这类"值不对"跟音量为 9 一样按夹取处理，界面不必为此弹红字。
 // 退回的是默认预设（readable），而不是保持上一个 —— 手写的坏 id 不该把用户锁死。

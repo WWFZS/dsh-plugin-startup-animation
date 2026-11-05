@@ -615,6 +615,10 @@ export const DEFAULT_CONFIG = Object.freeze({
   wallpaperScrim: 'auto',
   wallpaperBlur: 'auto',
   wallpaperSaturate: 'auto',
+  /** 玻璃面不透明度 0–1。'auto' = 跟随预设；调高更通透，调低更像实色面板。 */
+  wallpaperGlass: 'auto',
+  /** 面板背后那层的模糊半径（px）。'auto' = 跟随预设。 */
+  wallpaperSurfaceBlur: 'auto',
 })
 
 /** 素材扩展名 → 运行时呈现方式。不支持的扩展名只让该素材降级，不影响动画本身。 */
@@ -960,6 +964,8 @@ function resolveWallpaper(raw, options, warnings) {
     scrim: Number.isFinite(raw.wallpaperScrim) ? raw.wallpaperScrim : undefined,
     blur: Number.isFinite(raw.wallpaperBlur) ? raw.wallpaperBlur : undefined,
     saturate: Number.isFinite(raw.wallpaperSaturate) ? raw.wallpaperSaturate : undefined,
+    glassAlpha: Number.isFinite(raw.wallpaperGlass) ? raw.wallpaperGlass : undefined,
+    surfaceBlur: Number.isFinite(raw.wallpaperSurfaceBlur) ? raw.wallpaperSurfaceBlur : undefined,
   })
   return {
     // 三项同时成立才算"真的在铺壁纸"：省得浏览器侧再判一遍。
@@ -2740,6 +2746,10 @@ export function apply(ctx) {
                     ['wallpaperScrim', SCREEN_LIMITS.scrim],
                     ['wallpaperBlur', SCREEN_LIMITS.blur],
                     ['wallpaperSaturate', SCREEN_LIMITS.saturate],
+                    // 玻璃配方：透明度与面板模糊。两者都只管"透多少、糊多少"，
+                    // 可读性下限在 lib/wallpaper.mjs 里是**另一项固定权重**，不受它们影响。
+                    ['wallpaperGlass', SCREEN_LIMITS.glass],
+                    ['wallpaperSurfaceBlur', SCREEN_LIMITS.surfaceBlur],
                   ]) {
                     const value = body[key]
                     // 'auto' = 回到预设值（写盘时删掉这一项，读的时候自然回落）。
@@ -2806,7 +2816,7 @@ export function apply(ctx) {
                     patch.petPets = mergePetState(patch.petPets ?? petsNow, change.pack, next)
                   }
                   if (Object.keys(patch).length === 0) {
-                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "wallpaperEnabled", "wallpaperFile", "wallpaperPreset", "wallpaperScrim", "wallpaperBlur", "wallpaperSaturate", "petEnabled", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
+                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "wallpaperEnabled", "wallpaperFile", "wallpaperPreset", "wallpaperScrim", "wallpaperBlur", "wallpaperSaturate", "wallpaperGlass", "wallpaperSurfaceBlur", "petEnabled", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
                     return
                   }
                   try {
