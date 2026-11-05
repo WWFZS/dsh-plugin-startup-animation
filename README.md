@@ -14,7 +14,6 @@
 
 [安装](#安装) · [界面预览](#界面预览) · [使用指南](#怎么用) · [兼容性](#对未来-dsh-版本的兼容性) · [更新记录](https://github.com/WWFZS/dsh-plugin-startup-animation/releases) · [源码构建](#开发)
 
-GitHub：[WWFZS/dsh-plugin-startup-animation](https://github.com/WWFZS/dsh-plugin-startup-animation) ｜ Gitee：[weiwenfengzs/dsh-plugin-startup-animation](https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation)
 
 </div>
 
