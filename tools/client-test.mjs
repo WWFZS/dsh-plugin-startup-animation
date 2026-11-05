@@ -1557,9 +1557,11 @@ await check('主题壁纸：换预设立刻广播给背景层（不用等回包�
   const immediate = calls.filter((call) => call.type === 'event' && call.name === 'dsa:wall-sync')
   assert.equal(immediate.length, 1, `点下去应该当场广播一次，实际 ${immediate.length} 次`)
   // 且这次带的是**重磨砂自己的**观感：残留的滑杆值不能盖住预设。
+  // 预设只负责颜色，遮挡一律回 0 —— 点预设 = 回到"壁纸原样透出来"。
   assert.equal(immediate[0].detail.preset, 'frosted')
-  assert.equal(immediate[0].detail.scrim, 0.25, `预设自带的幕浓度被残留值盖住了：${immediate[0].detail.scrim}`)
-  assert.equal(immediate[0].detail.surfaceBlur, 36, `预设自带的玻璃模糊被残留值盖住了：${immediate[0].detail.surfaceBlur}`)
+  assert.equal(immediate[0].detail.scrim, 0, `预设不该自带幕浓度：${immediate[0].detail.scrim}`)
+  assert.equal(immediate[0].detail.glassAlpha, 0, `预设不该自带玻璃遮挡：${immediate[0].detail.glassAlpha}`)
+  assert.equal(immediate[0].detail.surfaceBlur, 36, `预设自带的磨砂半径丢了：${immediate[0].detail.surfaceBlur}`)
   assert.equal(immediate[0].detail.enabled, true)
   // 回包到了再同步一次（服务器是唯一真相）。值一样，背景层会自己短路。
   await new Promise((resolve) => setTimeout(resolve, 30))

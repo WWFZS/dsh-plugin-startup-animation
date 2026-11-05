@@ -612,12 +612,15 @@ export const DEFAULT_CONFIG = Object.freeze({
   /** 出厂预设 id（见 lib/wallpaper.mjs 的 PRESETS）；可被下面几项微调覆盖。 */
   wallpaperPreset: 'readable',
   /** 微调：没写的字段取预设值，写了就夹进安全区间。'auto' = 跟随预设。 */
-  wallpaperScrim: 'auto',
-  wallpaperBlur: 'auto',
-  wallpaperSaturate: 'auto',
-  /** 玻璃面不透明度 0–1。'auto' = 跟随预设；调高更通透，调低更像实色面板。 */
-  wallpaperGlass: 'auto',
-  /** 面板背后那层的模糊半径（px）。'auto' = 跟随预设。 */
+  //
+  // 默认全是 0 = **最透**：壁纸原样透出来，面板不遮挡。想加遮挡是用户自己的选择，
+  // 不该由出厂配置替用户预先压暗 —— 否则"想看原样"就得先把每根滑杆拖到底。
+  wallpaperScrim: 0,
+  wallpaperBlur: 0,
+  wallpaperSaturate: 1,
+  /** 玻璃面不透明度 0–1。0 = 面板全透（壁纸原样），越大越像实色釉面。 */
+  wallpaperGlass: 0,
+  /** 面板背后那层的模糊半径（px）。已不开放滑杆，保留键以承接旧配置。 */
   wallpaperSurfaceBlur: 'auto',
 })
 

@@ -118,13 +118,13 @@ window.__ModuleLoader__.load({
      * 因为最后还有 FLOOR 兜底。
      */
     const PRESETS = Object.freeze([
-      { id: 'readable', name: '可读优先', scrim: 0.25, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0.4, surfaceBlur: 24, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '白釉玻璃，正文优先' },
-      { id: 'frosted', name: '重磨砂', scrim: 0.25, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0.45, surfaceBlur: 36, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '大半径磨砂，动态也稳' },
-      { id: 'night', name: '暗夜釉色', scrim: 0.25, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0.6, surfaceBlur: 22, accent: '#4f8cff', text: 'light', surface: 'solid', desc: '深蓝釉面，夜景' },
-      { id: 'vivid', name: '原色直出', scrim: 0.25, blur: 0, saturate: 1, glassTint: '#67dce7', glassAlpha: 0.5, surfaceBlur: 18, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '青色玻璃，壁纸颜色不被压' },
-      { id: 'author', name: '作者自用', scrim: 0.5, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0.4, surfaceBlur: 9, accent: '#67dce7', text: 'light', surface: 'solid', desc: '壁纸压一半，面板薄' },
-      { id: 'hacker', name: '黑客绿(Fish)', scrim: 0.6, blur: 0, saturate: 1, glassTint: '#266d3c', glassAlpha: 0.8, surfaceBlur: 9, accent: '#00c800', text: 'light', surface: 'solid', desc: '终端绿，几乎不透' },
-      { id: 'violet', name: '紫色心情', scrim: 0.5, blur: 0, saturate: 1, glassTint: '#533b78', glassAlpha: 0.8, surfaceBlur: 9, accent: '#b388ff', text: 'light', surface: 'solid', desc: '紫釉玻璃，几乎不透' },
+      { id: 'readable', name: '可读优先', scrim: 0, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0, surfaceBlur: 24, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '白釉玻璃，正文优先' },
+      { id: 'frosted', name: '重磨砂', scrim: 0, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0, surfaceBlur: 36, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '大半径磨砂，动态也稳' },
+      { id: 'night', name: '暗夜釉色', scrim: 0, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0, surfaceBlur: 22, accent: '#4f8cff', text: 'light', surface: 'solid', desc: '深蓝釉面，夜景' },
+      { id: 'vivid', name: '原色直出', scrim: 0, blur: 0, saturate: 1, glassTint: '#67dce7', glassAlpha: 0, surfaceBlur: 18, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '青色玻璃，壁纸颜色不被压' },
+      { id: 'author', name: '作者自用', scrim: 0, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0, surfaceBlur: 9, accent: '#67dce7', text: 'light', surface: 'solid', desc: '深色薄玻璃' },
+      { id: 'hacker', name: '黑客绿(Fish)', scrim: 0, blur: 0, saturate: 1, glassTint: '#266d3c', glassAlpha: 0, surfaceBlur: 9, accent: '#00c800', text: 'light', surface: 'solid', desc: '终端绿' },
+      { id: 'violet', name: '紫色心情', scrim: 0, blur: 0, saturate: 1, glassTint: '#533b78', glassAlpha: 0, surfaceBlur: 9, accent: '#b388ff', text: 'light', surface: 'solid', desc: '紫釉玻璃' },
     ])
 
     /** 默认预设 id：装上就有合理观感，不逼用户先选一套。 */
@@ -4457,12 +4457,15 @@ window.__ModuleLoader__.load({
               ),
               h('div', { className: 'dsa-set-presets' }, PRESETS.map(presetCard)),
             ),
-            // ── ③ 微调 ──
-            // 遮罩厚度调"壁纸被压多少"，壁纸模糊/色彩浓度调"壁纸本身长什么样"，
-            // 玻璃厚度调"面板藏住多少壁纸"。可读性下限挂在玻璃那一层，跟这几根滑杆都无关。
+            // ── ③ 微调：就两根 ──
+            // 预设只管颜色（七套釉色），**遮挡**留给这两根：
+            //   · 玻璃厚度 = 面板藏住多少壁纸（0 = 原样透出来，这是默认）
+            //   · 遮罩厚度 = 画面压暗多少（字实在看不清时才需要）
+            // 出厂全是 0，所以"刚装上、刚换预设"看到的一定是原样的壁纸。
             //
-            // 遮罩下限是 0：想让壁纸原样透出来就从 0 开始试。真到字看不清的时候，
-            // 玻璃厚度会把面板抬回来 —— 安全线在引擎里，不在滑杆上。
+            // 壁纸模糊/色彩浓度不放出滑杆了：前者是预设的磨砂半径为底、加亮才用得上的
+            // 参数，后者只会把画面洗白 —— 两个都收进确认过的默认值里。
+            // 可读性下限挂在引擎里（面板 + 文字保险层），与这两根滑杆无关。
             slider('wallpaperScrim', t('wallScrim'), SCREEN_LIMITS.scrim[0], SCREEN_LIMITS.scrim[1], 0.02, shown.scrim, '%'),
             slider('wallpaperBlur', t('wallBlur'), SCREEN_LIMITS.blur[0], SCREEN_LIMITS.blur[1], 1, shown.blur, 'px'),
             slider('wallpaperSaturate', t('wallSaturate'), SCREEN_LIMITS.saturate[0], SCREEN_LIMITS.saturate[1], 0.05, shown.saturate, '×'),

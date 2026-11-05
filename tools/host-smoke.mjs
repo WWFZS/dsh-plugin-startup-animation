@@ -334,10 +334,11 @@ assert.equal(wallTune.json().wallpaper.scrim, 0.92, '幕浓度没被夹到上限
 assert.equal(wallTune.json().wallpaper.blur, 12)
 assert.equal(wallTune.json().wallpaper.glassAlpha, 0.92, '玻璃透明度没被夹到上限')
 assert.equal(wallTune.json().wallpaper.surfaceBlur, 40, '面板模糊没被夹到上限')
-// 'auto' = 交还给预设（frosted 自带 0.25 的幕、36px 的面板模糊），而不是沿用刚才手调的 0.92。
+// 'auto' = 交还给预设（预设只负责颜色，遮挡一律回 0），而不是沿用刚才手调的 0.92。
 const wallAuto = await postJson({ wallpaperScrim: 'auto', wallpaperGlass: 'auto', wallpaperSurfaceBlur: 'auto' })
 assert.equal(wallAuto.status, 200, wallAuto.body.toString())
-assert.equal(wallAuto.json().wallpaper.scrim, 0.25, "'auto' 没有回落到预设自带的幕浓度")
+assert.equal(wallAuto.json().wallpaper.scrim, 0, "'auto' 没有回落到预设自带的幕浓度")
+assert.equal(wallAuto.json().wallpaper.glassAlpha, 0, "'auto' 没有回落到预设自带的玻璃遮挡")
 assert.equal(wallAuto.json().wallpaper.surfaceBlur, 36, "'auto' 没有回落到预设自带的面板模糊")
 // 认不出的预设 id 不落盘（写进去就是一份语义不明的手写数据），但不报错：
 // 这类"值不对"跟音量为 9 一样按夹取处理，界面不必为此弹红字。
