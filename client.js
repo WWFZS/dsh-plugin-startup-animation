@@ -2143,8 +2143,6 @@ window.__ModuleLoader__.load({
 
     function createWallpaperLayer(options) {
       const onDecision = options.onDecision
-      /** 每次决策都要贴到页上的颜色变量（不含字色通道之外的任何排版变量）。 */
-      const onLive = options.onLive
       /** 当前状态：来自 manage 的 wallpaper 段（形状见 index.js resolveWallpaper）。 */
       let cfg = null
       /** 上一次铺的是哪一份素材：`file|kind` —— 变了才重挂 DOM。 */
@@ -2430,7 +2428,14 @@ window.__ModuleLoader__.load({
         const hint = Array.isArray(next.hint) ? next.hint : []
         const sampled = sameMedia && lastDecision !== null ? lastDecision.analysis : null
         const analysis = sampled ?? (hint.length > 0 ? analyzeColors(hint) : null)
-        if (changed || lastDecision === null) decideAndApply(analysis)
+        if (changed || lastDecision === null) {
+          decideAndApply(analysis)
+        } else if (typeof onDecision === 'function') {
+          // 配置没变就不重算，但**要再报一次**：设置页是后起来的（它挂载时会
+          // `dsa:wall-query` 问一句），若这里闷着不吭声，设置页永远拿不到画面摘要，
+          // 预设卡上就没有对比度数字，滑杆下限也退回预设值。
+          onDecision(lastDecision)
+        }
         mountMedia()
         probe()
         // 布局稳定后再探一次：首帧时 frame 可能还在挂载中，早看会误判"层没铺上"。
@@ -3130,7 +3135,48 @@ window.__ModuleLoader__.load({
           }
         }
 
-        const wallCfg = (patch, okText) => postJson(send, patch, okText)
+        /**
+         * 点了就画：先把这份补丁合并进背景层，再落盘。
+         *
+         * 宿主是本地进程，回包通常只有几毫秒 —— 但那几毫秒是"点了没动静"的全部观感，
+         * 而且一旦回包慢/丢了（宿主重启、路由 500），用户只会得到"点了没反应"。
+         * 服务器仍是唯一真相：回包到了会再同步一次，值一样就被背景层的 sameAs 短路。
+         *
+         * 只做**不换素材**的补丁（预设、滑杆、开关）：换素材要先由宿主校验文件类型、
+         * 算出 src 与 kind，本地猜一遍只会猜错。
+         *
+         * @param {object} patch 提交给宿主的那份补丁（wallpaperPreset / wallpaper* 键）。
+         */
+        const paintNow = (patch) => {
+          if (wallpaper === null) return
+          // 换素材不本地预演：文件类型要宿主判、src 要宿主拼，猜错了就是先闪一张旧的再换。
+          if ('wallpaperFile' in patch) return
+          const next = { ...wallpaper }
+          if (typeof patch.wallpaperPreset === 'string') next.preset = patch.wallpaperPreset
+          // 'auto' 与"没传"都表示"回到预设自带的值"：交给 sanitizeTweak 就不必在
+          // 这里重写一遍优先级（它内部就是 resolvePreset，非有限数即跳过）。
+          const sliderKeys = [
+            ['wallpaperScrim', 'scrim'],
+            ['wallpaperBlur', 'blur'],
+            ['wallpaperSaturate', 'saturate'],
+          ]
+          for (const [from, to] of sliderKeys) {
+            if (patch[from] === 'auto') next[to] = 'auto'
+            else if (Number.isFinite(patch[from])) next[to] = patch[from]
+          }
+          if (typeof patch.wallpaperEnabled === 'boolean') next.enabled = patch.wallpaperEnabled
+          const tweak = sanitizeTweak({ preset: next.preset, scrim: next.scrim, blur: next.blur, saturate: next.saturate })
+          window.dispatchEvent(
+            new CustomEvent('dsa:wall-sync', {
+              detail: { ...next, ...tweak, enabled: next.enabled === true && next.src !== '' },
+            }),
+          )
+        }
+
+        const wallCfg = (patch, okText) => {
+          paintNow(patch)
+          return postJson(send, patch, okText)
+        }
 
         /**
          * 标题旁的版本小字。
@@ -3762,7 +3808,19 @@ window.__ModuleLoader__.load({
                 'data-tone': surface,
                 disabled: busy,
                 title: decision ? `${preset.name} · ${decision.contrast.toFixed(2)}:1` : preset.name,
-                onClick: () => wallCfg({ wallpaperPreset: preset.id }, t('saved')),
+                // 预设是"整套观感"：必须把三根滑杆的残留值一并清回 auto。
+                // 只写 preset 的话，之前拖过的 scrim/blur/saturate 会继续盖住新预设 ——
+                // 幕浓度和模糊纹丝不动，用户看到的就是"点了没反应"。
+                onClick: () =>
+                  wallCfg(
+                    {
+                      wallpaperPreset: preset.id,
+                      wallpaperScrim: 'auto',
+                      wallpaperBlur: 'auto',
+                      wallpaperSaturate: 'auto',
+                    },
+                    t('saved'),
+                  ),
               },
               h(
                 'span',

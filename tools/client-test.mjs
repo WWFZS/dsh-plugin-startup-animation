@@ -1408,7 +1408,7 @@ await check('主题页签：开关 + 预设卡 + 微调滑杆 + 素材卡片', a
   assert.ok(cardNames.includes('多重影像.mp4') && cardNames.includes('漫威-漫威宇宙.jpg'), `素材没列全：${cardNames}`)
 })
 
-await check('主题页签：点预设卡 → 只写 wallpaperPreset', async () => {
+await check('主题页签：点预设卡 → 写 preset 并把三根滑杆清回 auto', async () => {
   const { render, calls } = await loadClient({ status: themeStatus() })
   const tree = await openThemeTab(render)
   const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
@@ -1416,7 +1416,14 @@ await check('主题页签：点预设卡 → 只写 wallpaperPreset', async () =
   matte.props.onClick()
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
   assert.ok(post, '点预设没有发 POST')
-  assert.deepEqual(JSON.parse(post.init.body), { wallpaperPreset: 'matte' })
+  // 只写 preset 是不够的：之前拖过的 scrim/blur/saturate 会继续盖住新预设，
+  // 幕浓度和模糊纹丝不动 → 用户看到的就是"点了没反应"。必须一并清回 auto。
+  assert.deepEqual(JSON.parse(post.init.body), {
+    wallpaperPreset: 'matte',
+    wallpaperScrim: 'auto',
+    wallpaperBlur: 'auto',
+    wallpaperSaturate: 'auto',
+  })
 })
 
 await check('主题页签：点素材卡 → 写 wallpaperFile 并顺手打开壁纸', async () => {
@@ -1494,18 +1501,26 @@ await check('主题壁纸：让位变量必须带 !important（内核把令牌�
   assert.ok(!/font-size|font-family|--dsh-content-font-size/.test(css), `样式表里混进了排版变量：${css}`)
 })
 
-await check('主题壁纸：换预设立刻广播给背景层（不用刷新页面）', async () => {
+await check('主题壁纸：换预设立刻广播给背景层（不用等回包也不用刷新）', async () => {
   const { render, calls } = await loadClient({ status: themeStatus() })
   const tree = await openThemeTab(render)
-  const card = findByClass(tree, 'dsa-set-preset')[0]
-  assert.ok(card, '没有预设卡')
+  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
+  assert.ok(matte, '没有预设卡')
   // 背景层是常驻的独立实例，只靠 window 事件桥接：不广播就只改了设置页自己的卡片，
-  // 界面要等下次刷新才变 —— 这正是"换主题得刷新"的根因。
-  card.props.onClick()
+  // 界面要等下次刷新才变。**点下去当场**就得广播，不能等回包 —— 那几毫秒就是"点了没动静"。
+  matte.props.onClick()
+  const immediate = calls.filter((call) => call.type === 'event' && call.name === 'dsa:wall-sync')
+  assert.equal(immediate.length, 1, `点下去应该当场广播一次，实际 ${immediate.length} 次`)
+  // 且这次带的是**重磨砂自己的**观感：残留的滑杆值不能盖住预设。
+  assert.equal(immediate[0].detail.preset, 'matte')
+  assert.equal(immediate[0].detail.scrim, 0.34, `预设自带的幕浓度被残留值盖住了：${immediate[0].detail.scrim}`)
+  assert.equal(immediate[0].detail.blur, 18, `预设自带的模糊被残留值盖住了：${immediate[0].detail.blur}`)
+  assert.equal(immediate[0].detail.enabled, true)
+  // 回包到了再同步一次（服务器是唯一真相）。值一样，背景层会自己短路。
   await new Promise((resolve) => setTimeout(resolve, 30))
-  const synced = calls.filter((call) => call.type === 'event' && call.name === 'dsa:wall-sync')
-  assert.equal(synced.length, 1, `换预设应该广播一次 dsa:wall-sync，实际 ${synced.length} 次`)
-  assert.ok(synced[0].detail && typeof synced[0].detail.enabled === 'boolean', '广播里没带 wallpaper 段')
+  const after = calls.filter((call) => call.type === 'event' && call.name === 'dsa:wall-sync')
+  assert.ok(after.length >= 2, `回包后应该再同步一次，实际 ${after.length} 次`)
+  assert.ok(after[after.length - 1].detail && typeof after[after.length - 1].detail.enabled === 'boolean', '广播里没带 wallpaper 段')
 })
 
 console.log('')
