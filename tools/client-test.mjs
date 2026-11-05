@@ -1408,6 +1408,20 @@ await check('主题页签：开关 + 预设卡 + 微调滑杆 + 素材卡片', a
   assert.ok(cardNames.includes('多重影像.mp4') && cardNames.includes('漫威-漫威宇宙.jpg'), `素材没列全：${cardNames}`)
 })
 
+await check('主题页签：预设卡上每格都有对比度数字（不依赖背景层广播）', async () => {
+  const { render } = await loadClient({ status: themeStatus() })
+  const tree = await openThemeTab(render)
+  // 这里**没有**任何 dsa:wall-decision 广播（背景层还在起），拿到的只有 wallpaper.hint。
+  // 七格必须照样算得出数：否则用户看到七张空卡片，以为功能是坏的。
+  const ratios = findByClass(tree, 'dsa-set-preset-ratio')
+  assert.equal(ratios.length, 7, `预设对比度数量不对：${ratios.length}`)
+  for (const node of ratios) {
+    const text = node.children[0]
+    const value = Number(String(text).replace(':1', ''))
+    assert.ok(Number.isFinite(value) && value >= 4.5, `对比度算错了：${text}`)
+  }
+})
+
 await check('主题页签：点预设卡 → 写 preset 并把三根滑杆清回 auto', async () => {
   const { render, calls } = await loadClient({ status: themeStatus() })
   const tree = await openThemeTab(render)
@@ -1521,6 +1535,23 @@ await check('主题壁纸：换预设立刻广播给背景层（不用等回包�
   const after = calls.filter((call) => call.type === 'event' && call.name === 'dsa:wall-sync')
   assert.ok(after.length >= 2, `回包后应该再同步一次，实际 ${after.length} 次`)
   assert.ok(after[after.length - 1].detail && typeof after[after.length - 1].detail.enabled === 'boolean', '广播里没带 wallpaper 段')
+})
+await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广播，画面真的重画）', async () => {
+  const { render, calls } = await loadClient({ status: themeStatus() })
+  const tree = await openThemeTab(render)
+  const before = calls.filter((call) => call.type === 'style')
+  const beforeCss = before.length > 0 ? before[before.length - 1].el.textContent : ''
+  assert.ok(beforeCss.includes('blur(0px)'), `起始预设（可读优先）应该是零模糊：${beforeCss.slice(0, 160)}`)
+  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
+  assert.ok(matte, '找不到「重磨砂」预设')
+  matte.props.onClick()
+  // 就在点击当下读：这一层是同步画完的。不能等回包 —— 垫片的 POST 只会把**传进来的**
+  // 状态原样吐回来（它不模拟写盘），再等下去就等于断言"回包把画面盖回去"。
+  const after = calls.filter((call) => call.type === 'style')
+  const css = after[after.length - 1].el.textContent
+  // 重磨砂的核心观感是大模糊：18px 必须真的写进样式表，而不是只改了卡片。
+  assert.ok(css.includes('blur(18px)'), `点了「重磨砂」界面没重画：${css.slice(0, 160)}`)
+  assert.notEqual(css, beforeCss, '样式表没变，说明只是换了卡片')
 })
 
 console.log('')

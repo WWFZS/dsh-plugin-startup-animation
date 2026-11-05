@@ -3121,11 +3121,16 @@ window.__ModuleLoader__.load({
          * 对**当前这张壁纸**算一遍每个预设：拿背景层已经取样到的画面摘要，
          * 逐个 decideTheme → 得到"字色 + 幕浓度 + 实际对比度"。
          *
-         * 画面摘要（`analysis`）是唯一的外部输入：没有它就先给 null，
-         * 卡片只显示预设自身的观感，不编造数字。
+         * 画面摘要（`analysis`）是唯一的外部输入，两个来源，按可信度排：
+         *   ① 背景层真取样到的画面（`dsa:wall-decision` 广播）；
+         *   ② 内置素材的出厂代表色（`wallpaper.hint`）—— 背景层要是还没起来、
+         *      或者根本没收到广播，就用它兜底。**不能返回 null**：那样七格预设一个
+         *      数字都没有，用户看到的就是"这些卡片是死的"。
          */
         const presetPreview = (presetId) => {
-          const analysis = liveDecision && liveDecision.analysis ? liveDecision.analysis : null
+          const sampled = liveDecision && liveDecision.analysis ? liveDecision.analysis : null
+          const hint = wallpaper !== null && Array.isArray(wallpaper.hint) ? wallpaper.hint : []
+          const analysis = sampled !== null ? sampled : hint.length > 0 ? analyzeColors(hint) : null
           if (analysis === null) return null
           const resolved = resolvePreset({ preset: presetId, scrim: 'auto', blur: 'auto', saturate: 'auto' })
           try {
@@ -3732,9 +3737,15 @@ window.__ModuleLoader__.load({
            * 幕浓度的滑杆下限：用户可以把幕调薄，但**不能薄到字看不清**。
            * 这是"壁纸不影响用户看字"这条承诺在 UI 上的落点 —— 刻度到顶就是 0.92，
            * 但下限由当前画面的决策给出（拿不到画面摘要时用预设值兜底）。
+           *
+           * 注意这里不直接用 `liveDecision`：那份摘要来自背景层的广播，广播链路任何
+           * 一环没送到（背景层还没起来、规则被宿主拦了），下限就会退回预设值、卡片上
+           * 的对比度也会整排消失 —— 看着就像"这些数字是假的"。所以统一走 presetPreview
+           * （它自己会退回内置取色）。
            */
-          const floor = liveDecision && typeof liveDecision.scrim === 'number' ? liveDecision.scrim : activePreset.scrim
-          const liveContrast = liveDecision && typeof liveDecision.contrast === 'number' ? liveDecision.contrast : null
+          const liveNow = presetPreview(cfg.preset)
+          const floor = liveNow !== null && typeof liveNow.scrim === 'number' ? liveNow.scrim : activePreset.scrim
+          const liveContrast = liveNow !== null && typeof liveNow.contrast === 'number' ? liveNow.contrast : null
 
           const slider = (key, label, min, max, step, value, unit) => {
             const dragging = drag !== null && typeof drag[key] === 'number'
