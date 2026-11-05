@@ -450,7 +450,6 @@ window.__ModuleLoader__.load({
       // ── 主题（壁纸/视频铺进界面）──
       catTheme: '主题',
       wallpaper: '当壁纸',
-      setAsWallpaper: '设为界面壁纸',
       wallEnable: '界面壁纸',
       wallNote: '把视频或图片铺在界面背后。文字大小与字体不受影响，只动配色。',
       wallPreset: '观感预设',
@@ -560,7 +559,6 @@ window.__ModuleLoader__.load({
       // ── Theme (video/image behind the UI) ──
       catTheme: 'Theme',
       wallpaper: 'Wallpaper',
-      setAsWallpaper: 'Use as interface wallpaper',
       wallEnable: 'Interface wallpaper',
       wallNote: 'Puts a video or image behind the whole interface. Text size and font are untouched — only colors change.',
       wallPreset: 'Look preset',
@@ -781,8 +779,10 @@ window.__ModuleLoader__.load({
 .dsa-set-card-ph { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 16 / 9; background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); font-size: 12px; }
 .dsa-set-card-src { margin-left: 6px; font-size: 10.5px; color: var(--dsw-alias-label-tertiary); }
 .dsa-set-card-name { display: block; padding: 7px 9px; font-size: 12.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dsa-set-card-type { position: absolute; top: 7px; left: 7px; font-size: 11px; color: var(--dsw-alias-label-primary); background: rgba(0, 0, 0, 0.55); border-radius: 6px; padding: 2px 7px; pointer-events: none; }
-.dsa-set-card-using { position: absolute; top: 7px; left: 7px; font-size: 11px; color: #fff; background: var(--dsw-alias-brand-primary); border-radius: 6px; padding: 2px 7px; pointer-events: none; }
+.dsa-set-card-type { position: absolute; top: 7px; left: 7px; font-size: 11px; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); background: rgba(0, 0, 0, 0.55); border-radius: 6px; padding: 2px 7px; pointer-events: none; }
+/* 角标：底色一律用深色半透明，字径用固定值 —— 品牌色在浅色主题下是亮蓝，
+   白字压上去只有 3:1 左右，缩略图再亮一点就彻底糊了。 */
+.dsa-set-card-using { position: absolute; top: 7px; left: 7px; font-size: 11px; font-weight: 600; color: #fff; background: rgba(0, 0, 0, 0.72); border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 6px; padding: 2px 7px; pointer-events: none; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
 .dsa-set-card-del { position: absolute; top: 6px; right: 6px; z-index: 2; width: 24px; height: 24px; display: none; align-items: center; justify-content: center; border: none; border-radius: 7px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 14px; line-height: 1; cursor: pointer; padding: 0; }
 .dsa-set-card:hover .dsa-set-card-del, .dsa-set-card:focus-within .dsa-set-card-del { display: flex; }
 .dsa-set-card-del:hover { background: var(--dsw-alias-state-error-primary); }
@@ -810,12 +810,7 @@ window.__ModuleLoader__.load({
 .dsa-set-preset-name { font-size: 11.5px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsa-set-preset-ratio { font-size: 10.5px; color: var(--dsw-alias-label-tertiary); font-variant-numeric: tabular-nums; }
 /* 卡片右上角的「当壁纸」：与删除键同位置节拍，悬停才出现（平时别抢视线）。 */
-.dsa-set-card-wall { position: absolute; top: 6px; right: 6px; z-index: 3; display: none; align-items: center; justify-content: center; height: 22px; padding: 0 8px; border: none; border-radius: 7px; background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 11px; line-height: 1; cursor: pointer; }
-.dsa-set-card-wall:hover { background: var(--dsw-alias-brand-primary); }
-.dsa-set-card-wall:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 /* 删除键在右上角，壁纸键让到它左边 —— 两个都在悬停时出现，不能叠在一起。 */
-.dsa-set-card:hover .dsa-set-card-wall, .dsa-set-card:focus-within .dsa-set-card-wall { display: flex; }
-.dsa-set-card-wall { right: 36px; }
 /* ── 更新公告（Release 正文渲染：抬头 + 小标题 + 要点条目）── */
 .dsa-set-ann { display: flex; flex-direction: column; gap: 6px; max-width: 720px; }
 .dsa-set-ann-head { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary); }
@@ -2125,6 +2120,8 @@ window.__ModuleLoader__.load({
      */
     function createWallpaperLayer(options) {
       const onDecision = options.onDecision
+      /** 每次决策都要贴到页上的颜色变量（不含字色通道之外的任何排版变量）。 */
+      const onLive = options.onLive
       /** 当前状态：来自 manage 的 wallpaper 段（形状见 index.js resolveWallpaper）。 */
       let cfg = null
       /** 上一次铺的是哪一份素材：`file|kind` —— 变了才重挂 DOM。 */
@@ -2134,8 +2131,6 @@ window.__ModuleLoader__.load({
       /** 幕（半透明覆盖层）与素材本体分开：改浓度只需要改幕的 opacity。 */
       let scrimEl = null
       let mediaEl = null
-      /** 我们写过的 body 内联样式名：还原时逐个删掉，绝不整份清空（会误删别人的）。 */
-      const appliedProps = new Set()
       /** 最后一次决策（设置页要显示"当前对比度"）。 */
       let lastDecision = null
       /**
@@ -2145,41 +2140,45 @@ window.__ModuleLoader__.load({
        * "亮壁纸配深色字"这种结论）。所以这里没有 `data-ds-dark-theme` 的监听。
        */
       let alive = true
+      /** 壁纸层与"让位变量"合并进同一条样式表的挂载点（见 ensureLive）。 */
+      let sheetEl = null
+      /** 我们写进那条样式表的内容 —— 和上一份一样就整段跳过，这是拖滑杆不卡的关键。 */
+      let lastCss = ''
 
       const ensureStyle = () => {
         if (base !== null) return
         base = document.createElement('div')
         base.className = 'dsa-wall'
         base.setAttribute('aria-hidden', 'true')
-        base.style.cssText = [
-          'position:fixed',
-          'inset:0',
-          // 低于三列（AppFrame 的子列没有 z-index，同一个层叠上下文里按顺序叠）：
-          // 用负数保证它永远在最底下，用户拖页面/滚动都不会浮上来。
-          'z-index:-1',
-          'pointer-events:none',
-          // 独立层叠上下文：否则 z-index:-1 会掉到 body 背景之下，什么都看不见。
-          'isolation:isolate',
-          'overflow:hidden',
-          'background:#000',
-        ].join(';')
+        // 层叠与尺寸都在 ensureLive 的样式表里，这里一句内联都不写。
         mediaEl = document.createElement('img')
         mediaEl.className = 'dsa-wall-cover'
         mediaEl.alt = ''
-        mediaEl.style.cssText = [
-          'position:absolute',
-          'inset:0',
-          'width:100%',
-          'height:100%',
-          'object-fit:cover',
-          'display:block',
-        ].join(';')
         scrimEl = document.createElement('div')
         scrimEl.className = 'dsa-wall-scrim'
-        scrimEl.style.cssText = ['position:absolute', 'inset:0', 'background:#000', 'opacity:0'].join(';')
+        // 幕的浓度每帧都要动，留 inline（它只是两个简单属性，且只在这一个自绘元素上）。
+        scrimEl.style.cssText = 'background:#000;opacity:0'
         base.appendChild(mediaEl)
         base.appendChild(scrimEl)
         document.body.appendChild(base)
+      }
+
+      /**
+       * 一条样式表管两件事：壁纸层自己的层叠与尺寸 + 覆盖应用的让位变量。
+       *
+       * 为什么不用 body 内联样式（ThemePresenter 那种做法）：
+       *   - 内联改一个变量，浏览器要把整棵树的依赖了它的样式重算一遍；拖滑杆时每帧都来一次；
+       *   - 用一条样式表就**换掉整段文本**，只有依赖这些变量的规则重新匹配。
+       * 还有一点更重要：作用域是 `body`，比应用写在自己元素上的变量低一档 ——
+       * 只顶掉"应用没写死的地方"，不去和组件自己设的局部值硬碰。
+       */
+      const ensureLive = () => {
+        if (sheetEl === null) {
+          sheetEl = document.createElement('style')
+          sheetEl.setAttribute('data-dsa-wall', '')
+          document.head.appendChild(sheetEl)
+        }
+        return sheetEl
       }
 
       const dropMedia = () => {
@@ -2201,20 +2200,41 @@ window.__ModuleLoader__.load({
         mountedKey = ''
       }
 
-      /** 把一份 `{ name → value }` 写到 body 内联样式，并记下名字。 */
-      const applyVars = (vars) => {
-        const style = document.body.style
-        for (const [name, value] of Object.entries(vars)) {
-          style.setProperty(name, value)
-          appliedProps.add(name)
-        }
+      /**
       }
 
-      /** 还原：只删我们写过的那些，不动 DSH 自己写的那批。 */
+      /**
+       * 把"壁纸层骨架 + 颜色变量"整段写进样式表。
+       *
+       * @param {Record<string, string>} tokens deriveTokens 的输出。
+       * @param {{ blur: number, saturate: number }} resolved 已解析的预设参数。
+       */
+      const paintCss = (tokens, resolved) => {
+        const vars = layoutVars(tokens)
+        const css = [
+          // 层叠：AppFrame 的子列（sidebarCol/centerCol/bottomRow）都是定位元素或 grid 子项，
+          // z-index 全在 0 以上；负数是唯一"永远垫底、又不脱离 body 定位"的位置。
+          // isolation 让负 z-index 停在自己这一层，不会钻到 body 背景下面（钻下去就看不见了）。
+          '.dsa-wall{position:fixed;inset:0;z-index:-1;pointer-events:none;isolation:isolate;overflow:hidden;background:#000;',
+          `filter:blur(${resolved.blur}px) saturate(${resolved.saturate});transform:scale(${resolved.blur > 0 ? 1.06 : 1});}`,
+          '.dsa-wall-cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}',
+          '.dsa-wall-scrim{position:absolute;inset:0;}',
+          'body{',
+          Object.entries(vars)
+            .map(([name, value]) => `${name}:${value};`)
+            .join(''),
+          '}',
+        ].join('')
+        if (css === lastCss) return
+        lastCss = css
+        ensureLive().textContent = css
+      }
+
+      /** 还原：把那条样式表清空 —— 应用自己写的变量一个都不动，壁纸层也一并消失。 */
       const clearVars = () => {
-        const style = document.body.style
-        for (const name of appliedProps) style.removeProperty(name)
-        appliedProps.clear()
+        // 变量全在那条样式表里：清空文本就是"回到原生外观"。
+        lastCss = ''
+        if (sheetEl !== null) sheetEl.textContent = ''
       }
 
       /**
@@ -2252,19 +2272,16 @@ window.__ModuleLoader__.load({
       const decideAndApply = (analysis) => {
         if (cfg === null) return
         const preset = { preset: cfg.preset, scrim: cfg.scrim, blur: cfg.blur, saturate: cfg.saturate }
-        const decision = decideTheme(analysis, resolvePreset(preset))
-        const tokens = deriveTokens(decision, resolvePreset(preset))
+        const resolved = resolvePreset(preset)
+        const decision = decideTheme(analysis, resolved)
+        const tokens = deriveTokens(decision, resolved)
         lastDecision = { ...decision, analysis }
-        applyVars(layoutVars(tokens))
-        if (base !== null) {
-          base.style.filter = `blur(${resolvePreset(preset).blur}px) saturate(${resolvePreset(preset).saturate})`
-          // 模糊会把边缘吸进来一圈透明，放大一点补掉。
-          base.style.transform = `scale(${resolvePreset(preset).blur > 0 ? 1.06 : 1})`
-          if (scrimEl !== null) {
-            // 幕的颜色跟墨色走：浅色字压暗幕，深色字压亮幕。
-            scrimEl.style.background = decision.ink === 'light' ? '#000' : '#fff'
-            scrimEl.style.opacity = String(decision.scrim)
-          }
+        paintCss(tokens, resolved)
+        // 只动幕的浓度/颜色 —— 这两个属性挂在自绘的幕元素上，不影响应用任何样式。
+        if (scrimEl !== null) {
+          // 幕的颜色跟墨色走：浅色字压暗幕，深色字压亮幕。
+          scrimEl.style.background = decision.ink === 'light' ? '#000' : '#fff'
+          scrimEl.style.opacity = String(decision.scrim)
         }
         if (typeof onDecision === 'function') onDecision(lastDecision)
       }
@@ -2288,13 +2305,16 @@ window.__ModuleLoader__.load({
       /** 挂素材本体；图与视频分两路（视频要静音循环 + 失败降级）。 */
       const mountMedia = () => {
         if (cfg === null || base === null) return
-        const key = `${cfg.file}|${cfg.kind}|${cfg.preset}|${cfg.scrim}|${cfg.blur}|${cfg.saturate}`
+        // 只跟素材有关。换预设/拖滑杆只改颜色与幕，不要碰素材本体 ——
+        // 视频重挂要重新解码，拖一下滑杆就黑一帧，看着就是"卡"。
+        const key = `${cfg.file}|${cfg.kind}`
         if (key === mountedKey) return
         mountedKey = key
         const old = mediaEl
         const next = cfg.kind === 'video' ? document.createElement('video') : document.createElement('img')
         next.className = 'dsa-wall-cover'
-        next.style.cssText = old.style.cssText
+        // 样式全部走下面那条样式表（.dsa-wall / .dsa-wall-cover / .dsa-wall-scrim），
+        // 不走内联：内联改一次就要重新计算整棵树，拖滑杆时最贵的就是它。
         next.setAttribute('aria-hidden', 'true')
         if (next.tagName === 'VIDEO') {
           next.muted = true
@@ -2384,11 +2404,59 @@ window.__ModuleLoader__.load({
             /* 拿不到就当作没开壁纸：界面保持原生 */
           }
         },
+        /**
+         * 这份配置和当前生效的那份一样吗？（只看影响画面的键）
+         *
+         * @param {object} next manage 回包里的 wallpaper 段。
+         * @returns {boolean}
+         */
+        sameAs(next) {
+          if (cfg === null || next === null || typeof next !== 'object') return false
+          return (
+            cfg.enabled === next.enabled &&
+            cfg.file === next.file &&
+            cfg.preset === next.preset &&
+            cfg.scrim === next.scrim &&
+            cfg.blur === next.blur &&
+            cfg.saturate === next.saturate
+          )
+        },
         sync,
+        /**
+         * 拖滑杆时的"预览一步"：只改这一份配置里的微调，不重新挂素材、不落盘。
+         *
+         * 拖拽过程由设置页本地驱动 + rAF 合并，这里每帧最多跑一次 resolve+decide+paint，
+         * 全是纯计算加一次 `textContent` 赋值 —— 不会触发应用任何组件重渲染。
+         *
+         * @param {{ scrim?: number | 'auto', blur?: number | 'auto', saturate?: number | 'auto', preset?: string }} tweak 只含变了的键。
+         */
+        preview(tweak) {
+          if (!alive || cfg === null || cfg.enabled !== true) return
+          if (tweak === null || typeof tweak !== 'object') return
+          // 只覆盖三根滑杆能碰的键。sanitizeTweak 是整份配置的规范形，直接展开会把
+          // text/surface/opacity 这些派生值一起"钉死"，换预设时就再也回不到预设自带的策略。
+          const clean = sanitizeTweak({
+            preset: cfg.preset,
+            scrim: Number.isFinite(tweak.scrim) ? tweak.scrim : cfg.scrim,
+            blur: Number.isFinite(tweak.blur) ? tweak.blur : cfg.blur,
+            saturate: Number.isFinite(tweak.saturate) ? tweak.saturate : cfg.saturate,
+          })
+          cfg = { ...cfg, scrim: clean.scrim, blur: clean.blur, saturate: clean.saturate }
+          const resolved = resolvePreset(cfg)
+          const hint = Array.isArray(cfg.hint) ? cfg.hint : []
+          // 有画面摘要就用真画面，否则退回出厂代表色（两者都比"什么都不算"准）。
+          const analysis = lastDecision !== null && lastDecision.analysis ? lastDecision.analysis : hint.length > 0 ? analyzeColors(hint) : null
+          decideAndApply(analysis)
+        },
         destroy() {
           alive = false
           document.removeEventListener('visibilitychange', onVisibility)
           clearAll()
+          if (sheetEl !== null) {
+            sheetEl.remove()
+            sheetEl = null
+          }
+          lastCss = ''
           cfg = null
         },
       }
@@ -2999,31 +3067,6 @@ window.__ModuleLoader__.load({
         const wallCfg = (patch, okText) => postJson(send, patch, okText)
 
         /**
-         * 卡片右上角的「当壁纸」小按钮（悬停才出现）。
-         *
-         * 和卡片主体那个"设为开机动画"是**两个动作**：同一段素材可以只做开机动画、
-         * 只做界面壁纸，或者两样都做。所以这里不复用 `use` 那条 POST，而是直接写
-         * `wallpaperFile` 并把壁纸总开关打开 —— 用户点它的意思就是"我现在要看到它"。
-         */
-        const wallBtn = (file) =>
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dsa-set-card-wall',
-              'aria-label': `${t('setAsWallpaper')} ${file.name}`,
-              title: t('setAsWallpaper'),
-              disabled: busy,
-              onClick: (event) => {
-                event.stopPropagation()
-                if (busy) return
-                postJson(send, { wallpaperFile: file.path, wallpaperEnabled: true }, t('wallSaved'))
-              },
-            },
-            t('wallpaper'),
-          )
-
-        /**
          * 标题旁的版本小字。
          *
          * 有新版本时它就是「更新」按钮本体 —— 点一下直接更新（manage 路由的
@@ -3261,9 +3304,6 @@ window.__ModuleLoader__.load({
                               if (!active) postJson(send, { use: file.path }, t('saved'))
                             },
                           },
-                          // 右上角「当壁纸」：把这段素材设为界面主题（与"设为开机动画"独立）。
-                          // 视频卡片也能用 —— 视频壁纸正是这个功能的主角。
-                          wallBtn(file),
                           hidden
                             ? h('div', { className: 'dsa-set-card-ph' }, displayName(file.name))
                             : thumbEl(file.path, video, 'dsa-set-card-media', (event) => {
@@ -3535,6 +3575,44 @@ window.__ModuleLoader__.load({
             const cat = state ? (state.library || []).find((entry) => entry.id === id) : null
             if (cat) for (const file of cat.files) wallFiles.push(file)
           }
+          /**
+           * 滑杆正在被拖的键 → 拖到的那一格值。
+           *
+           * 为什么要本地状态：滑杆若是"纯受控"（value 只认 state），松手前每一格都要等
+           * 一次 POST 回来才动 —— 滑块就滞后在自己的手指后面，看着就是不跟手。这里拖动时
+           * 只用本地值绘制（立刻跟手），松手才落盘；落盘回来的数再交还给 state。
+           */
+          const [drag, setDrag] = React.useState(null)
+          /** 合并成一帧只发一次预览的句柄（range 的 change 事件比帧还密）。 */
+          const previewFrame = React.useRef(0)
+          const previewNext = React.useRef(null)
+          const flushPreview = () => {
+            previewFrame.current = 0
+            const patch = previewNext.current
+            previewNext.current = null
+            if (patch === null) return
+            window.dispatchEvent(new CustomEvent('dsa:wall-preview', { detail: patch }))
+          }
+          const sendPreview = (key, value) => {
+            previewNext.current = { ...(previewNext.current || {}), [key]: value }
+            if (previewFrame.current === 0) {
+              previewFrame.current =
+                typeof window.requestAnimationFrame === 'function'
+                  ? window.requestAnimationFrame(flushPreview)
+                  : window.setTimeout(flushPreview, 16)
+            }
+          }
+          // 停手：把最后一格落盘（一次 POST，不是每格一次），再结束本地拖动。
+          const commit = (key, value) => {
+            if (previewFrame.current !== 0 && typeof window.cancelAnimationFrame === 'function') {
+              window.cancelAnimationFrame(previewFrame.current)
+              previewFrame.current = 0
+            }
+            previewNext.current = null
+            setDrag(null)
+            wallCfg({ [key]: value }, t('saved'))
+          }
+
           const activePreset = PRESETS.find((item) => item.id === cfg.preset) || PRESETS[0]
           // 滑杆读的是"预设 + 微调"合起来的真值：用户拖到的就是他会看到的。
           const shown = resolvePreset({ preset: cfg.preset, scrim: cfg.scrim, blur: cfg.blur, saturate: cfg.saturate })
@@ -3546,33 +3624,55 @@ window.__ModuleLoader__.load({
           const floor = liveDecision && typeof liveDecision.scrim === 'number' ? liveDecision.scrim : activePreset.scrim
           const liveContrast = liveDecision && typeof liveDecision.contrast === 'number' ? liveDecision.contrast : null
 
-          const slider = (key, label, min, max, step, value, unit) =>
-            h(
+          const slider = (key, label, min, max, step, value, unit) => {
+            const dragging = drag !== null && typeof drag[key] === 'number'
+            const current = dragging ? drag[key] : value
+            return h(
               'div',
               { className: 'dsa-set-row' },
               h('div', { className: 'dsa-set-label' }, label),
               h(
                 'div',
                 { className: 'dsa-set-right' },
-                h('span', { className: 'dsa-set-sec' }, `${Math.round(value * (unit === '%' ? 100 : 1))}${unit === '%' ? '%' : unit}`),
+                h(
+                  'span',
+                  { className: 'dsa-set-sec' },
+                  `${Math.round(current * (unit === '%' ? 100 : 1))}${unit === '%' ? '%' : unit}`,
+                ),
                 h('input', {
                   type: 'range',
                   className: 'dsa-set-range',
                   min,
                   max,
                   step,
-                  value,
+                  value: current,
                   'aria-label': label,
-                  disabled: busy || !cfg.enabled,
+                  // 拖动期间不禁用：busy 一置真滑杆会自己松手，体验更差。
+                  disabled: dragging ? false : busy || !wallpaperOn,
+                  // 每一格：只本地记值 + 让壁纸层自己重画（不 POST，也不重渲染整页）。
                   onChange: (event) => {
                     const next = Number(event.target.value)
-                    if (Number.isFinite(next)) wallCfg({ [key]: next }, t('saved'))
+                    if (!Number.isFinite(next)) return
+                    setDrag((prev) => ({ ...(prev || {}), [key]: next }))
+                    sendPreview(key, next)
                   },
-                  // 壁纸关着时这三根都没有可调的对象（cfg.enabled 是开机动画的开关，与它无关）。
-                  disabled: busy || !wallpaperOn,
+                  // 松手：一次落盘。
+                  onPointerUp: (event) => {
+                    const next = Number(event.target.value)
+                    if (Number.isFinite(next)) commit(key, next)
+                  },
+                  // 键盘/无障碍路径没有 pointerup，用 change 收尾。
+                  onKeyUp: (event) => {
+                    const next = Number(event.target.value)
+                    if (Number.isFinite(next)) commit(key, next)
+                  },
+                  onBlur: () => {
+                    if (dragging) commit(key, current)
+                  },
                 }),
               ),
             )
+          }
 
           /**
            * 预设卡片：九宫格里的一格。
@@ -4086,17 +4186,29 @@ window.__ModuleLoader__.load({
           })
           const onWallSync = (event) => {
             const detail = event.detail
-            if (detail !== null && typeof detail === 'object') wallLayer.sync(detail)
+            if (detail === null || typeof detail !== 'object') return
+            // 落盘回包可能和刚才拖出来的预览一模一样（滑杆停手后就是这种情况）：
+            // 键都没变就什么都不做，省掉一次决策 + 一次样式表重写。
+            if (wallLayer.sameAs(detail)) return
+            wallLayer.sync(detail)
+          }
+          // 拖滑杆时的逐帧预览：只走壁纸层自己，不碰设置页 state
+          // （碰了就是每帧重渲染整页 —— 那就是"滑杆不跟手"的根源）。
+          const onWallPreview = (event) => {
+            const detail = event.detail
+            if (detail !== null && typeof detail === 'object') wallLayer.preview(detail)
           }
           const onWallQuery = () => {
             void wallLayer.load()
           }
           window.addEventListener('dsa:wall-sync', onWallSync)
+          window.addEventListener('dsa:wall-preview', onWallPreview)
           window.addEventListener('dsa:wall-query', onWallQuery)
           void wallLayer.load()
 
           return () => {
             window.removeEventListener('dsa:wall-sync', onWallSync)
+            window.removeEventListener('dsa:wall-preview', onWallPreview)
             window.removeEventListener('dsa:wall-query', onWallQuery)
             try {
               wallLayer.destroy()

@@ -1449,19 +1449,26 @@ await check('主题页签：壁纸关闭时滑杆禁用（没有壁纸可调）'
   }
 })
 
-await check('MP4/壁纸卡片上的「当壁纸」按钮：写 wallpaperFile 且不动 use', async () => {
+await check('MP4/壁纸页签的素材卡上不再有「当壁纸」按钮（选主题只在主题页签里做）', async () => {
   const status = themeStatus()
-  // 主题页签的夹具只给素材库，卡片要的是开机动画域那份（两边读同一个 library）。
-  const { render, calls } = await loadClient({ status: { ...status, library: status.library } })
+  const { render } = await loadClient({ status })
   const tree = await render()
-  const buttons = findByClass(tree, 'dsa-set-card-wall')
-  assert.ok(buttons.length > 0, '卡片上没有「当壁纸」按钮')
-  buttons[0].props.onClick({ stopPropagation() {} })
-  const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
-  const body = JSON.parse(post.init.body)
-  assert.equal(body.wallpaperEnabled, true)
-  assert.ok(typeof body.wallpaperFile === 'string' && body.wallpaperFile !== '', '没有写素材')
-  assert.equal(body.use, undefined, '不该顺手改开机动画的素材')
+  assert.equal(findByClass(tree, 'dsa-set-card-wall').length, 0, '素材卡上仍有「当壁纸」按钮')
+})
+
+await check('主题滑杆：拖动只本地跟手，松手才落盘一次', async () => {
+  const { render, calls } = await loadClient({ status: themeStatus() })
+  const tree = await openThemeTab(render)
+  const scrim = findByClass(tree, 'dsa-set-range').find((node) => node.props['aria-label'] === '遮罩厚度')
+  assert.ok(scrim, '没有遮罩滑杆')
+  // 三格拖拽：每一格都只改本地值，别急着 POST（POST 一次要等回包，滑块就滞后了）。
+  for (const value of ['0.4', '0.5', '0.6']) scrim.props.onChange({ target: { value } })
+  const posted = calls.filter((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.equal(posted.length, 0, '拖动过程中就在发请求了')
+  scrim.props.onPointerUp({ target: { value: '0.6' } })
+  const after = calls.filter((call) => call.type === 'fetch' && call.init?.method === 'POST')
+  assert.equal(after.length, 1, `松手后应该只落盘一次，实际 ${after.length} 次`)
+  assert.equal(JSON.parse(after[0].init.body).wallpaperScrim, 0.6)
 })
 
 console.log('')
