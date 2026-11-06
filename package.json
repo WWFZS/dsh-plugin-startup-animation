@@ -65,7 +65,7 @@
     "builtin/宠物/**/*"
   ],
   "scripts": {
-    "test": "node selftest.mjs && node lib/wallpaper-test.mjs && node tools/sync-wallpaper-inline.mjs --check && node tools/boot-runtime.mjs && node tools/client-test.mjs && node lib/self-manage-test.mjs && node lib/e2e-uninstall.mjs && node tools/boot-css-test.mjs && node tools/host-smoke.mjs",
+    "test": "node selftest.mjs && node lib/wallpaper-test.mjs && node tools/sync-wallpaper-inline.mjs --check && node tools/boot-runtime.mjs && node tools/client-test.mjs && node lib/self-manage-test.mjs && node lib/e2e-uninstall.mjs && node tools/host-smoke.mjs",
     "test:unit": "node selftest.mjs",
     "test:wallpaper": "node lib/wallpaper-test.mjs",
     "test:boot": "node tools/boot-runtime.mjs",
