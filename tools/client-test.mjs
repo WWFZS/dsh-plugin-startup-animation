@@ -1368,9 +1368,11 @@ const themeStatus = (wallpaper) => ({
     kind: 'video',
     name: '多重影像.mp4',
     preset: 'readable',
-    scrim: 0.52,
+    scrim: 0,
     blur: 0,
     saturate: 1,
+    glassAlpha: 0,
+    surfaceBlur: 24,
     hint: ['#12161f', '#2b3a55', '#7c93b8', '#05070c'],
     ...wallpaper,
   },
@@ -1529,14 +1531,14 @@ await check('主题壁纸：让位变量必须带 !important（内核把令牌�
   // 内核的 ThemePresenter 用 body.style.setProperty 落地令牌；不带 !important 的作者声明
   // 必输给内联，令牌顶不掉 → 列底还是内核那套实色 → 壁纸永远看不见。
   //
-  // 列底现在是**半透明玻璃**（rgba），不是 transparent："透"要让壁纸看得见，同时面板底
-  // 还得站得住字 —— 完全不透明等于没铺壁纸，完全透明等于字直接压在画面上。
+  // 列底出厂是 **transparent**（玻璃厚度 0 = 壁纸原样）。透明也要带 !important ——
+  // 内核把令牌写成 body 内联样式，不带 !important 的作者声明一律输给它。
   assert.match(
     css,
-    /--dsw-alias-bg-base:\s*rgba\([^)]*\)\s*!important/,
+    /--dsw-alias-bg-base:\s*(transparent|rgba\([^)]*\))\s*!important/,
     `让位变量没带 !important，会被 body 内联样式压住：${css.slice(0, 200)}`,
   )
-  assert.match(css, /--dsw-specific-sidebar-fill:\s*rgba\([^)]*\)\s*!important/, '侧栏底没接管')
+  assert.match(css, /--dsw-specific-sidebar-fill:\s*(transparent|rgba\([^)]*\))\s*!important/, '侧栏底没接管')
   // 画布本身也要放空：首帧 CSS 直接写死 background-color（深色主题是 #151517）。
   // body 必须显式 transparent —— 少它一份，壁纸就被那层实色盖死。
   assert.match(css, /body\{background:transparent !important/, 'body 底色没放空')
@@ -1588,12 +1590,17 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   // 状态原样吐回来（它不模拟写盘），再等下去就等于断言"回包把画面盖回去"。
   const after = calls.filter((call) => call.type === 'style')
   const css = after[after.length - 1].el.textContent
-  // 换预设必须真的换掉观感：三列底色（面板色 + 不透明度）跟着预设走。
-  assert.ok(
-    /--dsw-alias-bg-base:rgba\([^)]*,\s*[\d.]+\) !important/.test(css),
-    `三列底色没跟着预设生成半透明面板：${css.slice(-320)}`,
-  )
-  assert.notEqual(css, beforeCss, '样式表没变，说明只是换了卡片')
+  // 换预设必须真的换掉观感。七套预设的颜色（釉色）与磨砂半径都不同，但「重磨砂」和
+  // 「可读优先」是**同一套釉色**（只差磨砂半径，这是照参考实现的设计）—— 所以这里
+  // 换成点「暗夜釉色」：它的釉色是深蓝，浮层色必须真的变。
+  const night = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('暗夜釉色'))
+  assert.ok(night, '找不到「暗夜釉色」预设')
+  night.props.onClick()
+  const css2 = calls.filter((call) => call.type === 'style').pop().el.textContent
+  const layer3 = (text) => (text.match(/--dsw-alias-bg-layer-3:(#[0-9a-f]{6})/) || [])[1]
+  assert.ok(layer3(css2) !== undefined, `样式表里没有浮层色：${css2.slice(-320)}`)
+  assert.notEqual(css2, beforeCss, '换预设没重画样式表，说明只是换了卡片')
+  assert.notEqual(layer3(css2), layer3(beforeCss), '浮层色没跟着预设换，界面看起来不会变')
 })
 
 console.log('')

@@ -544,28 +544,39 @@ window.__ModuleLoader__.load({
       const wallWorst = contrastRatio(wallLo, glassInk) <= contrastRatio(wallHi, glassInk) ? wallLo : wallHi
       // 列底能"藏"多少，由**玻璃厚度**决定 —— 这是它存在的唯一理由。
       //
-      // 只看 4.5:1 的话，算出来的不透明度几乎永远落在下限 0.35（窗子太宽），滑杆也就
-      // 永远看不出反应 —— 这正是用户说的"玻璃厚度没效果"。所以这里把玻璃厚度翻译成
+      // 只看 4.5:1 的话，算出来的不透明度几乎永远落在下限（窗子太宽），滑杆也就永远
+      // 看不出反应 —— 这正是用户说的"玻璃厚度没效果"。所以这里把玻璃厚度翻译成
       // **面板能藏住多少壁纸**：玻璃越厚，成品色越靠近玻璃色、越远离壁纸。
       //
-      // 上下限都压在 0.3–0.95：0.3 是"壁纸看得清"的那一档（面板只剩三成，画面原样透上来），
-      // 0.95 是"还能再多藏一点"的上限 —— 到不了 1，永远留一丁点壁纸色。
+      // 下限是 0：**出厂就是最透的那一档**（面板不盖、壁纸原样）。道理很简单 ——
+      // 想看原样的壁纸，不该先把滑杆拖到底；遮挡是往"上"加，不是从满格往下减。
       //
-      // 0.3 这一档字是兜不住的（面板自己只有三成不透明），所以列底在**文字区域**会另叠
-      // 一层 `dsa-wall-reading`（见 deriveTokens）：壁纸面板保持清澈，字压在实底上。
-      // 安全性算出来更高时以安全值为准。
-      const SHELL_MIN = 0.3
-      const SHELL_MAX = 0.95
+      // glass = 0 时**不做任何安全反推**：用户明确要求"一点不盖"，这时候面板就该是
+      // transparent。安全线不是删掉了，而是搬到了字底下的保险层（`dsa-wall-reading`）——
+      // 面板可以全透，但字仍然压在 ≥4.5:1 的实底上。这个分工是整套观感的关键：
+      // 一份面负责"看见壁纸"，另一份小面积的面负责"看清字"。
+      const SHELL_MIN = 0
+      const SHELL_MAX = 0.9
       const shellTarget = SHELL_MIN + clampRange(glassAlpha, [0, 1]) * (SHELL_MAX - SHELL_MIN)
       // 悬停/选中的高亮面：不参与可读性主线，但也不能是"纯白或纯黑"跳变 —— 壁纸越亮，
       // 高亮就该越淡，否则白面板上的白色悬停块会直接吞掉壁纸。
       const wallLum = relativeLuminance(parseHex(decision.tint) ?? g1Rgb(g1.final))
       const hoverAlpha = clampRange(0.1 - wallLum * 0.08, [0.02, 0.1])
       const hover = mixRgb(g1Rgb(g1.final), parseHex(decision.tint) ?? g1Rgb(g1.final), hoverAlpha)
-      const wallAlpha = Math.max(
-        shellTarget,
-        solveWallAlpha(parseHex(g1.final) ?? wallWorst, glassInk, wallWorst),
-      )
+      // 面板底色**跟壁纸主色走**，不是预设釉色。
+      //
+      // 为什么：釉色是白的时候（可读优先/重磨砂），面板就是一层 46% 的白压在整个界面上，
+      // 壁纸透上来先被掺白 —— 用户看到的就是"色彩灰蒙、不够鲜亮"。面板底色跟着壁纸主色，
+      // 透上来的是**这颜色自己的加强版**，画面不褪色，字也仍然站在同一条色相当上。
+      const wallBase = parseHex(decision.tint) ?? g1Rgb(g1.final)
+      const wallAlpha = shellTarget <= 0.001
+        ? 0
+        : // 上限压在 0.9：到不了实色，永远留一点壁纸色。安全值想顶到 1 也不给 ——
+          // 面板做全实色等于"没开壁纸"，那不是用户要的东西。
+          Math.min(0.9, Math.max(shellTarget, solveWallAlpha(wallBase, glassInk, wallWorst)))
+      // 面板实际用的颜色：壁纸主色按"墙面透明度"往预设釉色里掺一档，让七套预设仍有区分，
+      // 但主调是壁纸自己的颜色。
+      const sheetRgb = byte3(mixRgb(g1Rgb(g1.final), wallBase, 0.62))
       const ink = inkLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(14, 16, 22, 0.95)'
       const dim = inkLight ? 'rgba(255, 255, 255, 0.76)' : 'rgba(14, 16, 22, 0.70)'
       const faint = inkLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(14, 16, 22, 0.54)'
@@ -574,7 +585,7 @@ window.__ModuleLoader__.load({
       //
       // 透底量跟着**列底实际留了多少空**走：列底 alpha=1（安全值推满）时壁纸本来就看不见，
       // 再把雾掺进去只是让颜色偏脏；列底很透时（玻璃厚度 0）壁纸才是画面主角。
-      const frost = mixRgb(g1Rgb(g1.final), parseHex(decision.tint) ?? g1Rgb(g1.final), clampRange(1 - wallAlpha, [0, GLASS_SHOW_THROUGH]))
+      const frostRgb = byte3(mixRgb(g1Rgb(g1.final), parseHex(decision.tint) ?? g1Rgb(g1.final), clampRange(1 - wallAlpha, [0, GLASS_SHOW_THROUGH])))
       // 文字保险层：贴在文字后面的一块实底（气泡、选中行、输入框里）。
       //
       // 为什么需要它：面板做到 0.3 时，壁纸原样透上来 —— 那才是"看得清壁纸"。但字压在这层
@@ -582,6 +593,25 @@ window.__ModuleLoader__.load({
       // 面板保持清澈，只在字底下垫一层接近实色的底。它对壁纸的遮挡面积小得多，
       // 视觉上仍是"壁纸铺满整个界面"，而字永远站在 ≥4.5:1 的面上。
       const reading = mixRgb(g1Rgb(g1.final), parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light) ?? g1Rgb(g1.final), 0.12)
+      // 浮层色：除了"壁纸雾"，还有一条**离壁纸越远越白**的台阶。
+      //
+      // 只看雾的话，七套预设里同釉色的那几套（可读优先/重磨砂）面板完全一样，
+      // 换预设只剩滑杆在动 —— 那正是"换预设看不出来"。所以浮层在雾的上面再按层级
+      // 往地板色方向抬一点点：层 3 是菜单/弹层，最实也最亮；地图上它还是同一条色相，
+      // 但肉眼能分出"浮起来了"。
+      // 浮层色：除了"壁纸雾"，还有一条**离壁纸越远越向主题地板靠**的台阶。
+      //
+      // 只看雾的话，七套预设里同釉色的那几套（可读优先/重磨砂）面板完全一样，
+      // 换预设只剩滑杆在动 —— 那正是"换预设看不出来"。所以浮层在雾的上面再按层级
+      // 走一步：层 3 是菜单/弹层，离壁纸最远、最接近主题地板；层 1 还是壁纸雾本身。
+      // 台阶只做一级（0 → 0.10 → 0.20），再多就成"三块不同的颜色"了。
+      //
+      // 方向**一律朝主题地板**：浅色主题往白抬、深色主题往暗压。反方向（浅色主题往下压暗）
+      // 会让浮层比面板还深，弹窗看起来像凹进去的，而且暗色层上白字的余量也会被吃掉。
+      const floorRgbForLift = parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light) ?? frostRgb
+      const liftStep = (rgb, amount) => toHex(mixRgb(rgb, floorRgbForLift, clampRange(amount, [0, 1])))
+      const frost2Hex = liftStep(frostRgb, 0.05)
+      const frost3Hex = liftStep(frostRgb, 0.1)
       // 文字保险层多实：面板本身不够用时（wallAlpha 低于 0.6）才逐步实起来；
       // 面板本来就够实的时候（0.85 以上）它退到和面板一样，界面上不多一层"补丁"。
       const readingAlpha = clampRange(wallAlpha + (1 - wallAlpha) * 0.55, [0.5, 0.95])
@@ -594,7 +624,9 @@ window.__ModuleLoader__.load({
         'dsa-wall-glass-2': g1.final,
         'dsa-wall-glass-3': g1.final,
         'dsa-wall-glass-solid': toHex(mixRgb(g1Rgb(g1.final), parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light) ?? g1Rgb(g1.final), floor * 0.5)),
-        'dsa-wall-frost': toHex(frost),
+        'dsa-wall-frost': toHex(frostRgb),
+        'dsa-wall-frost-2': frost2Hex,
+        'dsa-wall-frost-3': frost3Hex,
         'dsa-wall-surface-blur': `${surfaceBlur}px`,
         // 浮层的模糊：层越高，透过它看到的壁纸越糊 —— 这才是"浮起来的"观感。
         'dsa-wall-blur-1': `${surfaceBlur}px`,
@@ -604,7 +636,7 @@ window.__ModuleLoader__.load({
         // 三列的不透明度：`max(玻璃厚度, 安全性算出来的下限)`。
         // 玻璃厚度决定"面板藏住多少壁纸"，安全性决定"最少要藏多少"，取严的那个。
         'dsa-wall-wall-alpha': String(Math.round(wallAlpha * 100) / 100),
-        'dsa-wall-wall': rgba(g1Rgb(g1.final), wallAlpha),
+        'dsa-wall-wall': wallAlpha <= 0.001 ? 'transparent' : rgba(sheetRgb, wallAlpha),
         // 悬停/选中的高亮面：同样半透明，压在列底之上仍然透壁纸。
         'dsa-wall-hover': rgba(hover, 0.85),
         // 文字后面的实底：只有"壁纸透得太狠、字真的会看不清"时才实起来，
@@ -2744,22 +2776,22 @@ window.__ModuleLoader__.load({
         '--dsw-alias-bg-base': tokens['dsa-wall-wall'],
         '--dsw-specific-sidebar-fill': tokens['dsa-wall-wall'],
         // 面上的面：层 1 是大面板（卡片、行、列表），层 2/3 是浮在它上面的菜单、弹层、
-        // 选中态。三层用同一个颜色：面板亮度被可读性下限锁死，再想拉开只能往中间灰走，
-        // 而中间灰上白字黑字都只有 4:1 —— 层次交给浮层自己背后的模糊（见样式表）。
-        '--dsw-alias-bg-layer-1': tokens['dsa-wall-glass-1'],
-        '--dsw-alias-bg-layer-2': tokens['dsa-wall-glass-2'],
-        '--dsw-alias-bg-layer-3': tokens['dsa-wall-glass-3'],
+        // 选中态。三层用的是**同一族壁纸雾**，越靠前越往地板色抬一档 —— 这样"浮起来"
+        // 是看得见的，而不是三层糊成一个色。
+        '--dsw-alias-bg-layer-1': tokens['dsa-wall-frost'],
+        '--dsw-alias-bg-layer-2': tokens['dsa-wall-frost-2'],
+        '--dsw-alias-bg-layer-3': tokens['dsa-wall-frost-3'],
         // 面板背后那层"壁纸雾"。
         //
         // 不能拿 frost 当 `bg-overlay`：frost 是「玻璃面掺一点壁纸色」的中间调，
         // 糊在浮层上就是整片看不见。浮层自己也得站得住字，所以跟层 2/3 用同一个玻璃色。
         '--dsw-alias-bg-conversation': tokens['dsa-wall-frost'],
-        '--dsw-alias-bg-overlay': tokens['dsa-wall-glass-3'],
-        '--dsw-alias-bg-module-platform': tokens['dsa-wall-glass-2'],
-        '--dsw-alias-bg-multi-select': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-bg-overlay': tokens['dsa-wall-frost-3'],
+        '--dsw-alias-bg-module-platform': tokens['dsa-wall-frost-2'],
+        '--dsw-alias-bg-multi-select': tokens['dsa-wall-frost-2'],
         // 抬高的按钮（侧栏「新建会话」、重命名输入框）：比最高那层再亮半档。
-        '--dsw-alias-button-elevated-fill': tokens['dsa-wall-glass-3'],
-        '--dsw-alias-button-floating-fill': tokens['dsa-wall-glass-3'],
+        '--dsw-alias-button-elevated-fill': tokens['dsa-wall-frost-3'],
+        '--dsw-alias-button-floating-fill': tokens['dsa-wall-frost-3'],
         // 字色：由玻璃面的实际亮度决定（deriveTokens 里算过），不是拍脑袋。
         '--dsw-alias-label-primary': tokens['dsa-wall-ink'],
         '--dsw-alias-label-secondary': tokens['dsa-wall-ink-dim'],
@@ -2772,13 +2804,13 @@ window.__ModuleLoader__.load({
         // 行内 code 是 `background: var(--dsw-alias-markdown-inline-code)` + `color: inherit`
         // —— 只要底还停在内核那套浅色静态值（#f1f3f5），字却被我们改成浅墨，就成了
         // "白底白字"。代码块同理（label-primary 做字色 + code-block 做底）。
-        '--dsw-alias-markdown-inline-code': tokens['dsa-wall-glass-2'],
-        '--dsw-alias-markdown-code-block': tokens['dsa-wall-glass-1'],
-        '--dsw-alias-markdown-tag': tokens['dsa-wall-glass-2'],
-        '--dsw-alias-markdown-code-block-banner': tokens['dsa-wall-glass-2'],
+        '--dsw-alias-markdown-inline-code': tokens['dsa-wall-frost-2'],
+        '--dsw-alias-markdown-code-block': tokens['dsa-wall-frost'],
+        '--dsw-alias-markdown-tag': tokens['dsa-wall-frost-2'],
+        '--dsw-alias-markdown-code-block-banner': tokens['dsa-wall-frost-2'],
         // 用户消息气泡：底色是独立的 --dsw-specific-bubble（static-deepseek-50 浅蓝），
         // 字色却是 label-primary。壁纸把字改成浅色而气泡仍是浅蓝底 → 浅字浅底。
-        '--dsw-specific-bubble': tokens['dsa-wall-glass-2'],
+        '--dsw-specific-bubble': tokens['dsa-wall-frost-2'],
         '--dsw-specific-bubble-highlight': tokens['dsa-wall-glass-2'],
         // 菜单 / 输入区 / 悬浮层：自成一个面，同样必须跟着走。
         '--dsw-specific-menu': tokens['dsa-wall-glass-3'],
@@ -2951,7 +2983,9 @@ window.__ModuleLoader__.load({
           cfg.preset !== next.preset ||
           cfg.scrim !== next.scrim ||
           cfg.blur !== next.blur ||
-          cfg.saturate !== next.saturate
+          cfg.saturate !== next.saturate ||
+          (cfg.glassAlpha ?? 0) !== (next.glassAlpha ?? 0) ||
+          (cfg.surfaceBlur ?? 0) !== (next.surfaceBlur ?? 0)
         cfg = next
         wallLog('sync', { enabled: next.enabled, src: next.src, changed })
         if (next.enabled !== true || next.src === '') {
@@ -3021,13 +3055,18 @@ window.__ModuleLoader__.load({
          */
         sameAs(next) {
           if (cfg === null || next === null || typeof next !== 'object') return false
+          // 挡板要跟"画面由什么决定"对齐：少了 glassAlpha / surfaceBlur，
+          // 换预设（只改这两个 + 釉色）会被当成"没变"直接跳过 —— 那正是
+          // "点了预设，卡片变了但界面没动"。
           return (
             cfg.enabled === next.enabled &&
             cfg.file === next.file &&
             cfg.preset === next.preset &&
             cfg.scrim === next.scrim &&
             cfg.blur === next.blur &&
-            cfg.saturate === next.saturate
+            cfg.saturate === next.saturate &&
+            (cfg.glassAlpha ?? 0) === (next.glassAlpha ?? 0) &&
+            (cfg.surfaceBlur ?? 0) === (next.surfaceBlur ?? 0)
           )
         },
         sync,
@@ -3704,7 +3743,21 @@ window.__ModuleLoader__.load({
           // 换素材不本地预演：文件类型要宿主判、src 要宿主拼，猜错了就是先闪一张旧的再换。
           if ('wallpaperFile' in patch) return
           const next = { ...wallpaper }
-          if (typeof patch.wallpaperPreset === 'string') next.preset = patch.wallpaperPreset
+          const switchingPreset = typeof patch.wallpaperPreset === 'string' && patch.wallpaperPreset !== next.preset
+          if (switchingPreset) {
+            next.preset = patch.wallpaperPreset
+            // 换预设 = 换整套观感：把旧预设的微调（磨砂半径、遮挡）一并清掉，
+            // 否则残留值会盖住新预设 —— 用户看到的还是上一套的磨砂。
+            next.surfaceBlur = 'auto'
+            next.scrim = 'auto'
+            next.glassAlpha = 'auto'
+            next.blur = 'auto'
+            next.saturate = 'auto'
+            // 画面摘要要重算：磨砂半径现在是预设自带的观感，而 hint（出厂代表色）
+            // 算出来的摘要跟真画面算出来的可能不一样 —— 不换的话换预设只改了卡片。
+            const hint = Array.isArray(next.hint) ? next.hint : []
+            next.analysis = hint.length > 0 ? analyzeColors(hint) : null
+          }
           // 'auto' 与"没传"都表示"回到预设自带的值"：交给 sanitizeTweak 就不必在
           // 这里重写一遍优先级（它内部就是 resolvePreset，非有限数即跳过）。
           const sliderKeys = [
@@ -3714,6 +3767,8 @@ window.__ModuleLoader__.load({
             ['wallpaperGlass', 'glassAlpha'],
           ]
           for (const [from, to] of sliderKeys) {
+            // `switchingPreset` 刚把那几个键清成 'auto'：这里要**跳过**，不能改回去。
+            if (switchingPreset && to !== 'preset') continue
             if (patch[from] === 'auto') next[to] = 'auto'
             else if (Number.isFinite(patch[from])) next[to] = patch[from]
           }
@@ -4457,15 +4512,11 @@ window.__ModuleLoader__.load({
               ),
               h('div', { className: 'dsa-set-presets' }, PRESETS.map(presetCard)),
             ),
-            // ── ③ 微调：就两根 ──
-            // 预设只管颜色（七套釉色），**遮挡**留给这两根：
-            //   · 玻璃厚度 = 面板藏住多少壁纸（0 = 原样透出来，这是默认）
-            //   · 遮罩厚度 = 画面压暗多少（字实在看不清时才需要）
-            // 出厂全是 0，所以"刚装上、刚换预设"看到的一定是原样的壁纸。
+            // 预设只管颜色（七套釉色），**遮挡**归滑杆：出厂全是 0，所以"刚装上、
+            // 刚换预设"看到的一定是原样的壁纸 —— 想看更有遮挡的面板就往上加。
             //
-            // 壁纸模糊/色彩浓度不放出滑杆了：前者是预设的磨砂半径为底、加亮才用得上的
-            // 参数，后者只会把画面洗白 —— 两个都收进确认过的默认值里。
-            // 可读性下限挂在引擎里（面板 + 文字保险层），与这两根滑杆无关。
+            // 壁纸模糊/色彩浓度也收起了滑杆：前者是预设法定的磨砂半径，后者只会
+            // 把画面洗白。可读性下限挂在引擎里，与这两根滑杆无关。
             slider('wallpaperScrim', t('wallScrim'), SCREEN_LIMITS.scrim[0], SCREEN_LIMITS.scrim[1], 0.02, shown.scrim, '%'),
             slider('wallpaperBlur', t('wallBlur'), SCREEN_LIMITS.blur[0], SCREEN_LIMITS.blur[1], 1, shown.blur, 'px'),
             slider('wallpaperSaturate', t('wallSaturate'), SCREEN_LIMITS.saturate[0], SCREEN_LIMITS.saturate[1], 0.05, shown.saturate, '×'),
