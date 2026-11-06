@@ -637,6 +637,14 @@ window.__ModuleLoader__.load({
         'dsa-wall-wall': wallAlpha <= 0.001 ? 'transparent' : rgba(sheetRgb, wallAlpha),
         // 悬停/选中的高亮面：同样半透明，压在列底之上仍然透壁纸。
         'dsa-wall-hover': rgba(hover, 0.85),
+        // 卡片式布局里那几块"实心卡片"的底色。
+        //
+        // 卡片内部要能放任何字（正文、气泡、菜单），所以它必须比列底更实：先把地板色压到
+        // 0.92 的不透明度，再掺一点 glassTint 让每套预设仍有自己的调子。剩下的 8% 是给
+        // 浮层做台阶用的（面板/卡片/菜单各差一档），不是留给壁纸透的 —— 壁纸的可见面积
+        // 靠卡片之间的缝隙,不靠让卡片变透。
+        'dsa-wall-card': toHex(mixRgb(floorRgbForLift, tintRgb ?? floorRgbForLift, 0.14)),
+        'dsa-wall-card-alpha': '0.92',
         // 文字后面的实底：只有"壁纸透得太狠、字真的会看不清"时才实起来，
         // 其余时候跟着面板走（不能平白无故把气泡涂白）。
         'dsa-wall-reading': rgba(reading, readingAlpha),
@@ -2706,6 +2714,20 @@ window.__ModuleLoader__.load({
           `html{background-color:${tokens['dsa-wall-underlay']} !important;}`,
           'html,body{background-image:none !important;}',
           `body{background:transparent !important;}`,
+          // ── 卡片式布局 ──
+          //
+          // 壁纸铺满整个窗口，三列各自收成一块**独立卡片**，卡片间留 10px 的缝，壁纸从缝里
+          // 露出来。卡片是实底（0.92），所以卡片里的字永远清楚；壁纸的可见面积靠"缝隙 +
+          // 窗口留白"，不靠把卡片做透 —— 这就是"字清楚"与"壁纸鲜亮"能同时成立的地方。
+          //
+          // 选择器只认结构（`[data-shell-overlay]` 的父节点是 frame），不认 CSS module 的
+          // 哈希类名（`mP3x-q_frame`），内核升级也不会失效。
+          '[data-shell-overlay]{gap:var(--dsa-card-gap,10px);padding:var(--dsa-card-gap,10px);}',
+          '[data-shell-overlay]>*{border-radius:16px;overflow:hidden;background:var(--dsa-card);',
+          'box-shadow:0 6px 24px rgba(0,0,0,0.18),0 0 0 1px rgba(255,255,255,0.08) inset;}',
+          // 底栏是同一条横贯的卡片，左右对齐、下面留一条缝。
+          '[data-shell-bottom]{border-radius:14px;overflow:hidden;background:var(--dsa-card);',
+          'margin:0 var(--dsa-card-gap,10px) var(--dsa-card-gap,10px);}',
           // 一条规则都不留 backdrop-filter：它糊的是元素背后的**所有内容，包括列里自己的
           // 正文**。之前把它挂在 shell.overlay / 三列上，用户看到的就是"设置页的字清楚，
           // 对话窗口整个是模糊的"。壁纸要透上来，只靠列的底色半透明（下面的 wallAlpha）；
@@ -2769,6 +2791,17 @@ window.__ModuleLoader__.load({
         // 各有各的值：面板越亮的预设，越不能透 —— 白玻璃透在白底上会把字吃掉。
         '--dsw-alias-bg-base': tokens['dsa-wall-wall'],
         '--dsw-specific-sidebar-fill': tokens['dsa-wall-wall'],
+        // 卡片式布局：壁纸铺满整个窗口，三列各自变成一块**独立的实心卡片**，
+        // 卡片之间留出缝，壁纸就从缝里露出来。
+        //
+        // 为什么这样才不"闷"：字不再压在壁纸的任意一小块上，而是压在卡片内部统一的面
+        // 上 —— 所以卡片可以做得比"毛玻璃"实得多（字更清楚），同时整屏的壁纸面积仍然
+        // 很大（2/3 以上在缝隙里），观感不灰。这是拿"每一像素都半透"换"整块面清楚"。
+        //
+        // 卡片不需要读壁纸取样：它只要站在主题那一侧（深色主题→深卡、浅色→浅卡），
+        // 内部用哪套字色就由 deriveTokens 决定，和壁纸本身长什么样无关。
+        '--dsa-card': tokens['dsa-wall-card'],
+        '--dsa-card-gap': '10px',
         // 面上的面：层 1 是大面板（卡片、行、列表），层 2/3 是浮在它上面的菜单、弹层、
         // 选中态。三层用的是**同一族壁纸雾**，越靠前越往地板色抬一档 —— 这样"浮起来"
         // 是看得见的，而不是三层糊成一个色。
