@@ -618,7 +618,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   wallpaperScrim: 0,
   wallpaperBlur: 0,
   wallpaperSaturate: 1,
-  /** 玻璃面不透明度 0–1。0 = 面板全透（壁纸原样），越大越像实色釉面。 */
+  /** 玻璃面不透明度：已不开放滑杆，固定 0 = 面板全透。保留键以承接旧配置。 */
   wallpaperGlass: 0,
   /** 面板背后那层的模糊半径（px）。已不开放滑杆，保留键以承接旧配置。 */
   wallpaperSurfaceBlur: 'auto',
@@ -967,8 +967,8 @@ function resolveWallpaper(raw, options, warnings) {
     scrim: Number.isFinite(raw.wallpaperScrim) ? raw.wallpaperScrim : undefined,
     blur: Number.isFinite(raw.wallpaperBlur) ? raw.wallpaperBlur : undefined,
     saturate: Number.isFinite(raw.wallpaperSaturate) ? raw.wallpaperSaturate : undefined,
-    glassAlpha: Number.isFinite(raw.wallpaperGlass) ? raw.wallpaperGlass : undefined,
-    surfaceBlur: Number.isFinite(raw.wallpaperSurfaceBlur) ? raw.wallpaperSurfaceBlur : undefined,
+    // 玻璃厚度没有滑杆了，面板遮挡只由遮罩厚度负责：老配置里若还留着 wallpaperGlass，
+    // 直接忽略 —— 否则用户会看到一个自己调不动、却仍在生效的实色面板。
   })
   return {
     // 三项同时成立才算"真的在铺壁纸"：省得浏览器侧再判一遍。
@@ -2749,10 +2749,9 @@ export function apply(ctx) {
                     ['wallpaperScrim', SCREEN_LIMITS.scrim],
                     ['wallpaperBlur', SCREEN_LIMITS.blur],
                     ['wallpaperSaturate', SCREEN_LIMITS.saturate],
-                    // 玻璃配方：透明度与面板模糊。两者都只管"透多少、糊多少"，
-                    // 可读性下限在 lib/wallpaper.mjs 里是**另一项固定权重**，不受它们影响。
+                    // 玻璃厚度没有滑杆了：面板遮挡只由遮罩厚度负责（实测只有 0 才看得见壁纸，
+                    // 往上加就是一层实色，留着滑杆只会误导）。键保留但仍夹取，老客户端发来也不炸。
                     ['wallpaperGlass', SCREEN_LIMITS.glass],
-                    ['wallpaperSurfaceBlur', SCREEN_LIMITS.surfaceBlur],
                   ]) {
                     const value = body[key]
                     // 'auto' = 回到预设值（写盘时删掉这一项，读的时候自然回落）。
@@ -2819,7 +2818,7 @@ export function apply(ctx) {
                     patch.petPets = mergePetState(patch.petPets ?? petsNow, change.pack, next)
                   }
                   if (Object.keys(patch).length === 0) {
-                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "wallpaperEnabled", "wallpaperFile", "wallpaperPreset", "wallpaperScrim", "wallpaperBlur", "wallpaperSaturate", "wallpaperGlass", "wallpaperSurfaceBlur", "petEnabled", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
+                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "wallpaperEnabled", "wallpaperFile", "wallpaperPreset", "wallpaperScrim", "wallpaperBlur", "wallpaperSaturate", "wallpaperGlass", "petEnabled", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
                     return
                   }
                   try {

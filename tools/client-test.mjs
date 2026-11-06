@@ -1367,7 +1367,7 @@ const themeStatus = (wallpaper) => ({
     src: '/dsh-startup-animation/asset?path=builtin%2FMP4%2F%E5%A4%9A%E9%87%8D%E5%BD%B1%E5%83%8F.mp4',
     kind: 'video',
     name: '多重影像.mp4',
-    preset: 'readable',
+    preset: 'frosted',
     scrim: 0,
     blur: 0,
     saturate: 1,
@@ -1395,10 +1395,10 @@ await check('主题页签：开关 + 预设卡 + 微调滑杆 + 素材卡片', a
   const switches = findAll(tree, 'dsa-set-switch').filter((node) => node.props['aria-label'] === '界面壁纸')
   assert.equal(switches.length, 1, `主题页签的开关数量不对：${switches.length}`)
   assert.equal(switches[0].props['aria-checked'], 'true')
-  // 预设：7 套出厂预设（含"可读优先"），每格一个按钮。
+  // 预设：5 套出厂预设（含"重磨砂"），每格一个按钮。
   const presets = findAll(tree, 'dsa-set-preset')
-  assert.equal(presets.length, 7, `预设数量不对：${presets.length}`)
-  assert.ok(all.includes('可读优先'), `没有"可读优先"：${all.join(' | ')}`)
+  assert.equal(presets.length, 5, `预设数量不对：${presets.length}`)
+  assert.ok(all.includes('重磨砂'), `没有"重磨砂"：${all.join(' | ')}`)
   assert.ok(all.includes('暗夜釉色'), `没有"暗夜釉色"：${all.join(' | ')}`)
   // 当前预设那格是按下态，其余不是。
   assert.equal(presets.filter((node) => node.props['aria-pressed'] === 'true').length, 1, '按下态数量不对')
@@ -1418,7 +1418,7 @@ await check('主题页签：预设卡上每格都有对比度数字（不依赖�
   // 这里**没有**任何 dsa:wall-decision 广播（背景层还在起），拿到的只有 wallpaper.hint。
   // 七格必须照样算得出数：否则用户看到七张空卡片，以为功能是坏的。
   const ratios = findByClass(tree, 'dsa-set-preset-ratio')
-  assert.equal(ratios.length, 7, `预设对比度数量不对：${ratios.length}`)
+  assert.equal(ratios.length, 5, `预设对比度数量不对：${ratios.length}`)
   for (const node of ratios) {
     const text = node.children[0]
     const value = Number(String(text).replace(':1', ''))
@@ -1429,7 +1429,7 @@ await check('主题页签：预设卡上每格都有对比度数字（不依赖�
 await check('主题页签：点预设卡 → 写 preset 并把玻璃/模糊/幕全部清回 auto', async () => {
   const { render, calls } = await loadClient({ status: themeStatus() })
   const tree = await openThemeTab(render)
-  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
+  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('暗夜釉色'))
   assert.ok(matte, '找不到"重磨砂"预设')
   matte.props.onClick()
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
@@ -1437,7 +1437,7 @@ await check('主题页签：点预设卡 → 写 preset 并把玻璃/模糊/幕�
   // 只写 preset 是不够的：之前拖过的 scrim/blur/saturate/glassAlpha 会继续
   // 盖住新预设，幕浓度和玻璃纹丝不动 → 用户看到的就是"点了没反应"。必须一并清回 auto。
   assert.deepEqual(JSON.parse(post.init.body), {
-    wallpaperPreset: 'frosted',
+    wallpaperPreset: 'night',
     wallpaperScrim: 'auto',
     wallpaperBlur: 'auto',
     wallpaperSaturate: 'auto',
@@ -1469,26 +1469,28 @@ await check('主题页签：遮罩滑杆从 0 开始（想原样透出壁纸就�
   // 下限就是 0：安全线在引擎里（玻璃厚度会把面板抬回来），不该靠滑杆下限锁人。
   assert.equal(Number(scrim.props.min), 0, `遮罩下限是 ${scrim.props.min}，应该允许 0`)
 })
-await check('主题页签：面板模糊滑杆已去掉（开着只会让画面更糊）', async () => {
+await check('主题页签：只剩三根滑杆（遮罩厚度 / 壁纸模糊 / 色彩浓度）', async () => {
   const { render } = await loadClient({ status: themeStatus() })
   const tree = await openThemeTab(render)
   const labels = findAll(tree, 'dsa-set-range').map((node) => node.props['aria-label'])
   assert.ok(!labels.includes('面板模糊'), `滑杆里还有「面板模糊」：${labels.join('/')}`)
-  // 主题面板自己的四根：遮罩厚度 / 壁纸模糊 / 色彩浓度 / 玻璃厚度
-  // （页面上还有个开机动画的「展示时长」，不在主题面板里）。
+  // 玻璃厚度也收掉了：实测只有 0 才看得见壁纸，往上加就是一层实色，留着只会误导。
+  assert.ok(!labels.includes('玻璃厚度'), `滑杆里还有「玻璃厚度」：${labels.join('/')}`)
+  // 页面上还有个开机动画的「展示时长」，不在主题面板里。
   assert.deepEqual(
     labels.filter((label) => label !== '展示时长'),
-    ['遮罩厚度', '壁纸模糊', '色彩浓度', '玻璃厚度'],
+    ['遮罩厚度', '壁纸模糊', '色彩浓度'],
   )
 })
-await check('玻璃厚度真的动面板：拖到 0 和拖到 1 的不透明度必须不同', async () => {
+await check('遮罩与壁纸模糊的上限收紧到 80% / 10px', async () => {
   const wall = await import('../lib/wallpaper.mjs')
-  const analysis = wall.analyzeColors(['#1f2d3d', '#4a6b8a'])
-  const preset = wall.resolvePreset({ preset: 'readable' })
-  const decision = wall.decideTheme(analysis, preset)
-  const thin = Number(wall.deriveTokens(decision, { ...preset, glassAlpha: 0 }, { dark: true })['dsa-wall-wall-alpha'])
-  const thick = Number(wall.deriveTokens(decision, { ...preset, glassAlpha: 1 }, { dark: true })['dsa-wall-wall-alpha'])
-  assert.ok(thick > thin + 0.2, `玻璃厚度没效果：0→${thin}，1→${thick}`)
+  assert.equal(wall.SCREEN_LIMITS.scrim[1], 0.8, '遮罩上限不是 80%')
+  assert.equal(wall.SCREEN_LIMITS.blur[1], 10, '壁纸模糊上限不是 10px')
+  const { render } = await loadClient({ status: themeStatus() })
+  const tree = await openThemeTab(render)
+  const ranges = (label) => findByClass(tree, 'dsa-set-range').find((node) => node.props['aria-label'] === label)
+  assert.equal(Number(ranges('遮罩厚度').props.max), 0.8)
+  assert.equal(Number(ranges('壁纸模糊').props.max), 10)
 })
 
 await check('主题页签：壁纸关闭时滑杆禁用（没有壁纸可调）', async () => {
@@ -1551,7 +1553,7 @@ await check('主题壁纸：让位变量必须带 !important（内核把令牌�
 await check('主题壁纸：换预设立刻广播给背景层（不用等回包也不用刷新）', async () => {
   const { render, calls } = await loadClient({ status: themeStatus() })
   const tree = await openThemeTab(render)
-  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
+  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('暗夜釉色'))
   assert.ok(matte, '没有预设卡')
   // 背景层是常驻的独立实例，只靠 window 事件桥接：不广播就只改了设置页自己的卡片，
   // 界面要等下次刷新才变。**点下去当场**就得广播，不能等回包 —— 那几毫秒就是"点了没动静"。
@@ -1560,10 +1562,10 @@ await check('主题壁纸：换预设立刻广播给背景层（不用等回包�
   assert.equal(immediate.length, 1, `点下去应该当场广播一次，实际 ${immediate.length} 次`)
   // 且这次带的是**重磨砂自己的**观感：残留的滑杆值不能盖住预设。
   // 预设只负责颜色，遮挡一律回 0 —— 点预设 = 回到"壁纸原样透出来"。
-  assert.equal(immediate[0].detail.preset, 'frosted')
+  assert.equal(immediate[0].detail.preset, 'night')
   assert.equal(immediate[0].detail.scrim, 0, `预设不该自带幕浓度：${immediate[0].detail.scrim}`)
   assert.equal(immediate[0].detail.glassAlpha, 0, `预设不该自带玻璃遮挡：${immediate[0].detail.glassAlpha}`)
-  assert.equal(immediate[0].detail.surfaceBlur, 36, `预设自带的磨砂半径丢了：${immediate[0].detail.surfaceBlur}`)
+  assert.equal(immediate[0].detail.surfaceBlur, 22, `预设自带的磨砂半径丢了：${immediate[0].detail.surfaceBlur}`)
   assert.equal(immediate[0].detail.enabled, true)
   // 回包到了再同步一次（服务器是唯一真相）。值一样，背景层会自己短路。
   await new Promise((resolve) => setTimeout(resolve, 30))

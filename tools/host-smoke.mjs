@@ -327,25 +327,25 @@ assert.equal(wallBytes.status, 200, '壁纸素材取不到流')
 assert.match(wallBytes.headers['content-type'], /^image\//)
 // 预设与微调：认得的值留下，越界的被夹住。
 const frostedId = 'frosted'
-const wallTune = await postJson({ wallpaperPreset: frostedId, wallpaperScrim: 5, wallpaperBlur: 12, wallpaperGlass: 9, wallpaperSurfaceBlur: 99 })
+const wallTune = await postJson({ wallpaperPreset: frostedId, wallpaperScrim: 5, wallpaperBlur: 12, wallpaperGlass: 9 })
 assert.equal(wallTune.status, 200, wallTune.body.toString())
 assert.equal(wallTune.json().wallpaper.preset, frostedId)
-assert.equal(wallTune.json().wallpaper.scrim, 0.92, '幕浓度没被夹到上限')
-assert.equal(wallTune.json().wallpaper.blur, 12)
-assert.equal(wallTune.json().wallpaper.glassAlpha, 0.92, '玻璃透明度没被夹到上限')
-assert.equal(wallTune.json().wallpaper.surfaceBlur, 40, '面板模糊没被夹到上限')
+assert.equal(wallTune.json().wallpaper.scrim, 0.8, '幕浓度没被夹到上限')
+assert.equal(wallTune.json().wallpaper.blur, 10, '壁纸模糊被夹到 10px')
+assert.equal(wallTune.json().wallpaper.glassAlpha, 0, '玻璃厚度应固定为 0（滑杆已收掉）')
+// 面板模糊滑杆已经整体收掉：预设自带的那一档磨砂半径照常生效，不再接受手调。
 // 'auto' = 交还给预设（预设只负责颜色，遮挡一律回 0），而不是沿用刚才手调的 0.92。
-const wallAuto = await postJson({ wallpaperScrim: 'auto', wallpaperGlass: 'auto', wallpaperSurfaceBlur: 'auto' })
+const wallAuto = await postJson({ wallpaperScrim: 'auto', wallpaperGlass: 'auto' })
 assert.equal(wallAuto.status, 200, wallAuto.body.toString())
 assert.equal(wallAuto.json().wallpaper.scrim, 0, "'auto' 没有回落到预设自带的幕浓度")
 assert.equal(wallAuto.json().wallpaper.glassAlpha, 0, "'auto' 没有回落到预设自带的玻璃遮挡")
 assert.equal(wallAuto.json().wallpaper.surfaceBlur, 36, "'auto' 没有回落到预设自带的面板模糊")
 // 认不出的预设 id 不落盘（写进去就是一份语义不明的手写数据），但不报错：
 // 这类"值不对"跟音量为 9 一样按夹取处理，界面不必为此弹红字。
-// 退回的是默认预设（readable），而不是保持上一个 —— 手写的坏 id 不该把用户锁死。
+// 退回的是默认预设（frosted），而不是保持上一个 —— 手写的坏 id 不该把用户锁死。
 const wallBadPreset = await postJson({ wallpaperPreset: 'not-a-preset' })
 assert.equal(wallBadPreset.status, 200, wallBadPreset.body.toString())
-assert.equal(wallBadPreset.json().wallpaper.preset, 'readable', '认不出的预设没退回默认值')
+assert.equal(wallBadPreset.json().wallpaper.preset, 'frosted', '认不出的预设没退回默认值')
 // 音频不能当壁纸：静默拒收（不落盘、不炸），壁纸保持关闭。
 const wallAudio = await postJson({ wallpaperFile: audioEntry.path })
 assert.equal(wallAudio.status, 200, wallAudio.body.toString())

@@ -106,7 +106,7 @@ window.__ModuleLoader__.load({
 
     /**
      * 出厂预设。除了幕（`scrim`）、壁纸模糊（`blur`）、色彩浓度（`saturate`），
-     * 每个预设还带一套**玻璃配方**，这正是"七套预设看起来完全不一样"的来源：
+     * 每个预设还带一套**玻璃配方**，这正是"五套预设看起来完全不一样"的来源：
      *
      * - `glassTint`   玻璃面的色（面板/卡片/菜单/气泡都染它）
      * - `glassAlpha`  玻璃面的不透明度 0–1
@@ -118,22 +118,20 @@ window.__ModuleLoader__.load({
      * 因为最后还有 FLOOR 兜底。
      */
     const PRESETS = Object.freeze([
-      { id: 'readable', name: '可读优先', scrim: 0, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0, surfaceBlur: 24, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '白釉玻璃，正文优先' },
       { id: 'frosted', name: '重磨砂', scrim: 0, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0, surfaceBlur: 36, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '大半径磨砂，动态也稳' },
       { id: 'night', name: '暗夜釉色', scrim: 0, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0, surfaceBlur: 22, accent: '#4f8cff', text: 'light', surface: 'solid', desc: '深蓝釉面，夜景' },
       { id: 'vivid', name: '原色直出', scrim: 0, blur: 0, saturate: 1, glassTint: '#67dce7', glassAlpha: 0, surfaceBlur: 18, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '青色玻璃，壁纸颜色不被压' },
-      { id: 'author', name: '作者自用', scrim: 0, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0, surfaceBlur: 9, accent: '#67dce7', text: 'light', surface: 'solid', desc: '深色薄玻璃' },
       { id: 'hacker', name: '黑客绿(Fish)', scrim: 0, blur: 0, saturate: 1, glassTint: '#266d3c', glassAlpha: 0, surfaceBlur: 9, accent: '#00c800', text: 'light', surface: 'solid', desc: '终端绿' },
       { id: 'violet', name: '紫色心情', scrim: 0, blur: 0, saturate: 1, glassTint: '#533b78', glassAlpha: 0, surfaceBlur: 9, accent: '#b388ff', text: 'light', surface: 'solid', desc: '紫釉玻璃' },
     ])
 
     /** 默认预设 id：装上就有合理观感，不逼用户先选一套。 */
-    const DEFAULT_PRESET_ID = 'readable'
+    const DEFAULT_PRESET_ID = 'frosted'
 
     /** 用户改动过的安全区间（服务端也用这几个数夹取，两边一致）。 */
     const SCREEN_LIMITS = Object.freeze({
-      scrim: [0, 0.92],
-      blur: [0, 32],
+      scrim: [0, 0.8],
+      blur: [0, 10],
       saturate: [0.3, 1.6],
       opacity: [0.15, 0.92],
       // 玻璃面透明度：上限 0.92 —— 留一点缝让壁纸透出来，同时地板层仍在托底。
@@ -461,7 +459,7 @@ window.__ModuleLoader__.load({
 
     function deriveTokens(decision, preset = {}, opts = {}) {
       const dark = opts.dark === true
-      // 玻璃配方只出现在预设里（七套各自一套釉色）。预设没给釉色时不能拿**壁纸的画面色**
+      // 玻璃配方只出现在预设里（每套一套釉色）。预设没给釉色时不能拿**壁纸的画面色**
       // 顶替 —— 那是壁纸的主色，压成不透明面板会变成一整块纯色块（深色壁纸 ⇒ 全黑界面）。
       // 这种情形退回"当前主题的原生釉"：浅色白釉、深色近黑釉。
       const nativeTint = dark ? FLOOR_BASE.dark : FLOOR_BASE.light
@@ -478,10 +476,10 @@ window.__ModuleLoader__.load({
       const glassAlpha = clampRange(Number.isFinite(preset.glassAlpha) ? preset.glassAlpha : 0.4, SCREEN_LIMITS.glass)
       const surfaceBlur = Math.round(clampRange(Number.isFinite(preset.surfaceBlur) ? preset.surfaceBlur : 20, SCREEN_LIMITS.surfaceBlur))
       const accent = preset.accent ?? '#4f8cff'
-      // 地板色 = 预设的玻璃色经亮度钳制：色相听预设的（七套各有自己的调子），亮度必须
+      // 地板色 = 预设的玻璃色经亮度钳制：色相听预设的（每套有自己的调子），亮度必须
       // 过 4.6:1 那条线。直接拿玻璃色当釉去混白/黑地板是不行的 —— 两者都往中间走，
       // 深色主题下白色釉在 0.59 的地板上只剩 `#333539`，比宿主原生底色还亮，
-      // 七套预设于是糊成同一片灰，这就是"参数全拉低也看不见"。
+      // 五套预设于是糊成同一片灰，这就是"参数全拉低也看不见"。
       //
       // 最透那一档（玻璃厚度滑杆拉到 0）用的釉色比例极小，只要地板本身够深就守得住；
       // 层 2/3 掺的釉更多，所以它们各自再钳一次 —— 但**幅度要小**：钳得太狠，
@@ -565,7 +563,7 @@ window.__ModuleLoader__.load({
       const hover = mixRgb(g1Rgb(g1.final), parseHex(decision.tint) ?? g1Rgb(g1.final), hoverAlpha)
       // 面板底色**跟壁纸主色走**，不是预设釉色。
       //
-      // 为什么：釉色是白的时候（可读优先/重磨砂），面板就是一层 46% 的白压在整个界面上，
+      // 为什么：釉色是白的时候（重磨砂），面板就是一层 46% 的白压在整个界面上，
       // 壁纸透上来先被掺白 —— 用户看到的就是"色彩灰蒙、不够鲜亮"。面板底色跟着壁纸主色，
       // 透上来的是**这颜色自己的加强版**，画面不褪色，字也仍然站在同一条色相当上。
       const wallBase = parseHex(decision.tint) ?? g1Rgb(g1.final)
@@ -574,14 +572,14 @@ window.__ModuleLoader__.load({
         : // 上限压在 0.9：到不了实色，永远留一点壁纸色。安全值想顶到 1 也不给 ——
           // 面板做全实色等于"没开壁纸"，那不是用户要的东西。
           Math.min(0.9, Math.max(shellTarget, solveWallAlpha(wallBase, glassInk, wallWorst)))
-      // 面板实际用的颜色：壁纸主色按"墙面透明度"往预设釉色里掺一档，让七套预设仍有区分，
+      // 面板实际用的颜色：壁纸主色按"墙面透明度"往预设釉色里掺一档，让五套预设仍有区分，
       // 但主调是壁纸自己的颜色。
       const sheetRgb = byte3(mixRgb(g1Rgb(g1.final), wallBase, 0.62))
       const ink = inkLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(14, 16, 22, 0.95)'
       const dim = inkLight ? 'rgba(255, 255, 255, 0.76)' : 'rgba(14, 16, 22, 0.70)'
       const faint = inkLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(14, 16, 22, 0.54)'
       // 面板背后要糊成什么样：把**真实壁纸色**按透底量掺进玻璃面 ——
-      // 这就是面板后面看到的那层"壁纸雾"，也是七套预设肉眼能分开的最后一把力。
+      // 这就是面板后面看到的那层"壁纸雾"，也是五套预设肉眼能分开的最后一把力。
       //
       // 透底量跟着**列底实际留了多少空**走：列底 alpha=1（安全值推满）时壁纸本来就看不见，
       // 再把雾掺进去只是让颜色偏脏；列底很透时（玻璃厚度 0）壁纸才是画面主角。
@@ -595,13 +593,13 @@ window.__ModuleLoader__.load({
       const reading = mixRgb(g1Rgb(g1.final), parseHex(dark ? FLOOR_BASE.dark : FLOOR_BASE.light) ?? g1Rgb(g1.final), 0.12)
       // 浮层色：除了"壁纸雾"，还有一条**离壁纸越远越白**的台阶。
       //
-      // 只看雾的话，七套预设里同釉色的那几套（可读优先/重磨砂）面板完全一样，
+      // 只看雾的话，同釉色的几套面板完全一样，
       // 换预设只剩滑杆在动 —— 那正是"换预设看不出来"。所以浮层在雾的上面再按层级
       // 往地板色方向抬一点点：层 3 是菜单/弹层，最实也最亮；地图上它还是同一条色相，
       // 但肉眼能分出"浮起来了"。
       // 浮层色：除了"壁纸雾"，还有一条**离壁纸越远越向主题地板靠**的台阶。
       //
-      // 只看雾的话，七套预设里同釉色的那几套（可读优先/重磨砂）面板完全一样，
+      // 只看雾的话，同釉色的几套面板完全一样，
       // 换预设只剩滑杆在动 —— 那正是"换预设看不出来"。所以浮层在雾的上面再按层级
       // 走一步：层 3 是菜单/弹层，离壁纸最远、最接近主题地板；层 1 还是壁纸雾本身。
       // 台阶只做一级（0 → 0.10 → 0.20），再多就成"三块不同的颜色"了。
@@ -698,7 +696,7 @@ window.__ModuleLoader__.load({
      * 三步纯算术（不依赖浏览器的 color-mix），所以 node 里能直接单测出最终对比度：
      *
      *   1. 地板色 = 玻璃色经亮度钳制（`clampSurfaceColor`）→ 色相听预设，亮度过 4.6:1
-     *   2. 釉色按 alpha 掺进地板色              → 面板的"釉"，七套预设在这一步分开
+     *   2. 釉色按 alpha 掺进地板色              → 面板的"釉"，五套预设在这一步分开
      *   3. 字色取步骤 2 的亮度                 → 深釉配白字、亮釉配黑字
      *
      * 可读性下限由**步骤 1** 兑现：地板色本身就已经过线，釉色不管怎么掺，字色
@@ -724,7 +722,7 @@ window.__ModuleLoader__.load({
      * - 深色主题：太亮的釉会被往黑压（`#ffffff → #3d3e3e`）；
      * - 浅色主题：太暗的釉会被往白提（`#0d1524 → #d0d2d5`）。
      *
-     * 保住色相的**方向**：七套预设仍是七种调子，只是亮度过线，不会糊成一片灰。
+     * 保住色相的**方向**：五套预设仍是七种调子，只是亮度过线，不会糊成一片灰。
      * 参考实现把这一项叫 `weClampSurfaceColor`，判的是同一条网格（正文 vs 面板合成到
      * 最坏背衬 ≥4.5:1，最透档 alpha 取 0.10）。
      *
@@ -743,7 +741,7 @@ window.__ModuleLoader__.load({
       //
       // 这里刻意不按"主题方向优先"挑：那样会让暗釉色在浅色主题下被一路顶到 `#5d6064`
       // 这种擦着 5.1:1 的中间灰 —— 面板看着够，字却发虚（用户实测:同一张壁纸换到
-      // 暗夜釉色/作者自用/黑客绿/紫色心情就看不清）。**色相是预设的，字色是算出来的**，
+      // 暗夜釉色/黑客绿/紫色心情就看不清）。**色相是预设的，字色是算出来的**，
       // 两件事分开之后，面板就能保住预设的颜色，字由到底用白还是黑来兜。
       const composedOf = (color) => relativeLuminance(mixRgb(mixRgb(color, rgb, alpha), backdrop, leak))
       const contrastPair = (lum) => ({ white: 1.05 / (lum + 0.05), black: (lum + 0.05) / 0.05 })
@@ -851,7 +849,6 @@ window.__ModuleLoader__.load({
       wallScrim: '遮罩厚度',
       wallBlur: '壁纸模糊',
       wallSaturate: '色彩浓度',
-      wallGlass: '玻璃厚度',
       wallPick: '壁纸素材',
       wallPickHint: '视频与图片都能当壁纸',
       wallUse: '当壁纸',
@@ -961,7 +958,6 @@ window.__ModuleLoader__.load({
       wallScrim: 'Scrim',
       wallBlur: 'Blur',
       wallSaturate: 'Saturation',
-      wallGlass: 'Glass',
       wallPick: 'Wallpaper media',
       wallPickHint: 'Videos and images both work',
       wallUse: 'Use as wallpaper',
@@ -3762,7 +3758,6 @@ window.__ModuleLoader__.load({
             ['wallpaperScrim', 'scrim'],
             ['wallpaperBlur', 'blur'],
             ['wallpaperSaturate', 'saturate'],
-            ['wallpaperGlass', 'glassAlpha'],
           ]
           for (const [from, to] of sliderKeys) {
             // `switchingPreset` 刚把那几个键清成 'auto'：这里要**跳过**，不能改回去。
@@ -4510,16 +4505,14 @@ window.__ModuleLoader__.load({
               ),
               h('div', { className: 'dsa-set-presets' }, PRESETS.map(presetCard)),
             ),
-            // 预设只管颜色（七套釉色），**遮挡**归滑杆：出厂全是 0，所以"刚装上、
+            // 预设只管颜色（每套一套釉色），**遮挡**归滑杆：出厂全是 0，所以"刚装上、
             // 刚换预设"看到的一定是原样的壁纸 —— 想看更有遮挡的面板就往上加。
             //
-            // 壁纸模糊/色彩浓度也收起了滑杆：前者是预设法定的磨砂半径，后者只会
-            // 把画面洗白。可读性下限挂在引擎里，与这两根滑杆无关。
+            // 玻璃厚度那根已经收掉：实测只有 0 才看得见壁纸，往上加就是一层实色，留着只是误导。
+            // 面板遮挡全靠遮罩厚度一根；可读性下限挂在引擎里，与滑杆无关。
             slider('wallpaperScrim', t('wallScrim'), SCREEN_LIMITS.scrim[0], SCREEN_LIMITS.scrim[1], 0.02, shown.scrim, '%'),
             slider('wallpaperBlur', t('wallBlur'), SCREEN_LIMITS.blur[0], SCREEN_LIMITS.blur[1], 1, shown.blur, 'px'),
             slider('wallpaperSaturate', t('wallSaturate'), SCREEN_LIMITS.saturate[0], SCREEN_LIMITS.saturate[1], 0.05, shown.saturate, '×'),
-            slider('wallpaperGlass', t('wallGlass'), SCREEN_LIMITS.glass[0], SCREEN_LIMITS.glass[1], 0.01,
-              Number(shown.glassAlpha.toFixed(2)), ''),
             // ── ④ 素材：所有视频与图片都能当壁纸 ──
             h(
               'div',

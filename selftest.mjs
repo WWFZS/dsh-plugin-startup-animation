@@ -959,7 +959,7 @@ await check('默认不铺壁纸：装上新版不会突然换掉用户的界面�
   const { wallpaper } = wallpaperConfig({})
   assert.equal(wallpaper.enabled, false)
   assert.equal(wallpaper.src, '')
-  assert.equal(wallpaper.preset, 'readable')
+  assert.equal(wallpaper.preset, 'frosted')
 })
 
 await check('壁纸与开机动画各自独立：设了壁纸不动开机动画的素材', () => {
@@ -1015,19 +1015,17 @@ await check('预设与微调：认得的 id 保留，越界的值被夹取', () 
     wallpaperBlur: -3,
     wallpaperSaturate: 9,
     wallpaperGlass: 4,
-    wallpaperSurfaceBlur: 999,
   })
   assert.equal(wallpaper.preset, 'frosted')
-  assert.equal(wallpaper.scrim, 0.92, '幕浓度没有夹到上限')
+  assert.equal(wallpaper.scrim, 0.8, '幕浓度没有夹到上限')
   assert.equal(wallpaper.blur, 0, '模糊没有夹到下限')
   assert.equal(wallpaper.saturate, 1.6, '饱和没有夹到上限')
-  assert.equal(wallpaper.glassAlpha, 0.92, '玻璃透明度没有夹到上限')
-  assert.equal(wallpaper.surfaceBlur, 40, '面板模糊没有夹到上限')
+  assert.equal(wallpaper.glassAlpha, 0, '玻璃厚度已经固定为 0（滑杆收掉了）')
 })
 
 await check('认不出的预设 id 退回默认值（不产生第二份数据源）', () => {
   const { wallpaper } = wallpaperConfig({ wallpaperPreset: 'not-a-preset' })
-  assert.equal(wallpaper.preset, 'readable')
+  assert.equal(wallpaper.preset, 'frosted')
 })
 
 await check('内置素材带出厂取色（首帧之前就能定字色）', () => {
