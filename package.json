@@ -58,7 +58,7 @@
     "README.md",
     "docs/*.jpg",
     "docs/*.png",
-    "screenshots.json",
+    "docs/*.gif",
     "LICENSE",
     "builtin/图片/**/*",
     "builtin/音频/**/*",
