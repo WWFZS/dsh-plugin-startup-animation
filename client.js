@@ -2724,6 +2724,7 @@ window.__ModuleLoader__.load({
           // 哈希类名（`mP3x-q_frame`），内核升级也不会失效。
           '[data-shell-overlay]{gap:var(--dsa-card-gap,10px);padding:var(--dsa-card-gap,10px);}',
           '[data-shell-overlay]>*{border-radius:16px;overflow:hidden;background:var(--dsa-card);',
+          'background-color:var(--dsa-card);isolation:isolate;',
           'box-shadow:0 6px 24px rgba(0,0,0,0.18),0 0 0 1px rgba(255,255,255,0.08) inset;}',
           // 底栏是同一条横贯的卡片，左右对齐、下面留一条缝。
           '[data-shell-bottom]{border-radius:14px;overflow:hidden;background:var(--dsa-card);',
@@ -2800,6 +2801,9 @@ window.__ModuleLoader__.load({
         //
         // 卡片不需要读壁纸取样：它只要站在主题那一侧（深色主题→深卡、浅色→浅卡），
         // 内部用哪套字色就由 deriveTokens 决定，和壁纸本身长什么样无关。
+        // 卡片底色：**不透明**。之前给的是 `#ffffff`（浅色主题）+ 92% 不透明度 ——
+        // 那 8% 的缝在亮壁纸上看不出来，在黑壁纸上却让整张卡片掉到 #ebebeb 灰，深色字
+        // 压上去发闷。卡片这块面不需要透：壁纸的可见面积靠卡片之间的缝，不靠卡片本身。
         '--dsa-card': tokens['dsa-wall-card'],
         '--dsa-card-gap': '10px',
         // 面上的面：层 1 是大面板（卡片、行、列表），层 2/3 是浮在它上面的菜单、弹层、
