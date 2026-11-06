@@ -504,12 +504,12 @@ window.__ModuleLoader__.load({
         const value = Math.round(clampRange(base * factor, SCREEN_LIMITS.surfaceBlur))
         return `${value}px`
       }
-      // 字色：按**实际对比度**验出来（谁清楚用谁），不是按面板亮度猜。
-      // 面板只有一层，所以字色只需要对这一次负责；浮层的区别落在模糊半径上。
+      // 字色：按**实际对比度**验出来（谁清楚用谁），不是按面板亮度猜，也不是按主题猜。
       //
-      // 有一条护栏：`#ffffff` 面板上"白字"和"黑字"的对比度是 1.00 对 18.88，比较本身不会错；
-      // 但灰面板（比如 #808080）上两者可能只差 0.01，此时按亮度兜底，避免因为取整抖动
-      // 把字色和面刷成同一个颜色。
+      // 这是"换预设就看不清"的最后一道闸：以前 clampSurfaceColor 按主题方向挑颜色，
+      // 暗釉在浅色主题下会被顶到 `#5d6064`（白字 5.1:1 擦线），而擦线在真实界面上是
+      // 不够的。现在颜色交给预设（保住色相），字色在这里按实测选 —— 面板够暗就上白字、
+      // 够亮就上深字，两边都够不着的情况由 clampSurfaceColor 的 4.8:1 余量挡住。
       const whiteOnGlass = contrastRatio(parseHex(INK.light), parseHex(g1.final))
       const darkOnGlass = contrastRatio(parseHex(INK.dark), parseHex(g1.final))
       const inkLight = darkOnGlass > whiteOnGlass ? false : whiteOnGlass > darkOnGlass ? true : g1.lum < 0.18
@@ -739,19 +739,17 @@ window.__ModuleLoader__.load({
       // 最透那一档：玻璃厚度 0 时面板与壁纸的混合比。壁纸越亮，透底越强，面板色就越要让位
       // —— 由调用方按壁纸亮度传进来（列上真要透多少看 SHELL 那一档，这里是判据用的）。
       const leak = showThrough
-      // 判据是**掺完这层釉之后**的合成亮度：
-      //   · 主题定方向（深色用白字、浅色用黑字）先判；
-      //   · 到不了 4.6:1 才允许翻面（深色主题的亮釉面板配深字）。翻面的代价是那层
-      //     上面要换一套字色，所以它被限制在原文就在 0.15–0.85 之间的"中间调"上 ——
-      //     纯黑/纯白这类极端色不翻，否则深色主题会被白釉整片刷成白色界面。
+      // 判据是**掺完这层釉之后**的合成亮度：只要白字或黑字有一侧够 4.6:1 就放行。
+      //
+      // 这里刻意不按"主题方向优先"挑：那样会让暗釉色在浅色主题下被一路顶到 `#5d6064`
+      // 这种擦着 5.1:1 的中间灰 —— 面板看着够，字却发虚（用户实测:同一张壁纸换到
+      // 暗夜釉色/作者自用/黑客绿/紫色心情就看不清）。**色相是预设的，字色是算出来的**，
+      // 两件事分开之后，面板就能保住预设的颜色，字由到底用白还是黑来兜。
       const composedOf = (color) => relativeLuminance(mixRgb(mixRgb(color, rgb, alpha), backdrop, leak))
       const contrastPair = (lum) => ({ white: 1.05 / (lum + 0.05), black: (lum + 0.05) / 0.05 })
       const passes = (color) => {
         const { white, black } = contrastPair(composedOf(color))
-        if ((dark ? white : black) >= 4.6) return true
-        const lum = relativeLuminance(color)
-        const flippable = lum > 0.15 && lum < 0.9
-        return flippable && (dark ? black : white) >= 4.6
+        return Math.max(white, black) >= 4.6
       }
       // 原色合格就原样用；不合格才沿"往纯黑/纯白"的轴找第一个合格点。
       const target = dark ? { r: 0, g: 0, b: 0 } : { r: 255, g: 255, b: 255 }
@@ -769,8 +767,8 @@ window.__ModuleLoader__.load({
         const t = i / 100
         const candidate = blend(t)
         if (!passes(candidate)) continue
-        // 只收"面板本身对比度也够"的点。阈值 4.8 比 4.5 留余量：玻璃厚度拉到 0 时面板
-        // 颜色就等于这儿返回的值，擦线的点遇上一轮 hex 取整就会掉回线下。
+        // 阈值 4.8 比 4.5 留余量：玻璃厚度拉到 0 时面板颜色就等于这儿返回的值，
+        // 擦线的点遇上一轮 hex 取整就会掉回线下。
         const lum = relativeLuminance(candidate)
         if (Math.max(1.05 / (lum + 0.05), (lum + 0.05) / 0.05) >= 4.8) return byte3(candidate)
       }
