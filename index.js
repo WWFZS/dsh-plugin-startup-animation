@@ -328,7 +328,6 @@ export const PET_PACK_FILE = 'pet.json'
 export const THEME_EXCLUDED = new Set([
   '550C-赛博控制台.mp4',
   '薰衣草花语-等你爱我.mp4',
-  '剑一.mp4',
   'dsh-大肥鱼.mp4',
   '少司缘.mp4',
 ])

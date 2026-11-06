@@ -161,7 +161,7 @@ try {
     assert.ok(mp4, '缺少 MP4 分类')
     assert.ok(img, '缺少 图片 分类')
     assert.ok(mp4.files.length >= 4, `MP4 条目偏少：${mp4.files.length}`)
-    assert.equal(img.files.length, 7)
+    assert.equal(img.files.length, 9)
     assert.ok(mp4.files.every((f) => f.path.startsWith('builtin/MP4/') && f.size > 0))
   })
   await check('tombstone 从列表隐藏', () => {
