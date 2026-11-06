@@ -32,6 +32,7 @@ import {
   listPetPacks,
   readPetPack,
   ASSET_ROUTE,
+  THEME_EXCLUDED,
   REPO_URL,
   UPDATE_ROUTE,
   VERSION,
@@ -1057,6 +1058,24 @@ await check('manageStatus 带回 wallpaper 段（设置页的数据源）', () =
   assert.ok(status.wallpaper && typeof status.wallpaper === 'object', 'manageStatus 没有 wallpaper')
   assert.equal(status.wallpaper.enabled, false)
   assert.ok(Array.isArray(status.library), '素材库还在（壁纸面板要复用它）')
+  fs.rmSync(home, { recursive: true, force: true })
+})
+
+await check('THEME_EXCLUDED 里的视频仍然在素材库里，只是被标成"不作主题"', () => {
+  const home = path.join(tmp, `theme-excluded-${Math.random().toString(36).slice(2)}`)
+  fs.mkdirSync(home, { recursive: true })
+  const status = manageStatus({ packageRoot, homeDir: home })
+  const mp4 = status.library.find((entry) => entry.id === 'MP4')
+  assert.ok(mp4, 'MP4 分类不见了 —— 开机动画那边也要用它')
+  const byName = new Map(mp4.files.map((file) => [file.name, file]))
+  for (const name of THEME_EXCLUDED) {
+    const file = byName.get(name)
+    assert.ok(file, `${name} 被整个删掉了 —— 它应该留着当开机动画`)
+    assert.equal(file.themeable, false, `${name} 应该标成不作主题`)
+  }
+  // 名单之外的照旧可作主题：删过了头会让主题页签整块空掉。
+  const usable = mp4.files.filter((file) => file.themeable !== false)
+  assert.ok(usable.length > 0, '一个可作主题的视频都没有了')
   fs.rmSync(home, { recursive: true, force: true })
 })
 

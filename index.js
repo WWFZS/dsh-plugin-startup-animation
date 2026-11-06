@@ -315,6 +315,25 @@ export const PET_DIR_NAME = '宠物'
 export const PET_PACK_FILE = 'pet.json'
 
 /**
+ * 只适合当开机动画、不适合铺成界面主题的内置视频。
+ *
+ * 判断标准是"铺满整屏之后还能不能当壁纸看"：竖屏短剧、有人物特写的片段铺上去只剩一团
+ * 糊，再好的面板颜色也救不回来。名单按**逻辑名**（不带 `.web.mp4` 变体后缀）匹配，
+ * 与 `scanLibrary` 对外报的名字一致 —— 所以进不进名单只跟文件名有关，跟本机装的是母版
+ * 还是变体无关。
+ *
+ * 效果只有一处：素材条目带 `themeable: false`，界面主题的候选列表把它筛掉。开机动画
+ * 那边照旧，删改素材也不受影响。
+ */
+export const THEME_EXCLUDED = new Set([
+  '550C-赛博控制台.mp4',
+  '薰衣草花语-等你爱我.mp4',
+  '剑一.mp4',
+  'dsh-大肥鱼.mp4',
+  '少司缘.mp4',
+])
+
+/**
  * 宠物包清单：一包 = 一个 `builtin/宠物/<目录>/pet.json`。
  *
  * 返回的对象直接喂给客户端的浮层与设置页，所以这里把「文件路径、语义角色、
@@ -1603,7 +1622,11 @@ export function scanLibrary(packageRoot, deleted = [], homeDir) {
         continue
       }
       const duration = videoDurationSec(abs)
-      items.push(duration === undefined ? { path: rel, name: logicalName, size } : { path: rel, name: logicalName, size, duration })
+      items.push(
+        duration === undefined
+          ? { path: rel, name: logicalName, size, themeable: !THEME_EXCLUDED.has(logicalName) }
+          : { path: rel, name: logicalName, size, duration, themeable: !THEME_EXCLUDED.has(logicalName) },
+      )
     }
     // 非视频素材：逐个列。
     for (const file of files) {

@@ -4330,7 +4330,10 @@ window.__ModuleLoader__.load({
           const wallFiles = []
           for (const id of ['MP4', '图片']) {
             const cat = state ? (state.library || []).find((entry) => entry.id === id) : null
-            if (cat) for (const file of cat.files) wallFiles.push(file)
+            // 宿主打过 `themeable: false` 的素材不参与"界面主题"的候选（比如竖屏短剧那种
+            // 铺满屏幕会糊成一片的片段），但它仍然留在素材库里当开机动画用 —— 两个页签
+            // 读的是同一份 library，只是主题这边筛掉。
+            if (cat) for (const file of cat.files) if (file.themeable !== false) wallFiles.push(file)
           }
           /**
            * 滑杆正在被拖的键 → 拖到的那一格值。

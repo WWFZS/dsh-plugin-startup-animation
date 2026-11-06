@@ -1358,7 +1358,14 @@ const themeStatus = (wallpaper) => ({
   builtin: true,
   deleted: [],
   library: [
-    { id: 'MP4', files: [{ path: 'builtin/MP4/多重影像.mp4', name: '多重影像.mp4', size: 100 }] },
+    {
+      id: 'MP4',
+      files: [
+        { path: 'builtin/MP4/多重影像.mp4', name: '多重影像.mp4', size: 100 },
+        // 只当开机动画用的片段：留在素材库里，但主题页签不该把它列成候选。
+        { path: 'builtin/MP4/剑一.mp4', name: '剑一.mp4', size: 100, themeable: false },
+      ],
+    },
     { id: '图片', files: [{ path: 'builtin/图片/漫威-漫威宇宙.jpg', name: '漫威-漫威宇宙.jpg', size: 100 }] },
   ],
   wallpaper: {
@@ -1406,10 +1413,13 @@ await check('主题页签：开关 + 预设卡 + 微调滑杆 + 素材卡片', a
   const ranges = findAll(tree, 'dsa-set-range').filter((node) => ['遮罩厚度', '壁纸模糊', '色彩浓度'].includes(node.props['aria-label']))
   assert.equal(ranges.length, 3, `滑杆数量不对：${ranges.length}`)
   // 素材：视频与图片都在（视频排在前面）。名字在 aria-label 里，不在纯文本里。
+  // 素材库里有 3 条，但标了 `themeable: false` 的那条（剑一）不该出现在主题候选里 ——
+  // 它只当开机动画用。
   const cards = findAll(tree, 'dsa-set-card-hit')
   assert.equal(cards.length, 2, `素材卡片数量不对：${cards.length}`)
   const cardNames = cards.map((node) => node.props['aria-label']).join(' | ')
   assert.ok(cardNames.includes('多重影像.mp4') && cardNames.includes('漫威-漫威宇宙.jpg'), `素材没列全：${cardNames}`)
+  assert.ok(!cardNames.includes('剑一'), `不作主题的素材混进了主题候选：${cardNames}`)
 })
 
 await check('主题页签：预设卡上每格都有对比度数字（不依赖背景层广播）', async () => {
