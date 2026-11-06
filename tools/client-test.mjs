@@ -1395,11 +1395,11 @@ await check('主题页签：开关 + 预设卡 + 微调滑杆 + 素材卡片', a
   const switches = findAll(tree, 'dsa-set-switch').filter((node) => node.props['aria-label'] === '界面壁纸')
   assert.equal(switches.length, 1, `主题页签的开关数量不对：${switches.length}`)
   assert.equal(switches[0].props['aria-checked'], 'true')
-  // 预设：5 套出厂预设（含"重磨砂"），每格一个按钮。
+  // 预设：5 套出厂预设（含"亮"），每格一个按钮。
   const presets = findAll(tree, 'dsa-set-preset')
   assert.equal(presets.length, 5, `预设数量不对：${presets.length}`)
-  assert.ok(all.includes('重磨砂'), `没有"重磨砂"：${all.join(' | ')}`)
-  assert.ok(all.includes('暗夜釉色'), `没有"暗夜釉色"：${all.join(' | ')}`)
+  assert.ok(all.includes('亮'), `没有"亮"：${all.join(' | ')}`)
+  assert.ok(all.includes('暗'), `没有"暗"：${all.join(' | ')}`)
   // 当前预设那格是按下态，其余不是。
   assert.equal(presets.filter((node) => node.props['aria-pressed'] === 'true').length, 1, '按下态数量不对')
   // 三个滑杆：遮罩/模糊/色彩。
@@ -1429,8 +1429,8 @@ await check('主题页签：预设卡上每格都有对比度数字（不依赖�
 await check('主题页签：点预设卡 → 写 preset 并把玻璃/模糊/幕全部清回 auto', async () => {
   const { render, calls } = await loadClient({ status: themeStatus() })
   const tree = await openThemeTab(render)
-  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('暗夜釉色'))
-  assert.ok(matte, '找不到"重磨砂"预设')
+  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('暗'))
+  assert.ok(matte, '找不到"亮"预设')
   matte.props.onClick()
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
   assert.ok(post, '点预设没有发 POST')
@@ -1553,14 +1553,14 @@ await check('主题壁纸：让位变量必须带 !important（内核把令牌�
 await check('主题壁纸：换预设立刻广播给背景层（不用等回包也不用刷新）', async () => {
   const { render, calls } = await loadClient({ status: themeStatus() })
   const tree = await openThemeTab(render)
-  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('暗夜釉色'))
+  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('暗'))
   assert.ok(matte, '没有预设卡')
   // 背景层是常驻的独立实例，只靠 window 事件桥接：不广播就只改了设置页自己的卡片，
   // 界面要等下次刷新才变。**点下去当场**就得广播，不能等回包 —— 那几毫秒就是"点了没动静"。
   matte.props.onClick()
   const immediate = calls.filter((call) => call.type === 'event' && call.name === 'dsa:wall-sync')
   assert.equal(immediate.length, 1, `点下去应该当场广播一次，实际 ${immediate.length} 次`)
-  // 且这次带的是**重磨砂自己的**观感：残留的滑杆值不能盖住预设。
+  // 且这次带的是**亮自己的**观感：残留的滑杆值不能盖住预设。
   // 预设只负责颜色，遮挡一律回 0 —— 点预设 = 回到"壁纸原样透出来"。
   assert.equal(immediate[0].detail.preset, 'night')
   assert.equal(immediate[0].detail.scrim, 0, `预设不该自带幕浓度：${immediate[0].detail.scrim}`)
@@ -1585,18 +1585,18 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   // **只由「壁纸模糊」那根管**（`blur`），不再吃预设的 surfaceBlur —— 用后者当主模糊
   // 会让「可读优先」一上手就把壁纸糊掉 24px，用户看到的就是"背景不显示"。
   assert.ok(beforeCss.includes('filter:blur(0px)'), `壁纸层不该被预设糊掉：${beforeCss.slice(0, 200)}`)
-  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('重磨砂'))
-  assert.ok(matte, '找不到「重磨砂」预设')
+  const matte = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('亮'))
+  assert.ok(matte, '找不到「亮」预设')
   matte.props.onClick()
   // 就在点击当下读：这一层是同步画完的。不能等回包 —— 垫片的 POST 只会把**传进来的**
   // 状态原样吐回来（它不模拟写盘），再等下去就等于断言"回包把画面盖回去"。
   const after = calls.filter((call) => call.type === 'style')
   const css = after[after.length - 1].el.textContent
-  // 换预设必须真的换掉观感。七套预设的颜色（釉色）与磨砂半径都不同，但「重磨砂」和
+  // 换预设必须真的换掉观感。七套预设的颜色（釉色）与磨砂半径都不同，但「亮」和
   // 「可读优先」是**同一套釉色**（只差磨砂半径，这是照参考实现的设计）—— 所以这里
-  // 换成点「暗夜釉色」：它的釉色是深蓝，浮层色必须真的变。
-  const night = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('暗夜釉色'))
-  assert.ok(night, '找不到「暗夜釉色」预设')
+  // 换成点「暗」：它的釉色是深蓝，浮层色必须真的变。
+  const night = findAll(tree, 'dsa-set-preset').find((node) => texts({ children: node.children }).includes('暗'))
+  assert.ok(night, '找不到「暗」预设')
   night.props.onClick()
   const css2 = calls.filter((call) => call.type === 'style').pop().el.textContent
   const layer3 = (text) => (text.match(/--dsw-alias-bg-layer-3:(#[0-9a-f]{6})/) || [])[1]

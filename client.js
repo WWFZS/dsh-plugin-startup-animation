@@ -118,11 +118,11 @@ window.__ModuleLoader__.load({
      * 因为最后还有 FLOOR 兜底。
      */
     const PRESETS = Object.freeze([
-      { id: 'frosted', name: '重磨砂', scrim: 0, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0, surfaceBlur: 36, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '大半径磨砂，动态也稳' },
-      { id: 'night', name: '暗夜釉色', scrim: 0, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0, surfaceBlur: 22, accent: '#4f8cff', text: 'light', surface: 'solid', desc: '深蓝釉面，夜景' },
-      { id: 'vivid', name: '原色直出', scrim: 0, blur: 0, saturate: 1, glassTint: '#67dce7', glassAlpha: 0, surfaceBlur: 18, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '青色玻璃，壁纸颜色不被压' },
-      { id: 'hacker', name: '黑客绿(Fish)', scrim: 0, blur: 0, saturate: 1, glassTint: '#266d3c', glassAlpha: 0, surfaceBlur: 9, accent: '#00c800', text: 'light', surface: 'solid', desc: '终端绿' },
-      { id: 'violet', name: '紫色心情', scrim: 0, blur: 0, saturate: 1, glassTint: '#533b78', glassAlpha: 0, surfaceBlur: 9, accent: '#b388ff', text: 'light', surface: 'solid', desc: '紫釉玻璃' },
+      { id: 'frosted', name: '亮', scrim: 0, blur: 0, saturate: 1, glassTint: '#ffffff', glassAlpha: 0, surfaceBlur: 36, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '白釉亮面板' },
+      { id: 'night', name: '暗', scrim: 0, blur: 0, saturate: 1, glassTint: '#0d1524', glassAlpha: 0, surfaceBlur: 22, accent: '#4f8cff', text: 'light', surface: 'solid', desc: '深蓝釉面' },
+      { id: 'vivid', name: '原图', scrim: 0, blur: 0, saturate: 1, glassTint: '#67dce7', glassAlpha: 0, surfaceBlur: 18, accent: '#4f8cff', text: 'auto', surface: 'solid', desc: '青色透明釉，壁纸颜色不被压' },
+      { id: 'hacker', name: '通用（绿）', scrim: 0, blur: 0, saturate: 1, glassTint: '#266d3c', glassAlpha: 0, surfaceBlur: 9, accent: '#00c800', text: 'light', surface: 'solid', desc: '终端绿' },
+      { id: 'violet', name: '通用（紫）', scrim: 0, blur: 0, saturate: 1, glassTint: '#533b78', glassAlpha: 0, surfaceBlur: 9, accent: '#b388ff', text: 'light', surface: 'solid', desc: '紫釉玻璃' },
     ])
 
     /** 默认预设 id：装上就有合理观感，不逼用户先选一套。 */
