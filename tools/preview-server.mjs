@@ -46,5 +46,6 @@ http
     })
   })
   .listen(port, '127.0.0.1', () => {
-    console.log(`preview: http://127.0.0.1:${port}/compile-cache/boot-scene.html`)
+    console.log(`preview: http://127.0.0.1:${port}/runtime/boot.css （样式看效果用 boot-css-test 的页；` +
+      '内置动画本身见设置页「立即刷新」）')
   })

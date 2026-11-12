@@ -22,6 +22,43 @@ import { fileURLToPath } from 'node:url'
 
 const repoRoot = fileURLToPath(new URL('../', import.meta.url))
 
+// ─────────────────────────── 测试页 ───────────────────────────
+//
+// 这个页面以前是从 `compile-cache/boot-card.html` 读的 —— 那是开发机的临时产物，
+// 仓库里从来没有过（`compile-cache/` 还写在 .gitignore 里），于是这个测试在干净
+// 检出上必然全红：服务器 404 → 浏览器落到 chrome-error:// → 所有 getComputedStyle
+// 断言一起变成 undefined。现在页面由本文件现拼（见 pageHtml），不再依赖任何本地产物。
+
+/** 宿主侧的原生启动卡（boot.css 里被 :has() 选中的那个）。 */
+const HOST_CARD = `<div data-dsh-boot><div data-dsh-boot-spinner>DeepSeek-Harness</div></div>`
+
+/** 覆盖层的 media 形态：ok / loading 是视频槽，gone 是失败回落后留下的空壳。 */
+const overlay = (state) => `<div class="dsa-root" data-mode="media" data-media="${state}"><div class="dsa-scene"><div class="dsa-badge">DeepSeek-Harness</div><div class="dsa-skip">点击跳过</div></div><div class="dsa-media">${state === 'gone' ? '' : '<video muted playsinline></video>'}</div></div>`
+
+/** 内置动画（css 模式）的覆盖层：不带 data-media，也没有视频槽。 */
+const cssOverlay = `<div class="dsa-root" data-mode="css"><div class="dsa-scene"><div class="dsa-badge">DeepSeek-Harness</div></div></div>`
+
+/** 每个 state 对应的页面主体：宿主原生卡始终在场，覆盖层按 state 叠加。 */
+const BODY = {
+  ok: HOST_CARD + overlay('ok'),
+  loading: HOST_CARD + overlay('loading'),
+  gone: HOST_CARD + overlay('gone'),
+  css: HOST_CARD + cssOverlay,
+  // 覆盖层还没挂上：只有首帧遮罩（html[data-dsa-cover]）。
+  cover: HOST_CARD,
+  // 标记还在、但覆盖层已经挂上：遮罩必须让位，否则会在真覆盖层上再盖一层纯色。
+  'cover-mounted': HOST_CARD + overlay('loading'),
+  // 动画被移除干净。
+  none: HOST_CARD,
+}
+
+/** 拼出完整页面：宿主原生卡 + 覆盖层 + 真实的 boot.css，按 state 选主体。 */
+const pageHtml = (state) =>
+  `<!doctype html><html${state === 'cover' || state === 'cover-mounted' ? ' data-dsa-cover=""' : ''}>` +
+  `<head><meta charset="utf-8"><link rel="stylesheet" href="/runtime/boot.css">` +
+  `<style>body{margin:0;background:#000}</style></head>` +
+  `<body>${BODY[state] ?? HOST_CARD}</body></html>`
+
 let failures = 0
 const check = async (name, fn) => {
   try {
@@ -41,19 +78,31 @@ const types = {
   '.css': 'text/css; charset=utf-8',
 }
 const server = http.createServer((req, res) => {
+  // 日志默认静默；排查"为什么全是 undefined"时设 DSA_CSS_DEBUG=1 看请求与 404。
+  const verbose = process.env.DSA_CSS_DEBUG === '1'
   const url = new URL(req.url ?? '/', 'http://x')
+  // 测试页现拼（见上方 pageHtml），其余路径仍从仓库根取文件（boot.css）。
+  if (url.pathname === '/boot-card.html') {
+    if (verbose) console.error(`  [srv] 200 ${url.pathname}${url.search}`)
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(pageHtml(url.searchParams.get('state') ?? 'none'))
+    return
+  }
   const file = path.join(repoRoot, decodeURIComponent(url.pathname))
   if (!file.startsWith(repoRoot)) {
+    if (verbose) console.error(`  [srv] 403 ${url.pathname}`)
     res.writeHead(403)
     res.end()
     return
   }
   fs.readFile(file, (error, buffer) => {
     if (error) {
+      if (verbose) console.error(`  [srv] 404 ${url.pathname} (${file})`)
       res.writeHead(404)
       res.end()
       return
     }
+    if (verbose) console.error(`  [srv] 200 ${url.pathname}`)
     res.writeHead(200, { 'Content-Type': types[path.extname(file).toLowerCase()] ?? 'text/plain' })
     res.end(buffer)
   })
@@ -147,6 +196,13 @@ async function evaluate(url, expression) {
         awaitPromise: true,
       })
       socket.close()
+      // 页面上抛异常时（典型是节点不存在 → querySelector 返回 null）CDP 回的是
+      // exceptionDetails，`result.value` 是 undefined —— 断言那边只会报一个干巴巴的
+      // "undefined !== 'none'"，看不出为什么。这里把原文带出来。
+      if (result.result?.exceptionDetails !== undefined) {
+        const detail = result.result.exceptionDetails
+        throw new Error(`页面求值失败：${detail.exception?.description ?? detail.text}（${url}）`)
+      }
       return result.result?.result?.value
     } catch (error) {
       socket.close()
@@ -161,7 +217,7 @@ const OVERLAY_OPACITY = "getComputedStyle(document.querySelector('.dsa-root') ??
 const COVER = "getComputedStyle(document.documentElement, '::before').content"
 const SCENE_DISPLAY = "getComputedStyle(document.querySelector('.dsa-scene')).display"
 const SKIP_OPACITY = "getComputedStyle(document.querySelector('.dsa-skip')).opacity"
-const page = (state) => `http://127.0.0.1:${port}/compile-cache/boot-card.html?state=${state}`
+const page = (state) => `http://127.0.0.1:${port}/boot-card.html?state=${state}`
 
 console.log('== 动画挂上就藏掉宿主原生启动卡 ==')
 

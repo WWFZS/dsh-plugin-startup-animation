@@ -2684,8 +2684,8 @@ export function apply(ctx) {
           handler: async (req, res) => {
             const options = () => ({ packageRoot, homeDir, route: ASSET_ROUTE })
             // 一个请求里 status() 可能被调用多次（成功分支 + 兜底分支），而每次 manageStatus
-            // 都要重扫素材库（stat 每个内置文件）。同一次写操作之后状态只变一次，缓存一份即可；
-            // 任何写操作都会 invalidate，不会读到旧值。
+            // 都要重扫素材库（stat 每个内置文件）。同一次写操作之后状态只变一次，缓存一份即可。
+            // `invalidate()` 让写操作明确声明"我改了磁盘，下次要重扫"。
             /** @type {{ value: Record<string, unknown> } | null} */
             let statusCache = null
             const invalidate = () => {
