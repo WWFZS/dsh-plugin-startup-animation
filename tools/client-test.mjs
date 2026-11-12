@@ -33,6 +33,29 @@ const check = async (name, fn) => {
 // ─────────────────────────── React 垫片 ───────────────────────────
 
 /**
+ * 原生主题令牌的两套取值（只给 `snapshotNative` 读的那六个）。
+ *
+ * 值本身随意，只要能区分深浅即可 —— 测试断的是"切主题后快照变了"，
+ * 不是"值等于多少"（那是内核的事）。
+ */
+const NATIVE_TOKENS_LIGHT = {
+  '--dsw-alias-bg-base': '#ffffff',
+  '--dsw-alias-bg-layer-1': '#f2f4f7',
+  '--dsw-alias-border-l1': 'rgba(0,0,0,0.12)',
+  '--dsw-alias-label-primary': '#0f1115',
+  '--dsw-alias-label-secondary': '#5b616b',
+  '--dsw-alias-label-tertiary': '#8b919b',
+}
+const NATIVE_TOKENS_DARK = {
+  '--dsw-alias-bg-base': '#16181d',
+  '--dsw-alias-bg-layer-1': '#1e2128',
+  '--dsw-alias-border-l1': 'rgba(255,255,255,0.14)',
+  '--dsw-alias-label-primary': '#e8eaed',
+  '--dsw-alias-label-secondary': '#9aa0a8',
+  '--dsw-alias-label-tertiary': '#6b7178',
+}
+
+/**
  * 极小的 React 替身：只实现 client.js 用到的部分。
  * hooks 用一个简单的游标实现 —— 组件函数按顺序调用 hook，渲染器负责重放。
  */
@@ -254,6 +277,48 @@ async function loadClient(options = {}) {
       removeEventListener() {},
       hidden: false,
     },
+    /**
+     * MutationObserver 垫片：只记下"监听了谁、盯哪些属性"，并支持手动触发。
+     *
+     * client.js 用它在深浅色主题切换后重算地板色 —— 那是**属性变化**驱动的，
+     * 没有真实 DOM 也能测：改完 `context.__theme` 直接调 `context.__fireTheme()`。
+     */
+    MutationObserver: class {
+      constructor(callback) {
+        this.callback = callback
+        this.targets = []
+        sandbox.__observers.push(this)
+      }
+
+      observe(target, options) {
+        this.targets.push({ target, options })
+      }
+
+      disconnect() {
+        this.targets = []
+      }
+
+      /** 测试用：模拟目标属性变化。 */
+      __fire() {
+        if (this.targets.length === 0) return
+        this.callback([], this)
+      }
+    },
+    /**
+     * getComputedStyle 垫片：返回沙箱里"当前主题"的原生令牌。
+     *
+     * 真实环境里这几个 `--dsw-alias-*` 由内核写在 body 内联样式上。
+     * `snapshotNative` 要读它们，所以垫片必须给出**可辨识**的值，
+     * 测试才能断言"切主题之后快照跟着换了"。
+     */
+    getComputedStyle: (el) => ({
+      getPropertyValue: (name) => {
+        const theme = sandbox.__theme
+        const table = theme === 'dark' ? NATIVE_TOKENS_DARK : NATIVE_TOKENS_LIGHT
+        return table[name] ?? ''
+      },
+      backgroundColor: '',
+    }),
     fetch: (url, init) => {
       const path = String(url)
       calls.push({ type: 'fetch', url: path, init })
@@ -301,6 +366,30 @@ async function loadClient(options = {}) {
   }
   sandbox.globalThis = sandbox
   sandbox.window.document = sandbox.document
+  /** 当前"深浅色"（client.js 读 data-ds-theme-source 与 body 上的 data-ds-dark-theme）。 */
+  sandbox.__theme = options.theme ?? 'dark'
+  /** client.js 里注册的 MutationObserver 实例（见垫片）。 */
+  sandbox.__observers = []
+  /**
+   * 切深浅色：改属性 + 通知观察器 —— 和内核 ThemePresenter 走同一条路。
+   * @param {'light'|'dark'} next
+   */
+  sandbox.__setTheme = (next) => {
+    sandbox.__theme = next
+    sandbox.document.documentElement.getAttribute = () => next
+    sandbox.document.body.hasAttribute = (name) => name === 'data-ds-dark-theme' && next === 'dark'
+    sandbox.__fireTheme()
+  }
+  /** 触发所有观察器（模拟属性变化）。 */
+  sandbox.__fireTheme = () => {
+    for (const observer of sandbox.__observers) observer.__fire()
+  }
+  // client.js 里 themeIsDark() 读这两个地方，垫片先按初始主题填好。
+  sandbox.document.documentElement = {
+    getAttribute: (name) => (name === 'data-ds-theme-source' ? sandbox.__theme : null),
+    style: { setProperty() {}, removeProperty() {} },
+  }
+  sandbox.document.body.hasAttribute = (name) => name === 'data-ds-dark-theme' && sandbox.__theme === 'dark'
   const context = vm.createContext(sandbox)
   // client.js 顶层就会调 window.__ModuleLoader__.load(...) —— 跑完即已装载。
   vm.runInContext(clientSource, context, { filename: 'client.js' })
@@ -730,7 +819,10 @@ const petStatus = (packs = [LULU_PACK], over = {}) => ({
   cfg: {},
   pet: {
     enabled: false,
+    display: 'page',
     size: 176,
+    // 默认当作"桌面模式可用"：绝大多数断言关心的是开关与动作，不该被环境差异干扰。
+    desktop: { available: true, reason: '' },
     pets: packs.map((pack, index) => ({ ...pack, enabled: index === 0, size: 176, x: 100, y: 100 })),
     ...over,
   },
@@ -770,6 +862,54 @@ await check('宠物页签：开关 + 大小 + 宠物卡 + 动作区', async () =
   assert.equal(packs.length, 1, `宠物卡数量不对：${packs.length}`)
   assert.ok(texts(packs[0]).includes('噜噜'), '宠物卡上没有名字')
   assert.ok(texts(packs[0]).includes('4 个动作'), `宠物卡上没有动作数：${texts(packs[0]).join('|')}`)
+})
+
+await check('宠物页签：显示位置两档（DSH界面 / 全局界面），点「全局界面」写 petDisplay', async () => {
+  const { render, calls } = await loadClient({ status: petStatus() })
+  const petTree = await openPetTab(render)
+  const segs = findAll(petTree, 'dsa-set-seg')
+  assert.deepEqual(
+    segs.map((seg) => texts(seg)[0]),
+    ['DSH界面', '全局界面'],
+    `显示位置应当是两档：${segs.map((seg) => texts(seg)[0]).join(' / ')}`,
+  )
+  // 默认是 DSH界面：第一档高亮。
+  assert.deepEqual(segs.map((seg) => seg.props['data-on']), ['1', '0'])
+  // 点「全局界面」→ 只发 petDisplay。
+  segs[1].props.onClick()
+  const post = calls.filter((call) => call.type === 'fetch' && call.init?.method === 'POST').pop()
+  assert.ok(post, '点显示位置没有发请求')
+  assert.deepEqual(JSON.parse(post.init.body), { petDisplay: 'global' })
+})
+
+await check('显示位置：没有「都显示」这一档（它会造出两只宠物）', async () => {
+  const { render } = await loadClient({ status: petStatus() })
+  const petTree = await openPetTab(render)
+  const labels = findAll(petTree, 'dsa-set-seg').map((seg) => texts(seg)[0])
+  assert.equal(labels.length, 2, `只该有两档，实际 ${labels.length} 档：${labels.join(' / ')}`)
+  assert.ok(!labels.includes('都显示'), '「都显示」必须删掉 —— 它会让同一只宠物出现两次')
+})
+
+await check('显示位置：全局界面不可用时那一档禁用并给出原因', async () => {
+  const status = petStatus([LULU_PACK], {
+    desktop: { available: false, reason: '桌面模式仅支持 Windows' },
+  })
+  const { render } = await loadClient({ status })
+  const petTree = await openPetTab(render)
+  const segs = findAll(petTree, 'dsa-set-seg')
+  assert.equal(segs[0].props.disabled, false, '「DSH界面」永远可用')
+  assert.equal(segs[1].props.disabled, true, '不可用时「全局界面」必须禁用')
+  assert.ok(
+    texts(petTree).includes('桌面模式仅支持 Windows'),
+    `没有把不可用原因显示出来：${texts(petTree).join('|')}`,
+  )
+})
+
+await check('显示位置：已选「全局界面」时高亮对得上', async () => {
+  const { render } = await loadClient({ status: petStatus([LULU_PACK], { display: 'global' }) })
+  const petTree = await openPetTab(render)
+  const segs = findAll(petTree, 'dsa-set-seg')
+  assert.deepEqual(segs.map((seg) => seg.props['data-on']), ['0', '1'])
 })
 
 await check('小包动作直接平铺：丢一个动作进去就多一格', async () => {
@@ -976,6 +1116,55 @@ await check('宠物大小越界 → 夹到 320 再写回（带 pack）', async (
   await new Promise((resolve) => setTimeout(resolve, 400))
   const post = calls.find((call) => call.type === 'fetch' && call.init?.method === 'POST')
   assert.deepEqual(JSON.parse(post.init.body), { petResize: { pack: 'lulu', size: 320 } }, '越界值没被夹到 320')
+})
+
+// 「全局界面」下桌面窗是独立进程，收不到窗口内的 dsa:pet-size 事件：
+// 不补一条实时通道，宠物就只能等 350ms 落盘 → 宿主按新尺寸重建 Electron 进程，
+// 用户看到的是"拖的时候没反应，停手闪没一秒再长回来"。
+await check('全局界面：拖动大小立刻推预览（不写盘），且一帧只推一次', async () => {
+  const { render, calls } = await loadClient({
+    status: petStatus([LULU_PACK], { enabled: true, display: 'global' }),
+  })
+  const petTree = await openPetTab(render)
+  const range = findByProp(petTree, 'aria-label').find((el) => el.props['aria-label'] === '宠物大小')
+  // 连拖三格：rAF 合并后只该有一次预览请求。
+  for (const value of ['200', '240', '280']) range.props.onChange({ target: { value } })
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const previews = calls.filter(
+    (call) =>
+      call.type === 'fetch' &&
+      call.init?.method === 'POST' &&
+      String(call.init.body).includes('petPreview'),
+  )
+  assert.equal(previews.length, 1, `预览请求没做逐帧合并（发了 ${previews.length} 次）`)
+  // 发的是**最后拖到的那一格**，不是排队时的第一格 —— 否则宠物永远慢半拍。
+  assert.deepEqual(
+    JSON.parse(previews[0].init.body),
+    { petPreview: { pack: 'lulu', size: 280 } },
+    `预览推的不是最新值：${previews[0].init.body}`,
+  )
+  // 停手后才落盘，而且只有一次。
+  await new Promise((resolve) => setTimeout(resolve, 400))
+  const commits = calls.filter(
+    (call) =>
+      call.type === 'fetch' &&
+      call.init?.method === 'POST' &&
+      String(call.init.body).includes('petResize'),
+  )
+  assert.equal(commits.length, 1, `落盘次数不对（${commits.length}）`)
+  assert.deepEqual(JSON.parse(commits[0].init.body), { petResize: { pack: 'lulu', size: 280 } })
+})
+
+await check('DSH界面：拖大小不发预览请求（浮层自己就跟手了）', async () => {
+  const { render, calls } = await loadClient({ status: petStatus() })
+  const petTree = await openPetTab(render)
+  const range = findByProp(petTree, 'aria-label').find((el) => el.props['aria-label'] === '宠物大小')
+  range.props.onChange({ target: { value: '240' } })
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  const previews = calls.filter(
+    (call) => call.type === 'fetch' && String(call.init?.body ?? '').includes('petPreview'),
+  )
+  assert.equal(previews.length, 0, '页面档不该发预览请求（多一条无用往返）')
 })
 
 await check('每只各记各的大小：切到女仆后，改的是女仆那一份', async () => {

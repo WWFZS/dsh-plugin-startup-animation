@@ -78,7 +78,12 @@ function createClock() {
         if (best === null) break
         now = best.at
         if (best.every === null) timers.delete(bestId)
-        else best.at = now + best.every
+        else {
+          // 周期定时器在一次推进里**每周期只跑一次**：直接跳到下一个周期，
+          // 不要重复取同一个 id（否则同一个 interval 会被反复触发，
+          // pending 越堆越多，行为与浏览器不一致）。
+          best.at = now + Math.max(1, best.every)
+        }
         best.fn()
         await flush()
       }
@@ -455,14 +460,25 @@ await check('应用就绪 → 淡出（data-state=leaving）并移除节点', as
 })
 
 await check('最短展示未到 → 不提前交接', async () => {
+  // 最短展示从 startAt 起算：走 watchBoot 的 100ms tick 判就绪，所以"就绪"落在
+  // 第一个 tick（100ms），交接要等到 minMs=3000 那一拍才触发。必须分小段推进 ——
+  // 一次 advance 到很远的未来，假时钟会**连着**跨过"开始淡出"和"移除节点"，
+  // 只能看到最终态（读到 null），看不到中间态。
   const { clock, page, overlay } = await runBoot({
     snapshot: { enabled: true, mode: 'css', src: '', minMs: 3000, fadeMs: 600 },
   })
   simulateAppReady(page)
   await clock.advance(500)
-  assert.equal(overlay().getAttribute('data-state'), 'idle', '最短展示未到就交接了')
-  await clock.advance(3000)
-  assert.equal(overlay().getAttribute('data-state'), 'leaving')
+  assert.equal(overlay()?.getAttribute('data-state'), 'idle', '最短展示未到就交接了')
+  // 分小段推进到 2600：绝不能已经交接。
+  for (let i = 0; i < 10; i += 1) await clock.advance(200)
+  assert.equal(overlay()?.getAttribute('data-state'), 'idle', '3000 之前就开始了淡出')
+  // 越过 3000（+10ms 余量）→ 顺延的那一拍开始淡出。
+  for (let i = 0; i < 3; i += 1) await clock.advance(200)
+  assert.equal(overlay()?.getAttribute('data-state'), 'leaving', '最短展示到点后没有开始淡出')
+  // 再推 700：淡出结束 → 移除节点。
+  for (let i = 0; i < 4; i += 1) await clock.advance(200)
+  assert.equal(overlay(), null, '淡出结束后覆盖层应从 DOM 移除')
 })
 
 await check('点击画面 → 立刻让开（跳过最短展示）', async () => {
@@ -484,6 +500,64 @@ await check('Esc 键 → 立刻让开', async () => {
   keydown({ key: 'Escape' })
   await clock.advance(10)
   assert.equal(overlay().getAttribute('data-state'), 'leaving', 'Esc 没有让开')
+})
+
+console.log('== 素材从未出画就挂掉：透明层不按素材时长扣着用户 ==')
+
+await check('素材一帧都没来 → 退场要快，不按素材的 20 秒扣着', async () => {
+  // 素材模式、用户设了 20 秒，但视频始终没出画，最后挂了、回落到内置场景。
+  // 这时可视内容只剩很短的内置动画，不该拿素材时长（20 秒）继续扣住用户。
+  // 交接计时改用 startAt 起算 + 900ms 上限，所以这之后 1 秒内就该让开。
+  const { clock, page, overlay } = await runBoot({
+    snapshot: {
+      enabled: true,
+      mode: 'video',
+      src: '/dsh-startup-animation/asset',
+      minMs: 20000,
+      mediaMode: true,
+      durationSec: 20,
+      fadeMs: 100,
+    },
+  })
+  const video = page.body.descendants().find((node) => node.tagName === 'VIDEO')
+  // 错误路径有重试；再错一次才真正放弃。
+  video.error = { code: 4 }
+  video.emit('error')
+  video.error = { code: 4 }
+  video.emit('error')
+  assert.equal(overlay().getAttribute('data-media'), 'gone')
+  simulateAppReady(page)
+  await clock.advance(1000)
+  assert.equal(overlay()?.getAttribute('data-state'), 'leaving', '素材没出画却还在按素材时长扣着')
+})
+
+await check('出画后素材才挂 → 仍按配置的最短展示兜底（不许一闪而过）', async () => {
+  // 反过来的方向：用户真的看到了画面，之后素材坏了也不该把这次展示缩成零点几秒。
+  const { clock, page, overlay } = await runBoot({
+    snapshot: {
+      enabled: true,
+      mode: 'video',
+      src: '/dsh-startup-animation/asset',
+      minMs: 900,
+      mediaMode: true,
+      durationSec: 3,
+      fadeMs: 100,
+    },
+  })
+  const video = page.body.descendants().find((node) => node.tagName === 'VIDEO')
+  video.readyState = 2
+  video.emit('loadeddata')
+  assert.equal(overlay().getAttribute('data-media'), 'ok')
+  simulateAppReady(page)
+  await clock.advance(200)
+  assert.equal(overlay()?.getAttribute('data-state'), 'idle', '出画后立刻交接了（最短展示没兜住）')
+  // 出画时刻就是时钟起点（revealedAt，这里是 0），最长展示取 durationSec*1000=3000。
+  // 同样分小段推进：假时钟的 advance 会**连着**烧掉这期间的所有交付点。
+  // 推进到 2600 应仍是 idle；再推 400（到 3000）就该开始淡出。
+  for (let i = 0; i < 13; i += 1) await clock.advance(200)
+  assert.equal(overlay()?.getAttribute('data-state'), 'idle', '3000 之前就开始了淡出')
+  for (let i = 0; i < 2; i += 1) await clock.advance(200)
+  assert.equal(overlay()?.getAttribute('data-state'), 'leaving', '最短展示到点后没有开始淡出')
 })
 
 console.log('== 开机音频：与画面同刻起播 ==')

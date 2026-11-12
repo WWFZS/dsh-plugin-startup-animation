@@ -39,6 +39,7 @@ import {
 } from './lib/self-manage.mjs'
 import { PRESETS, SCREEN_LIMITS, sanitizeTweak } from './lib/wallpaper.mjs'
 import { builtinColors } from './lib/wallpaper-colors.mjs'
+import { createDesktopPets, findElectron } from './lib/desktop-pet.mjs'
 
 /** Cordis 诊断用的插件名。 */
 export const name = 'startup-animation'
@@ -315,6 +316,14 @@ export const PET_DIR_NAME = '宠物'
 export const PET_PACK_FILE = 'pet.json'
 
 /**
+ * 宠物没有声明初始位置时的落点：右下角（0–100 的百分比，100 = 贴右/贴下）。
+ *
+ * 宠物包可以在 `pet.json` 的 `home` 里覆盖它 —— 两只宠物默认都落在右下角会叠在一起，
+ * 所以内置的噜噜是右下、女仆是左下（见各自的 `pet.json`）。
+ */
+const PET_HOME = Object.freeze({ x: 100, y: 100 })
+
+/**
  * 只适合当开机动画、不适合铺成界面主题的内置视频。
  *
  * 判断标准是"铺满整屏之后还能不能当壁纸看"：竖屏短剧、有人物特写的片段铺上去只剩一团
@@ -498,6 +507,17 @@ export function readPetPack(packageRoot, dirName) {
   const [width, height] = Array.isArray(meta.canvas) ? meta.canvas : []
   const cover = typeof meta.cover === 'string' ? fileOf(meta.cover) : ''
   const credit = meta.credit !== null && typeof meta.credit === 'object' ? meta.credit : null
+  /**
+   * 出厂初始位置（0–100 的百分比，100 = 贴右/贴下）。
+   *
+   * 由宠物包自己声明，不是全局常量：两只宠物一左一右才不打架（都默认右下角会叠在一起，
+   * 用户第一眼看到的是"一只变两只"的错位）。包没写就回落到右下角 —— 加新宠物不用改代码。
+   */
+  const homeRaw = meta.home !== null && typeof meta.home === 'object' ? meta.home : {}
+  const home = {
+    x: clampNumber(homeRaw.x, PET_HOME.x, 0, 100),
+    y: clampNumber(homeRaw.y, PET_HOME.y, 0, 100),
+  }
 
   return {
     id: typeof meta.id === 'string' && meta.id !== '' ? meta.id : dirName,
@@ -517,6 +537,8 @@ export function readPetPack(packageRoot, dirName) {
       Number.isFinite(height) && height > 0 ? height : 648,
     ],
     cover,
+    /** 出厂初始位置（0–100 百分比）；用户拖过之后以配置里的记录为准。 */
+    home,
     /** 点击音效路径；'' = 不播。 */
     clickSound,
     roles,
@@ -612,12 +634,19 @@ export const DEFAULT_CONFIG = Object.freeze({
   /** 宠物显示宽度的**默认值**（px）：每只自己记，没记过的那只用这个。 */
   petSize: 176,
   /**
-   * 每只宠物自己的状态：`{ pack, enabled, size, x, y }`。
+   * 每只宠物自己的状态：`{ pack, enabled, size, x, y, display }`。
    *
    * **只记用户动过的那几只**：没记录的包按"关着、默认大小、右下角"处理。这样加一个新宠物包
    * 不会因为缺配置就把所有老宠物重置一遍，也不会出现"删了包，配置里还留着"的死数据。
    */
   petPets: [],
+  /**
+   * 宠物显示位置（全局，不是每只）：`'page'` = 只在 DSH 界面里，`'global'` = 浮在所有窗口之上。
+   *
+   * 为什么是全局而不是每只：两档都保证"有且只有一只"，全局一档，行为唯一，
+   * 也省掉一张 N 只 × 2 档的配置矩阵。
+   */
+  petDisplay: 'page',
   // ── 壁纸主题（把视频/图片铺在 DSH 界面背后，并接管背景色让页面让位）──
   /**
    * 壁纸总开关。默认关：装上新版不该突然换掉用户的界面外观。
@@ -930,6 +959,8 @@ export function loadConfig(options) {
     skipFadeMs: clampNumber(raw.skipFadeMs, d.skipFadeMs, 60, 2000),
     minMs,
     durationSec,
+    /** 素材（video/image）模式：运行时据此算"已出画后的最短展示"。 */
+    mediaMode: mode === 'video' || mode === 'image',
     holdMs: clampNumber(raw.holdMs, d.holdMs, 2000, 120000),
     holdGraceMs: clampNumber(raw.holdGraceMs, d.holdGraceMs, 0, 30000),
     noFrameMs: clampNumber(raw.noFrameMs, d.noFrameMs, 1500, 30000),
@@ -1068,6 +1099,40 @@ export function releaseStreams(filePath) {
     }
   }
   return streams.length
+}
+
+/**
+ * 用户上传素材的删除重试窗口：最多试 12 次、累计约 3.5 秒。
+ *
+ * 为什么窗口要这么长：Windows 下 `destroy()` 只是**请求**关闭，fd 由 libuv 异步释放，
+ * 浏览器一边 Range 播放一边被要求删除时，句柄可能被占上百毫秒到一两秒。窗口取
+ * 1.5 秒（6×250ms）时，慢一步就会误判成"删不掉"——用户看到"已隐藏"，而磁盘上
+ * 文件还在、下次重启又冒出来。3.5 秒仍然远短于一次 HTTP 请求的耐心上限。
+ */
+const UPLOAD_DELETE_ATTEMPTS = 12
+const UPLOAD_DELETE_DELAY_MS = 300
+
+/**
+ * 带重试地真删一个上传素材。
+ * @param {string | undefined} homeDir DSH_HOME。
+ * @param {string} filePath 已规范化的绝对路径。
+ * @returns {Promise<{ removed: boolean, error?: unknown }>} removed=已删；
+ *   error=最后一次失败的异常（仅在 removed=false 时给出）。
+ */
+export async function deleteUploadedWithRetry(homeDir, filePath) {
+  let lastErr = null
+  for (let attempt = 0; attempt < UPLOAD_DELETE_ATTEMPTS; attempt += 1) {
+    try {
+      removeUploadedFile(homeDir, filePath)
+      return { removed: true }
+    } catch (error) {
+      lastErr = error
+      // 路径校验失败（不在上传目录里）重试再多次也没用，立刻放弃。
+      if (error?.code === undefined) return { removed: false, error }
+      if (attempt < UPLOAD_DELETE_ATTEMPTS - 1) await sleepMs(UPLOAD_DELETE_DELAY_MS)
+    }
+  }
+  return { removed: false, error: lastErr }
 }
 
 /**
@@ -1836,22 +1901,26 @@ const LINK_CLEANUP_DELAY_MS = 120
  * `<包名>_tmp_<pid>_<n>` 再 `rename` 过去 —— 覆盖联接点会 EPERM，而宿主给出的
  * 报错是「没有写入权限，无法安装」，看着像权限问题，其实是这个陈旧链接在挡路。
  *
- * 只删**链接**：`rmdirSync` 对联接点/符号链接只移除链接本身、绝不跟进目标；
- * 对真实目录要么删掉空目录（无害），要么 ENOTEMPTY 直接放弃。
+ * 为什么不再先判断"这是不是链接"：目录联接在 lstat 里就是 `isDirectory() === true`、
+ * `isSymbolicLink() === false`，`readlinkSync` 在部分环境下也读不出目标（EINVAL），
+ * `readdirSync` 还会跟进去把目标的文件列出来。任何"先认链接、再删"的写法都会在另一些
+ * 机器上把联接当成装好的包静默跳过，陈旧链接就永远清不掉。
+ *
+ * 安全的做法反而是**先删、再解释失败**：`rmdirSync` 对空目录与联接只移除那一层、
+ * 绝不跟进目标；对装好的包一定失败（ENOTEMPTY 或 EPERM）。所以这里只把
+ * "成功"或"本来就没有"当成 removed，其余一律 blocked —— 误判的代价只是多一次
+ * 无副作用的重试，而不是删掉用户装好的包。
  *
  * @param {string} profileDir profile 目录。
  * @returns {Promise<{ removed: boolean, blocked: boolean }>} removed=已清理；blocked=链接还在（多半被 DSH 占用）。
  */
 export async function cleanupLinkedInstall(profileDir) {
   const target = path.join(profileDir, 'node_modules', PACKAGE_NAME)
-  let stats
   try {
-    stats = fs.lstatSync(target)
+    fs.lstatSync(target)
   } catch {
     return { removed: false, blocked: false } // 本来就不存在
   }
-  // 真实目录 = 装好的包，不碰（删了就是破坏）。
-  if (stats.isDirectory() && !stats.isSymbolicLink()) return { removed: false, blocked: false }
 
   for (let attempt = 0; attempt < LINK_CLEANUP_ATTEMPTS; attempt += 1) {
     try {
@@ -1860,7 +1929,9 @@ export async function cleanupLinkedInstall(profileDir) {
     } catch (error) {
       const code = error !== null && typeof error === 'object' ? error.code : ''
       if (code === 'ENOENT') return { removed: true, blocked: false }
-      // ENOTEMPTY/EACCES 之外的意外错误不重试，如实报 blocked。
+      // ENOTEMPTY = 装好的包（或残留内容），不是链接残留：如实说没动，别重试。
+      if (code === 'ENOTEMPTY') return { removed: false, blocked: false }
+      // 剩下的 EPERM/EBUSY 多半是 DSH 还开着这个联接，等它一下。
       if (code !== 'EPERM' && code !== 'EBUSY') return { removed: false, blocked: true }
     }
     await new Promise((resolve) => setTimeout(resolve, LINK_CLEANUP_DELAY_MS))
@@ -2116,11 +2187,51 @@ export function removeUploadedFile(homeDir, value) {
   return abs
 }
 
+/** 宠物显示位置的合法取值：`page` = 只在 DSH 界面里，`global` = 浮在所有窗口之上。 */
+const PET_DISPLAYS = Object.freeze(['page', 'global'])
+
 /**
- * 宠物的默认落点：右下角（0–100 的百分比，100 = 贴右/贴下）。
- * 每只宠物各自记位置，新冒出来的那只从这里开始。
+ * 把配置里的显示位置规整成两档之一。
+ *
+ * 为什么只留两档：`desktop`/`both` 那套（页面浮层 + 桌面窗同时存在）会把**同一只宠物
+ * 复制成两份**，各自跑一套 15 秒随机节奏 —— 用户看到的是两只一样的动物在各演各的，
+ * 第一反应就是"重了"或"坏了"。现在两档都保证**有且只有一只**：
+ *   · `page`   = 浮在 DSH 页面里；
+ *   · `global` = 一个透明置顶窗浮在所有窗口之上（DSH 里当然也看得见它）。
+ *
+ * 旧值直接迁移，不写历史兼容分支（AGENTS.md 第 3 条）：
+ *   · `desktop`（旧的"只在桌面"）→ `global`；
+ *   · `both`（旧的"两边都显示"）→ `global` —— 它当初想要的就是"DSH 里也看得到"，
+ *     全局窗悬在 DSH 上方正好满足，而且不会再出现第二只。
+ *
+ * @param {Record<string, unknown>} raw 配置的 boot 段。
+ * @returns {'page' | 'global'} 显示位置。
  */
-const PET_HOME = Object.freeze({ x: 100, y: 100 })
+export function petDisplayOf(raw) {
+  const value = raw.petDisplay
+  if (value === 'page') return 'page'
+  if (value === 'global') return 'global'
+  if (value === 'desktop' || value === 'both') return 'global'
+  return DEFAULT_CONFIG.petDisplay
+}
+
+/**
+ * 当前要不要建页面内浮层（`page` 档）。
+ * @param {Record<string, unknown>} raw 配置的 boot 段。
+ * @returns {boolean} 是否显示。
+ */
+export function showsInPage(raw) {
+  return petDisplayOf(raw) === 'page'
+}
+
+/**
+ * 当前要不要在全局（所有窗口之上）显示（`global` 档）。
+ * @param {Record<string, unknown>} raw 配置的 boot 段。
+ * @returns {boolean} 是否显示。
+ */
+export function showsOnDesktop(raw) {
+  return petDisplayOf(raw) === 'global'
+}
 
 /**
  * 把一只宠物的字段合并进 `petPets` 数组。
@@ -2128,18 +2239,57 @@ const PET_HOME = Object.freeze({ x: 100, y: 100 })
  * 返回**新数组**（不改入参）：落盘的是整段 `petPets`，就地改会让内存里的旧值
  * 和写出去的新值混在一起，下一次合并就带上脏数据了。
  *
+ * 新建条目时的 `x/y` 取**这个包自己声明的初始点**（`home`），不是全局右下角 ——
+ * 否则「开关某一只」这个动作会顺手把它挪到右下角，而它的出厂位置可能在左下
+ * （女仆就是这样：一开开关就跳到噜噜身上去了）。
+ *
  * @param {Array<any>} current 现有数组（可能来自旧配置，字段不一定齐）。
  * @param {string} packId 宠物包 id。
  * @param {Record<string, unknown>} fields 要覆盖的字段（enabled / x / y）。
+ * @param {{ x: number, y: number }} [home] 这个包的初始位置；不传则回落右下角。
  * @returns {Array<Record<string, unknown>>} 新数组。
  */
-function mergePetState(current, packId, fields) {
+export function mergePetState(current, packId, fields, home = PET_HOME) {
   const list = current.filter((item) => item !== null && typeof item === 'object')
   const at = list.findIndex((item) => item.pack === packId)
-  if (at < 0) return [...list, { pack: packId, enabled: false, x: PET_HOME.x, y: PET_HOME.y, ...fields }]
+  if (at < 0) return [...list, { pack: packId, enabled: false, x: home.x, y: home.y, ...fields }]
   const copy = list.slice()
   copy[at] = { ...list[at], ...fields, pack: packId }
   return copy
+}
+
+/**
+ * 宠物列表：包本体 + 每只自己的开关 / 大小 / 位置。
+ *
+ * 设置页的宠物卡、页面浮层、桌面窗三处都读它 —— 只有这一个来源。
+ * 没有任何记录时**第一只默认开着**：装好插件、打开总开关就该看到一只，
+ * 而不是对着空屏幕去猜还要再开什么。用户在卡片上关掉后会写进 petPets，不会回弹。
+ *
+ * `packs` / `raw` 都可以由调用方预先读好传进来：`manageStatus` 一次请求里两样都已经有了，
+ * 不传的话就会再扫一遍宠物目录（女仆那只有 109 个 webm，每个都要 stat）。
+ *
+ * @param {{ packageRoot: string, homeDir?: string }} options 位置。
+ * @param {{ packs?: Array<Record<string, any>>, raw?: Record<string, unknown> }} [preloaded] 已经读好的数据。
+ * @returns {Array<Record<string, any>>} 每只宠物的完整状态（已按 id 排序）。
+ */
+export function petStates(options, preloaded = {}) {
+  const raw = preloaded.raw ?? loadRawBoot(options).raw
+  const packs = preloaded.packs ?? listPetPacks(options.packageRoot)
+  const savedPets = Array.isArray(raw.petPets) ? raw.petPets : []
+  return packs.map((pack, index) => {
+    const saved = savedPets.find((item) => item !== null && typeof item === 'object' && item.pack === pack.id)
+    // 没记过位置就用**这个包自己声明的**初始点（噜噜右下、女仆左下），
+    // 而不是全局右下角 —— 否则两只宠物会叠在同一个角上。
+    const home = pack.home !== null && typeof pack.home === 'object' ? pack.home : PET_HOME
+    return {
+      ...pack,
+      enabled: saved === undefined ? index === 0 : saved.enabled === true,
+      // 大小每只独立：没记过就用默认值（不是"跟别人一样"）。
+      size: clampNumber(saved === undefined ? DEFAULT_CONFIG.petSize : saved.size, DEFAULT_CONFIG.petSize, 100, 320),
+      x: clampNumber(saved === undefined ? home.x : saved.x, home.x, 0, 100),
+      y: clampNumber(saved === undefined ? home.y : saved.y, home.y, 0, 100),
+    }
+  })
 }
 
 /**
@@ -2151,22 +2301,8 @@ export function manageStatus(options) {
   // 一次 loadConfig 就够：`raw` 与 `sources` 已经在里面读好了。
   const { client, assetPath, warnings, raw } = loadConfig(options)
   // 宠物包只扫一次：设置页的宠物卡、浮层的动作表都从它来（每个动作要 stat）。
-  const petPacks = listPetPacks(options.packageRoot)
-  const savedPets = Array.isArray(raw.petPets) ? raw.petPets : []
-  // 每只宠物 = 包本体 + 它自己的开关与位置。
-  // 没有任何记录时**第一只默认开着**：装好插件、打开总开关就该看到一只，
-  // 而不是对着空屏幕去猜还要再开什么。用户在卡片上关掉后会写进 petPets，不会回弹。
-  const petList = petPacks.map((pack, index) => {
-    const saved = savedPets.find((item) => item !== null && typeof item === 'object' && item.pack === pack.id)
-    return {
-      ...pack,
-      enabled: saved === undefined ? index === 0 : saved.enabled === true,
-      // 大小每只独立：没记过就用默认值（不是"跟别人一样"）。
-      size: clampNumber(saved === undefined ? DEFAULT_CONFIG.petSize : saved.size, DEFAULT_CONFIG.petSize, 100, 320),
-      x: clampNumber(saved === undefined ? PET_HOME.x : saved.x, PET_HOME.x, 0, 100),
-      y: clampNumber(saved === undefined ? PET_HOME.y : saved.y, PET_HOME.y, 0, 100),
-    }
-  })
+  // 把 packs 与 raw 一并传进去，petStates 就不会再扫第二遍。
+  const petList = petStates(options, { packs: listPetPacks(options.packageRoot), raw })
   const fileRaw = typeof raw.file === 'string' ? raw.file : ''
   const audioFileRaw = typeof raw.audioFile === 'string' ? raw.audioFile : ''
   const deleted = Array.isArray(raw.deleted)
@@ -2227,7 +2363,27 @@ export function manageStatus(options) {
      */
     pet: {
       enabled: raw.petEnabled === true,
+      /**
+       * 显示位置：`'page'` 只在页面里，`'desktop'` 只在桌面上，`'both'` 两边都显示。
+       * 客户端据此决定要不要建 DOM 浮层；宿主据此决定要不要拉起 Electron helper。
+       */
+      display: petDisplayOf(raw),
       pets: petList,
+      /**
+       * 桌面模式在这台机器上能不能用（设置页据此决定那个选项要不要置灰）。
+       *
+       * `available: false` 时 `reason` 是一句给用户看的原因；能用的机器上 reason 为空。
+       * 这里不返回 Electron 的具体路径：用户不需要知道，排障看日志。
+       */
+      desktop: {
+        available: process.platform === 'win32' && findElectron() !== undefined,
+        reason:
+          process.platform === 'win32'
+            ? findElectron() === undefined
+              ? '未找到 Electron：把 electron.exe 放到 DSH_HOME/electron/ 或设 DSA_PET_ELECTRON_PATH'
+              : ''
+            : '桌面模式仅支持 Windows',
+      },
     },
     /**
      * 开机动画运行时的完整配置（boot.js 每次页面加载实时读取它 —— 桌面注入表是宿主
@@ -2358,6 +2514,51 @@ export function apply(ctx) {
     child.effect(() => {
       /** @type {Array<() => void>} */
       const disposers = []
+
+      // ── 桌面宠物 helper（仅 Windows）──
+      //
+      // 放在 webServer 里是因为它要宿主自己的源地址（`getOrigin()`）去转发 /manage 与 /asset：
+      // 桌面窗是 file:// 页面，直连 HTTP 会被 CORS 挡掉，所以走 helper 里的 `dsa-pet://` 协议。
+      //
+      // 它**不是**宠物功能的一部分：拉不起来就是桌面上少一只，页面浮层照常工作。
+      // 所以这里不抛、不阻塞，失败只落进日志与状态里的 reason。
+      const desktop = createDesktopPets({
+        packageRoot,
+        origin: () => child.webServer.getOrigin(),
+        log: { info, warn },
+      })
+      disposers.push(() => desktop.dispose())
+
+      /**
+       * 按当前配置同步桌面窗。
+       *
+       * 三个条件同时成立才拉进程：宠物总开关开着、显示位置包含桌面、至少有一只启用。
+       * 每次写配置后都调一次 —— sync 内部按列表指纹去重，内容没变不会重启进程。
+       *
+       * `sync` 返回 false 表示"这次没成，但值得重试"（宿主端口还没绑上）。这时挂一个
+       * 定时器重来，而不是静默放弃：桌面窗第一次出现往往就发生在宿主刚启动那几百毫秒里。
+       */
+      let desktopRetry = null
+      const syncDesktop = (attempt = 0) => {
+        try {
+          const { raw } = loadRawBoot({ packageRoot, homeDir })
+          const settled =
+            raw.petEnabled !== true || !showsOnDesktop(raw)
+              ? desktop.sync([])
+              : desktop.sync(petStates({ packageRoot, homeDir }))
+          if (!settled && attempt < 20 && desktopRetry === null) {
+            desktopRetry = setTimeout(() => {
+              desktopRetry = null
+              syncDesktop(attempt + 1)
+            }, 500)
+            desktopRetry.unref?.()
+          }
+        } catch (error) {
+          warn(`桌面宠物同步失败：${describe(error)}`)
+        }
+      }
+      // 宿主启动时就同步一次：用户上次选的就是桌面模式，不该等他去设置页点一下才出现。
+      syncDesktop()
 
       /** JSON 应答的小工具。 */
       const reply = (res, status, body) => {
@@ -2627,6 +2828,33 @@ export function apply(ctx) {
                     return
                   }
 
+                  // ── 大小预览：拖滑杆期间的实时通道（不写盘、不重建进程）──
+                  //
+                  // 为什么单独一条键：`petResize` 是"停手后的落盘"，它要走完整的
+                  // 写入 + 状态回包（重扫素材库）。拖滑杆每格都打那条路，用户看到的
+                  // 就是"宠物不跟手"。这里只把新尺寸推给正在运行的桌面 helper，
+                  // 当场改窗口大小，一句 {ok} 就回。
+                  //
+                  // 页面浮层不经过这里（它收 `dsa:pet-size` 事件，纯本地改 CSS）。
+                  // helper 没在跑（页面档 / 还没拉起来）就安静返回 previewed:false ——
+                  // 尺寸照样由随后那次 `petResize` 落盘，下一次 sync/重建会带上。
+                  if (body.petPreview !== undefined) {
+                    const change = body.petPreview
+                    if (change === null || typeof change !== 'object' || typeof change.pack !== 'string') {
+                      reply(res, 400, { ok: false, error: 'petPreview 需要 { pack, size }' })
+                      return
+                    }
+                    if (typeof change.size !== 'number' || !Number.isFinite(change.size)) {
+                      reply(res, 400, { ok: false, error: 'petPreview.size 必须是数字（px）' })
+                      return
+                    }
+                    const previewed = desktop.resize([
+                      { id: change.pack, size: clampNumber(change.size, DEFAULT_CONFIG.petSize, 100, 320) },
+                    ])
+                    reply(res, 200, { ok: true, previewed })
+                    return
+                  }
+
                   // 素材库操作：use / useAudio = 从列表选用（内置或上传）；forget = 从列表移除。
                   if (body.use !== undefined || body.useAudio !== undefined || body.forget !== undefined) {
                     try {
@@ -2675,23 +2903,15 @@ export function apply(ctx) {
                         writeHomeBootPatch(homeDir, libraryPatch)
                       } else if (typeof body.forget === 'string' && path.isAbsolute(body.forget)) {
                         // ── 上传素材删除（Windows 上文件句柄/权限会导致 EPERM）──
-                        // ① 先释放本进程对该文件的全部发送流；② 真删并重试 6 次
-                        //    （每次让出事件循环，等流的 fd 异步关闭）；③ 仍失败 → 从列表
-                        //    隐藏（写 tombstone，磁盘文件保留），界面提示"仅隐藏"，绝不裸抛错误。
+                        // ① 先释放本进程对该文件的全部发送流；② 真删，重试到窗口用完
+                        //    （流被 destroy 到 fs 真正关闭 fd 是异步的，几次是不够的：
+                        //    浏览器一边下载一边删时，句柄可能被占上百毫秒）；③ 仍失败
+                        //    → 从列表隐藏（写 tombstone，磁盘文件保留），界面提示
+                        //    "仅隐藏"，绝不裸抛错误。
                         const norm = path.normalize(String(body.forget))
                         releaseStreams(norm)
-                        let removed = false
-                        let lastErr = null
-                        for (let attempt = 0; attempt < 6 && !removed; attempt += 1) {
-                          try {
-                            removeUploadedFile(homeDir, norm)
-                            removed = true
-                          } catch (error) {
-                            lastErr = error
-                            if (attempt < 5) await sleepMs(250)
-                          }
-                        }
-                        if (removed) {
+                        const del = await deleteUploadedWithRetry(homeDir, norm)
+                        if (del.removed) {
                           /** @type {Record<string, undefined>} */
                           const cleared = {}
                           if (rawFile === norm) cleared.file = undefined
@@ -2704,8 +2924,8 @@ export function apply(ctx) {
                           if (rawFile === norm) patch.file = undefined
                           if (rawAudio === norm) patch.audioFile = undefined
                           writeHomeBootPatch(homeDir, patch)
-                          warn(`上传素材真删失败，已从列表隐藏（磁盘保留）：${describe(lastErr)}`)
-                          reply(res, 200, { ...status(), hiddenOnly: true, deleteError: describe(lastErr) })
+                          warn(`上传素材真删失败，已从列表隐藏（磁盘保留）：${describe(del.error)}`)
+                          reply(res, 200, { ...status(), hiddenOnly: true, deleteError: describe(del.error) })
                           return
                         }
                       } else {
@@ -2792,6 +3012,15 @@ export function apply(ctx) {
                   // 三个 per-pet 键都带 pack id，只改那一只。数值照旧"服务端夹取不给商用"：
                   // 越界的值就地夹好，不报错 —— 拖到边缘/拖滑杆时客户端算出的数偶尔带小数。
                   if (typeof body.petEnabled === 'boolean') patch.petEnabled = body.petEnabled
+                  // 显示位置：只认两个字面量，别的一律 400 —— 这个键决定要不要拉进程，
+                  // 悄悄夹成一个"差不多"的值会让用户看到的行为和选的不一样。
+                  if (body.petDisplay !== undefined) {
+                    if (!PET_DISPLAYS.includes(body.petDisplay)) {
+                      reply(res, 400, { ok: false, error: `petDisplay 只能是 ${PET_DISPLAYS.join(' / ')}` })
+                      return
+                    }
+                    patch.petDisplay = body.petDisplay
+                  }
                   // 需要先读一次当前配置（这次写的是"数组里的一项"，不能只靠 patch 覆盖）。
                   const perPet = ['petToggle', 'petResize', 'petMove'].filter((key) => body[key] !== undefined)
                   const petsNow =
@@ -2801,14 +3030,15 @@ export function apply(ctx) {
                           const current = loadConfig({ packageRoot, homeDir }).raw
                           return Array.isArray(current.petPets) ? current.petPets : []
                         })()
-                  const knownPacks = listPetPacks(packageRoot).map((pack) => pack.id)
+                  const knownPacks = listPetPacks(packageRoot)
+                  const packById = new Map(knownPacks.map((pack) => [pack.id, pack]))
                   for (const key of perPet) {
                     const change = body[key]
                     if (change === null || typeof change !== 'object' || typeof change.pack !== 'string') {
                       reply(res, 400, { ok: false, error: `${key} 需要 { pack, ... }` })
                       return
                     }
-                    if (!knownPacks.includes(change.pack)) {
+                    if (!packById.has(change.pack)) {
                       reply(res, 400, { ok: false, error: `没有这个宠物包：${change.pack}` })
                       return
                     }
@@ -2837,15 +3067,30 @@ export function apply(ctx) {
                       }
                     }
                     // 逐键应用：一条请求里同时带 petToggle 与 petResize 时两次都要落到同一份上。
-                    patch.petPets = mergePetState(patch.petPets ?? petsNow, change.pack, next)
+                    // home 取这个包声明的初始点，新建条目才不会被写到别的宠物那个角上。
+                    const pack = packById.get(change.pack)
+                    const home = pack !== undefined && pack.home !== null && typeof pack.home === 'object' ? pack.home : PET_HOME
+                    patch.petPets = mergePetState(patch.petPets ?? petsNow, change.pack, next, home)
                   }
                   if (Object.keys(patch).length === 0) {
-                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "wallpaperEnabled", "wallpaperFile", "wallpaperPreset", "wallpaperScrim", "wallpaperBlur", "wallpaperSaturate", "wallpaperGlass", "petEnabled", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
+                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "wallpaperEnabled", "wallpaperFile", "wallpaperPreset", "wallpaperScrim", "wallpaperBlur", "wallpaperSaturate", "wallpaperGlass", "petEnabled", "petDisplay", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
                     return
                   }
                   try {
                     writeHomeBootPatch(homeDir, patch)
                     invalidate()
+                    // 宠物相关字段写完立刻同步桌面窗：用户点"桌面"就该当场看到它出现，
+                    // 而不是等下一次重启。非宠物写入也会调一次，但 sync 按结构指纹去重，
+                    // 不会白重启（位置变化尤其不能触发重启 —— 那会让落地闪一下）。
+                    syncDesktop()
+                    // `?lite=1`：只回确认，不回整份 status。
+                    // 位置落盘（每次甩出去停下都会写一次）根本不需要状态回包，而 status()
+                    // 要重扫整个素材库（每个内置 webm 都 stat 一遍）。桌面宠物落地时多等
+                    // 这几十上百毫秒，用户感受到的就是"停稳之后卡一下"。
+                    if (requestFlag(req, 'lite')) {
+                      reply(res, 200, { ok: true })
+                      return
+                    }
                     reply(res, 200, status())
                   } catch (error) {
                     reply(res, 500, { ok: false, error: `保存失败：${describe(error)}` })
@@ -3091,6 +3336,10 @@ export function apply(ctx) {
 
 
       return () => {
+        if (desktopRetry !== null) {
+          clearTimeout(desktopRetry)
+          desktopRetry = null
+        }
         for (const dispose of disposers) {
           try {
             dispose()

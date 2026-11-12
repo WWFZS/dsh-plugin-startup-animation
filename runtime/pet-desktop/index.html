@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>pet</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+      /* 舞台：挤压/倾斜都加在它身上，不动 video 本身（transform 在 video 上会让解码路径抖）。 */
+      #stage {
+        position: absolute;
+        inset: 0;
+        transform-origin: 50% 88%;
+        transition: transform 210ms cubic-bezier(0.22, 1.4, 0.36, 1);
+      }
+      /* 撞墙那一帧的挤压：给个明确的"弹到了"的反馈（和浏览器浮层同一套数值）。 */
+      #stage[data-squash='1'] {
+        transform: scale(0.88, 1.12);
+        transition: none;
+      }
+      /* 两个 video 槽位交替：切换只改 opacity，一次只挂两段素材（全建会一口气解码几十 MB）。 */
+      .slot {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        opacity: 0;
+        transition: opacity 160ms linear;
+        pointer-events: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .slot[data-on='1'] {
+        opacity: 1;
+      }
+      /* 只有宠物本体吃鼠标：整窗其余透明区域必须放过去（主进程也做穿透，这里兜底）。 */
+      #hit {
+        position: absolute;
+        inset: 0;
+        cursor: grab;
+        touch-action: none;
+      }
+      #hit[data-drag='1'] {
+        cursor: grabbing;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <video class="slot" id="a" muted playsinline preload="none" aria-hidden="true"></video>
+      <video class="slot" id="b" muted playsinline preload="none" aria-hidden="true"></video>
+    </div>
+    <div id="hit"></div>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

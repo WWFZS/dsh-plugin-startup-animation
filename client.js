@@ -850,7 +850,6 @@ window.__ModuleLoader__.load({
       catTheme: '主题',
       wallpaper: '当壁纸',
       wallEnable: '界面壁纸',
-      wallNote: '把视频或图片铺在界面背后。文字大小与字体不受影响，只动配色。',
       wallPreset: '观感预设',
       wallPresetHint: '一键套用整套配色',
       wallContrast: '当前文字对比度',
@@ -858,7 +857,6 @@ window.__ModuleLoader__.load({
       wallBlur: '壁纸模糊',
       wallSaturate: '色彩浓度',
       wallPick: '壁纸素材',
-      wallPickHint: '视频与图片都能当壁纸',
       wallUse: '当壁纸',
       wallUsing: '主题使用中',
       wallSaved: '已设为界面壁纸',
@@ -904,11 +902,12 @@ window.__ModuleLoader__.load({
       catPet: '宠物',
       petEnable: '显示桌面宠物',
       petEnableAll: '显示所有宠物',
-      petNote: '每只宠物各自浮在界面上：拖动换位置、松手会记住，甩出去会撞边弹回来；点一下它会回应，右键按分类点播。开关在每张卡的右上角，可以同时开好几只。',
       petSize: '宠物大小',
       petAction: '动作',
       petPick: '宠物',
-      petPickHint: '点卡片选一只看它的动作；右上角开关决定它显不显示。',
+      petWhere: '显示位置',
+      petWherePage: 'DSH界面',
+      petWhereGlobal: '全局界面',
       petUnit: '个动作',
       petRandom: '随机一个',
       petSearch: '搜索动作',
@@ -959,7 +958,6 @@ window.__ModuleLoader__.load({
       catTheme: 'Theme',
       wallpaper: 'Wallpaper',
       wallEnable: 'Interface wallpaper',
-      wallNote: 'Puts a video or image behind the whole interface. Text size and font are untouched — only colors change.',
       wallPreset: 'Look preset',
       wallPresetHint: 'One tap applies the whole palette',
       wallContrast: 'Text contrast',
@@ -967,7 +965,6 @@ window.__ModuleLoader__.load({
       wallBlur: 'Blur',
       wallSaturate: 'Saturation',
       wallPick: 'Wallpaper media',
-      wallPickHint: 'Videos and images both work',
       wallUse: 'Use as wallpaper',
       wallUsing: 'Theme in use',
       wallSaved: 'Set as interface wallpaper',
@@ -1013,11 +1010,12 @@ window.__ModuleLoader__.load({
       catPet: 'Pet',
       petEnable: 'Show desktop pet',
       petEnableAll: 'Show all pets',
-      petNote: 'Each pet floats on its own: drag to move, fling to bounce off the edges, click for a reaction, right-click to play an action by category. The switch on each card decides whether that pet shows up — several can be on at once.',
       petSize: 'Pet size',
       petAction: 'Actions',
       petPick: 'Pets',
-      petPickHint: 'Click a card to browse its actions; the switch in its corner decides whether it shows.',
+      petWhere: 'Show on',
+      petWherePage: 'DSH window',
+      petWhereGlobal: 'Global',
       petUnit: 'actions',
       petRandom: 'Play a random one',
       petSearch: 'Search actions',
@@ -1083,6 +1081,10 @@ window.__ModuleLoader__.load({
 [data-dsa-ui] .dsa-set-tab { color: var(--dsa-ui-ink-2); }
 [data-dsa-ui] .dsa-set-tab:hover, [data-dsa-ui] .dsa-set-tab[aria-selected="true"] { color: var(--dsa-ui-ink); }
 [data-dsa-ui] .dsa-set-tab[aria-selected="true"] { background: var(--dsa-ui-bg); }
+[data-dsa-ui] .dsa-set-segs { background: var(--dsa-ui-layer); border-color: var(--dsa-ui-line); }
+[data-dsa-ui] .dsa-set-seg { color: var(--dsa-ui-ink-2); }
+[data-dsa-ui] .dsa-set-seg:hover:not(:disabled), [data-dsa-ui] .dsa-set-seg[data-on="1"] { color: var(--dsa-ui-ink); }
+[data-dsa-ui] .dsa-set-seg[data-on="1"] { background: var(--dsa-ui-bg); }
 [data-dsa-ui] .dsa-set-row, [data-dsa-ui] .dsa-set-stack, [data-dsa-ui] .dsa-set-self { border-color: var(--dsa-ui-line); }
 [data-dsa-ui] .dsa-set-btn { color: var(--dsa-ui-ink); background: var(--dsa-ui-layer); border-color: var(--dsa-ui-line); }
 [data-dsa-ui] .dsa-set-btn:hover { background: var(--dsa-ui-bg); }
@@ -1107,6 +1109,13 @@ window.__ModuleLoader__.load({
 .dsa-set-tab:hover { color: var(--dsw-alias-label-primary); }
 .dsa-set-tab[aria-selected="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 600; }
 .dsa-set-tab:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+/* 分段选择（显示位置）：与页签同一套观感，但更紧凑 —— 它嵌在一行里，不是页面级导航。 */
+.dsa-set-segs { display: flex; gap: 2px; padding: 2px; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; }
+.dsa-set-seg { font: inherit; font-size: 12.5px; padding: 4px 12px; border: none; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; white-space: nowrap; transition: background 120ms ease, color 120ms ease; }
+.dsa-set-seg:hover:not(:disabled) { color: var(--dsw-alias-label-primary); }
+.dsa-set-seg[data-on="1"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 600; }
+.dsa-set-seg:disabled { opacity: 0.45; cursor: default; }
+.dsa-set-seg:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dsa-set-panel { display: flex; flex-direction: column; }
 .dsa-set-desc { font-size: 13px; line-height: 1.55; color: var(--dsw-alias-label-secondary); margin-bottom: 10px; max-width: 720px; }
 .dsa-set-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--dsw-alias-border-l1); }
@@ -2582,10 +2591,12 @@ window.__ModuleLoader__.load({
       /** 最后一次决策（设置页要显示"当前对比度"）。 */
       let lastDecision = null
       /**
-       * 深色/浅色主题切换时要重新算吗？
+       * 深浅色主题变化时的重算，看下面 `onThemeChange`。
        *
-       * 不需要：决策只取决于**壁纸画面**，与用户的浅色/深色偏好无关（偏好绝不推翻
-       * "亮壁纸配深色字"这种结论）。所以这里没有 `data-ds-dark-theme` 的监听。
+       * 这里原先写着"不需要监听：决策只取决于壁纸画面"——那是错的。
+       * 壁纸画面决定的是**墨色**（亮壁纸配深色字），而**地板色**（面板底压哪一侧）
+       * 由主题深浅决定，两者在 `deriveTokens` 里是分开的参数。漏掉后者就会出现
+       * "切了深浅色，面板还停在上一套地板色"。
        */
       let alive = true
       /** 壁纸层与"让位变量"合并进同一条样式表的挂载点（见 ensureLive）。 */
@@ -3067,6 +3078,49 @@ window.__ModuleLoader__.load({
       }
       document.addEventListener('visibilitychange', onVisibility)
 
+      /**
+       * 深浅色主题变化后重新决策一次。
+       *
+       * 为什么必须监听（原先"决策只取决于壁纸画面"的说法是错的）：
+       * `deriveTokens(decision, preset, { dark })` 里的 `dark` 决定**地板色**
+       * （深色压近黑 `FLOOR_BASE.dark`、浅色压白）、可读性下限、以及釉色的钳制方向。
+       * 也就是说同一个壁纸画面上，深色主题和浅色主题产出的令牌本来就不同。
+       * 不重算的话，用户切了深浅色，界面面板还停在上一套地板色上，
+       * 设置页显示的对比度读数也跟着失真 —— 只有改一次预设或滑杆才纠正。
+       *
+       * 为什么要延迟：内核写属性与重算样式不在同一帧的保证里。读属性本身
+       * （`themeIsDark`）没问题，但 `snapshotNative` 读的是 **computed** 令牌 ——
+       * 那边 `--dsw-alias-*` 还是旧主题的值。所以先记下"要重算"，等两帧再动手。
+       */
+      let themeObserver = null
+      let themeFrame = 0
+      const onThemeChange = () => {
+        if (!alive || themeFrame !== 0) return
+        themeFrame = window.setTimeout(() => {
+          themeFrame = 0
+          if (!alive || cfg === null || cfg.enabled !== true) return
+          wallLog('深浅色变化 → 重新决策')
+          // 地板色变了 → 快照也要重抄（否则设置页用的是旧主题的原生色）。
+          snapshotNative()
+          decideAndApply(lastDecision !== null && lastDecision.analysis ? lastDecision.analysis : null)
+        }, 32)
+      }
+      if (typeof MutationObserver === 'function') {
+        themeObserver = new MutationObserver(onThemeChange)
+        // 内核 ThemePresenter 只写这两个属性（见 themeIsDark）：
+        //   <html data-ds-theme-source="light|dark">、<body data-ds-dark-theme>
+        const host = document.documentElement
+        if (host !== null && host !== undefined) {
+          themeObserver.observe(host, { attributes: true, attributeFilter: ['data-ds-theme-source'] })
+        }
+        if (document.body !== null && document.body !== undefined) {
+          themeObserver.observe(document.body, {
+            attributes: true,
+            attributeFilter: ['data-ds-dark-theme'],
+          })
+        }
+      }
+
       return {
         async load() {
           try {
@@ -3139,6 +3193,14 @@ window.__ModuleLoader__.load({
         destroy() {
           alive = false
           document.removeEventListener('visibilitychange', onVisibility)
+          if (themeObserver !== null) {
+            themeObserver.disconnect()
+            themeObserver = null
+          }
+          if (themeFrame !== 0) {
+            window.clearTimeout(themeFrame)
+            themeFrame = 0
+          }
           clearAll()
           if (sheetEl !== null) {
             sheetEl.remove()
@@ -3164,7 +3226,7 @@ window.__ModuleLoader__.load({
       const onPersist = options.onPersist
       const t = options.t
       /** 全局：总开关 + 每只的状态（大小也是每只自己的，见 entry.size）。 */
-      let pet = { enabled: false, pets: [] }
+      let pet = { enabled: false, display: 'page', pets: [] }
       /** @type {Map<string, ReturnType<typeof createPetInstance>>} */
       const instances = new Map()
 
@@ -3182,11 +3244,14 @@ window.__ModuleLoader__.load({
       const sync = (next) => {
         if (!next || typeof next !== 'object') return
         pet.enabled = next.enabled === true
+        pet.display = typeof next.display === 'string' ? next.display : 'page'
         // 每只的大小不在这里采纳：它由设置页的滑杆独占（拖的时候一路推 `dsa:pet-size`）。
         // 每次回包都应用一次旧值的话，拖着滑杆的宠物会被拽回上一个尺寸 —— 看着就是卡。
         if (Array.isArray(next.pets)) pet.pets = next.pets
-        // 总开关关着、或一个宠物包都没有：不建 DOM（素材几十 MB，不该占带宽和内存）。
-        if (!pet.enabled || pet.pets.length === 0) {
+        // 总开关关着、选了"全局界面"、或一个宠物包都没有：不建 DOM。
+        // 素材几十 MB，不该占带宽和内存；"全局界面"下页面里再出现一只就是同一只宠物
+        // 被复制成两份（两只各演各的），所以这里必须**互斥**。
+        if (!pet.enabled || pet.display === 'global' || pet.pets.length === 0) {
           dropAll()
           return
         }
@@ -3289,6 +3354,10 @@ window.__ModuleLoader__.load({
         // 宠物：大小滑杆的本地读数（拖动时只改本地，停手再提交）。
         const [petSize, setPetSize] = React.useState(176)
         const petSizeRef = React.useRef(null)
+        // 全局界面下的实时尺寸预览：一帧最多一次 POST（16ms 定时器合并），
+        // 以及"这一帧最后拖到的那一格"（回调发最新值，不是排队时的旧值）。
+        const petPreviewFrame = React.useRef(0)
+        const petPreviewNext = React.useRef(null)
         /** 宠物此刻在演哪个动作 —— 由浮层回报，用来高亮动作列表（它自己也会切，比如回应播完）。 */
         const [activeClip, setActiveClip] = React.useState('')
         /** 大宠物包（动作多）的搜索词；换宠物时清空。 */
@@ -3427,18 +3496,46 @@ window.__ModuleLoader__.load({
         // 为什么不能等回包再变：拖滑杆时宠物要是不跟手，手感就是"卡"——用户看到的是
         // 一个 350ms 的静止 + 一次跳变。落盘与显示解耦，拖起来才是连续的。
         // 大小是**每只自己的**，所以事件和落盘都带上当前选中的 pack。
+        //
+        // 「全局界面」下还要多一条实时通道：桌面 helper 是独立进程，收不到窗口内的
+        // `dsa:pet-size` 事件。以前它只能等 350ms 落盘 → 宿主 sync → 大小在重建指纹里
+        // → 整个 Electron 进程被停掉重开，用户看到的就是"拖的时候没反应，停手闪没
+        // 一秒再长回来"。现在每帧顺带 POST 一次 `petPreview`（不写盘，helper 当场改
+        // 窗口大小），两档手感一致。页面档不发这个请求 —— 浮层已经跟着走了。
         const onPetSize = (value) => {
           const next = Math.min(320, Math.max(100, Math.round(Number(value))))
           setPetSize(next)
-          window.dispatchEvent(
-            new CustomEvent('dsa:pet-size', { detail: { pack: petSelectedId, size: next } }),
-          )
-          if (petSizeRef.current !== null) clearTimeout(petSizeRef.current)
           const packId = petSelectedId
+          window.dispatchEvent(
+            new CustomEvent('dsa:pet-size', { detail: { pack: packId, size: next } }),
+          )
+          // 停手 350ms 落盘一次（每格都写盘会把配置刷成一片中间值）。
+          if (petSizeRef.current !== null) clearTimeout(petSizeRef.current)
           petSizeRef.current = setTimeout(() => {
             petSizeRef.current = null
             postJson(send, { petResize: { pack: packId, size: next } }, t('petSaved'))
           }, 350)
+          if (!(state && state.pet && state.pet.display === 'global')) return
+          // 记住这一帧的最新值：range 的 change 比帧还密，回调要发"最后拖到的那格"，
+          // 不是发排队时的第一格（那样宠物会永远慢半拍，且松手前最后一格丢帧）。
+          petPreviewNext.current = { pack: packId, size: next }
+          if (petPreviewFrame.current !== 0) return
+          petPreviewFrame.current = window.setTimeout(() => {
+            petPreviewFrame.current = 0
+            const latest = petPreviewNext.current
+            if (latest === null) return
+            petPreviewNext.current = null
+            // 不写盘、不回状态：helper 收到就改窗口，一句 {ok} 就回。
+            void fetch(MANAGE, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ petPreview: latest }),
+            })
+              .then((res) => res.json())
+              // helper 没在跑（刚切档 / 还没拉起来）就什么都不做：
+              // 尺寸由随后那次 petResize 落盘，重建时自然带上。
+              .catch(() => {})
+          }, 16)
         }
 
         /** 宠物开关：字段在 state.pet 里，不走通用 toggle（那个读的是顶层字段）。 */
@@ -4164,6 +4261,55 @@ window.__ModuleLoader__.load({
         /** 动作区标题带上宠物名：多只同屏时得知道现在看的是哪一只。 */
         const petActionTitle = petPack === null ? t('petAction') : `${t('petAction')} · ${petPack.name}`
         const petAsset = (file) => `${ASSET}?path=${encodeURIComponent(file)}`
+        /**
+         * 显示位置：DSH界面 / 全局界面。
+         *
+         * 两档都保证**有且只有一只**宠物：
+         *   · DSH界面 = 浮在页面里；
+         *   · 全局界面 = 一个透明置顶窗浮在所有窗口之上（DSH 里当然也看得见）。
+         *
+         * 为什么没有"都显示"：那会让同一只宠物同时以页面浮层和桌面窗存在，
+         * 两个实例各跑一套节奏、各有一份物理 —— 用户看到的是两只一样的动物在
+         * 各演各的（截图里一只在堆雪人一只在待机）。删掉这一档，动作才是一体的。
+         */
+        const petWhere = pet !== null && typeof pet.display === 'string' ? pet.display : 'page'
+        const petDesktop = pet !== null && pet.desktop && typeof pet.desktop === 'object' ? pet.desktop : null
+        const petDesktopOk = petDesktop !== null && petDesktop.available === true
+        const petWhereBtn = (value, label) =>
+          h(
+            'button',
+            {
+              key: value,
+              type: 'button',
+              className: 'dsa-set-seg',
+              'aria-pressed': petWhere === value ? 'true' : 'false',
+              'data-on': petWhere === value ? '1' : '0',
+              // 全局界面不可用（非 Windows / 没 Electron）时禁掉；"DSH界面"永远可用。
+              disabled: busy || pet === null || (value === 'global' && !petDesktopOk),
+              onClick: () => postJson(send, { petDisplay: value }, t('petSaved')),
+            },
+            label,
+          )
+        const petWhereRow = h(
+          'div',
+          { className: 'dsa-set-row' },
+          h(
+            'div',
+            null,
+            h('div', { className: 'dsa-set-label' }, t('petWhere')),
+            petDesktopOk ? null : h('div', { className: 'dsa-set-note' }, petDesktop === null ? '' : String(petDesktop.reason || '')),
+          ),
+          h(
+            'div',
+            { className: 'dsa-set-right' },
+            h(
+              'div',
+              { className: 'dsa-set-segs', role: 'group', 'aria-label': t('petWhere') },
+              petWhereBtn('page', t('petWherePage')),
+              petWhereBtn('global', t('petWhereGlobal')),
+            ),
+          ),
+        )
         const petSwitch = h(
           'button',
           {
@@ -4353,8 +4499,30 @@ window.__ModuleLoader__.load({
             if (patch === null) return
             window.dispatchEvent(new CustomEvent('dsa:wall-preview', { detail: patch }))
           }
+          /**
+           * 线协议键 → 引擎键。**只看这张表**，别再在别处手写一遍。
+           *
+           * 两个名字为什么不一样：`wallpaperScrim` 是写进配置/请求体的键（宿主按它
+           * 夹取、落盘），`scrim` 是壁纸引擎内部那份配置的形状（`resolvePreset` /
+           * `sanitizeTweak` 都认后者）。拖动预览在浏览器内直接调引擎，走的是后者。
+           *
+           * 踩过的坑：`slider()` 拿的是线协议键，直接 `sendPreview(key, value)` 派发，
+           * 引擎收到 `{wallpaperScrim: 0.4}` 去读 `tweak.scrim` → undefined → 回落到
+           * `cfg.scrim` 用**原值**重画。于是三根滑杆拖动时界面纹丝不动，松手落盘后
+           * 才跳变一次 —— 看着像"预览没实现"，其实是键名没对上。
+           */
+          const sliderKeys = [
+            ['wallpaperScrim', 'scrim'],
+            ['wallpaperBlur', 'blur'],
+            ['wallpaperSaturate', 'saturate'],
+          ]
+          const engineKeyOf = (key) => {
+            const hit = sliderKeys.find(([from]) => from === key)
+            return hit === undefined ? key : hit[1]
+          }
           const sendPreview = (key, value) => {
-            previewNext.current = { ...(previewNext.current || {}), [key]: value }
+            const engineKey = engineKeyOf(key)
+            previewNext.current = { ...(previewNext.current || {}), [engineKey]: value }
             if (previewFrame.current === 0) {
               previewFrame.current =
                 typeof window.requestAnimationFrame === 'function'
@@ -4497,7 +4665,6 @@ window.__ModuleLoader__.load({
           return h(
             'div',
             { className: 'dsa-set-panel', role: 'tabpanel', 'aria-label': t('catTheme') },
-            h('div', { className: 'dsa-set-desc' }, t('wallNote')),
             // ── ① 开关 ──
             h(
               'div',
@@ -4505,7 +4672,7 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { className: 'dsa-set-label' },
-                cfg.enabled ? `${t('wallEnable')} · ${cfg.name}` : t('wallEnable'),
+                cfg.enabled ? `${t('wallEnable')} · ${displayName(cfg.name)}` : t('wallEnable'),
               ),
               h(
                 'div',
@@ -4561,7 +4728,6 @@ window.__ModuleLoader__.load({
                 'div',
                 { className: 'dsa-set-stack-head' },
                 h('div', { className: 'dsa-set-label' }, t('wallPick')),
-                h('div', { className: 'dsa-set-right' }, h('span', { className: 'dsa-set-hint' }, t('wallPickHint'))),
               ),
               wallFiles.length === 0
                 ? h('div', { className: 'dsa-set-empty' }, t('libEmpty'))
@@ -4610,13 +4776,13 @@ window.__ModuleLoader__.load({
         const petPanel = h(
           'div',
           { className: 'dsa-set-panel', role: 'tabpanel', 'aria-label': t('catPet') },
-          h('div', { className: 'dsa-set-desc' }, t('petNote')),
           h(
             'div',
             { className: 'dsa-set-row' },
             h('div', { className: 'dsa-set-label' }, t('petEnableAll')),
             h('div', { className: 'dsa-set-right' }, petSwitch),
           ),
+          petWhereRow,
           h(
             'div',
             { className: 'dsa-set-row' },
@@ -4648,7 +4814,6 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'dsa-set-stack-head' },
               h('div', { className: 'dsa-set-label' }, t('petPick')),
-              h('div', { className: 'dsa-set-right' }, h('span', { className: 'dsa-set-hint' }, t('petPickHint'))),
             ),
             petPacks.length === 0
               ? h('div', { className: 'dsa-set-empty' }, t('petEmpty'))
@@ -4915,13 +5080,20 @@ window.__ModuleLoader__.load({
           const petLayer = createPetLayer({
             t,
             onPersist: (patch) => {
-              void fetch(MANAGE, {
+              // 纯位置写入（拖动/归位落地）：只要写盘成功，本地状态已经有了，
+              // 不需要回包，也不需要再扫一遍素材库。用 `?lite=1` 拿到一句 {ok} 就走 ——
+              // 完整 status 会让每次松手都多等几十上百毫秒（拖起来就是"卡一下"）。
+              const positionOnly =
+                Object.keys(patch).length === 1 && patch.petMove !== undefined
+              void fetch(positionOnly ? `${MANAGE}?lite=1` : MANAGE, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(patch),
               })
                 .then((res) => res.json())
                 .then((payload) => {
+                  // 只有拿到完整状态时才广播同步：lite 回包没有 pet 段，
+                  // 拿它去 sync 会把浮层状态清空。
                   if (payload && payload.pet) {
                     window.dispatchEvent(new CustomEvent('dsa:pet-sync', { detail: payload.pet }))
                   }

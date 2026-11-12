@@ -73,6 +73,19 @@ export function write() {
   return next.length - text.length
 }
 
+/**
+ * 比"内容"而不是"字节"：把行尾归一成 LF 再比。
+ *
+ * Windows 上 `core.autocrlf=true`（默认值）会把工作区的 `client.js` 写成 CRLF，
+ * 而 `render()` 生成的是 LF —— 直接按字节比，这条检查在 Windows 上**永远失败**，
+ * 于是它既拦不住真的漂移（人人都在红），也逼人 `--no-verify` 绕过。
+ * 行尾归一只影响比较，不影响写回（`write()` 仍按文件现有风格整段替换）。
+ *
+ * @param {string} text 任意行尾的文本。
+ * @returns {string} LF 归一的文本。
+ */
+const normalizeEol = (text) => text.replace(/\r\n/g, '\n')
+
 const isMain = process.argv[1] !== undefined && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))
 if (isMain) {
   if (process.argv.includes('--check')) {
@@ -81,7 +94,7 @@ if (isMain) {
     const stop = text.indexOf(END)
     if (start === -1 || stop === -1) throw new Error('client.js 里找不到内联标记段')
     const current = text.slice(start, stop + END.length)
-    if (current !== render()) {
+    if (normalizeEol(current) !== normalizeEol(render())) {
       console.error('client.js 的内联段落与 lib/wallpaper.mjs 不一致，请跑 node tools/sync-wallpaper-inline.mjs')
       process.exit(1)
     }

@@ -4,6 +4,7 @@
   "description": "橙色小水豚，13 段动作",
   "canvas": [480, 648],
   "cover": "cover.webp",
+  "home": { "x": 100, "y": 100 },
   "roles": {
     "idle": "待机",
     "drag": "拖拽悬空",

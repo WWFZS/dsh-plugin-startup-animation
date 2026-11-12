@@ -1,0 +1,25 @@
+# 统一按 LF 存、按 LF 取出。
+#
+# 为什么要显式写死：Windows 上 git 默认 `core.autocrlf=true`，会把工作区写成
+# CRLF。这在本仓库有两个实际后果：
+#   · `tools/sync-wallpaper-inline.mjs --check` 按字节比内联段，于是**永远失败**
+#     （它现在改成按内容比，但根因仍在这里）；
+#   · 提交里出现"只改行尾"的整文件 diff，review 时根本看不出改了什么。
+#
+# 二进制素材很多（webm/mp4/webp/woff），必须显式标 binary，否则 git 会尝试
+# 做行尾转换与文本 diff。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.mp4 binary
+*.webm binary
+*.mp3 binary
+*.wav binary
+*.woff binary
+*.woff2 binary
+*.tgz binary

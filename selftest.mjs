@@ -16,9 +16,11 @@ import {
   assertUploadedFile,
   clampDurationSec,
   cleanupLinkedInstall,
+  deleteUploadedWithRetry,
   installedVersion,
   loadConfig,
   manageStatus,
+  mergePetState,
   parseRange,
   pickMediaExtension,
   releaseStreams,
@@ -31,6 +33,10 @@ import {
   writeHomeBootPatch,
   listPetPacks,
   readPetPack,
+  petDisplayOf,
+  petStates,
+  showsInPage,
+  showsOnDesktop,
   ASSET_ROUTE,
   THEME_EXCLUDED,
   REPO_URL,
@@ -429,7 +435,20 @@ try {
     assert.ok(src.includes('releaseStreams(norm)'), '删除前未释放发送流')
     assert.ok(src.includes('hiddenOnly: true'), '缺少"仅隐藏"回包')
     assert.ok(src.includes('if (!res.writableEnded) stream.destroy()'), '缺少断开即销毁源流')
-    assert.ok(src.includes('attempt < 5'), '缺少真删重试')
+    assert.ok(src.includes('deleteUploadedWithRetry(homeDir, norm)'), '缺少带重试的真删')
+    assert.ok(!src.includes('attempt < 5'), '仍是旧的固定 6 次重试窗口')
+  })
+  await check('deleteUploadedWithRetry：重试窗口够长、路径非法立刻放弃', async () => {
+    const okFile = path.join(uploadDir, 'del-retry.mp4')
+    fs.writeFileSync(okFile, Buffer.alloc(64, 1))
+    assert.equal((await deleteUploadedWithRetry(home, okFile)).removed, true)
+    assert.equal(fs.existsSync(okFile), false)
+    // 目录外的路径：重试再多次也不会成功，必须一次就放弃、不白等整个窗口。
+    const started = Date.now()
+    const res = await deleteUploadedWithRetry(home, path.join(os.tmpdir(), 'nope.mp4'))
+    assert.equal(res.removed, false)
+    assert.ok(res.error instanceof Error, '失败时应带回错误对象')
+    assert.ok(Date.now() - started < 500, '路径校验失败不该按重试窗口慢慢等')
   })
 
   console.log('== 开机音频域（v1.7.0）==')
@@ -488,7 +507,11 @@ try {
     assert.ok(mark.includes('holdTitlebar()'), 'markMediaOk 未按住标题栏浮层')
     assert.ok(!src.includes('watchHold()\n        playStartupAudio()'), 'begin 仍在挂载瞬间放音')
     // 最短展示从出画起算。
-    assert.ok(src.includes('state.revealedAt !== null ? state.revealedAt : state.startAt'), 'minMs 未从出画起算')
+    assert.ok(src.includes('var revealed = state.revealedAt !== null'), '缺少"是否已出画"判定')
+    assert.ok(
+      src.includes('var clockStart = revealed ? state.revealedAt : state.startAt'),
+      'minMs 未从出画起算',
+    )
   })
   await check('boot.css 素材未出画时也不透明（静态锚点）', () => {
     const css = fs.readFileSync(new URL('./runtime/boot.css', import.meta.url), 'utf8')
@@ -1077,6 +1100,114 @@ await check('THEME_EXCLUDED 里的视频仍然在素材库里，只是被标成"
   const usable = mp4.files.filter((file) => file.themeable !== false)
   assert.ok(usable.length > 0, '一个可作主题的视频都没有了')
   fs.rmSync(home, { recursive: true, force: true })
+})
+
+await check('宠物显示位置：只有 page / global 两档，非法值回落 page', () => {
+  const home = path.join(tmp, `pet-display-${Math.random().toString(36).slice(2)}`)
+  fs.mkdirSync(home, { recursive: true })
+  // 没写过这个键 → 默认 page。
+  assert.equal(manageStatus({ packageRoot, homeDir: home }).pet.display, 'page')
+  // 两个合法值都认。
+  for (const value of ['page', 'global']) {
+    writeHomeBootPatch(home, { petDisplay: value })
+    assert.equal(manageStatus({ packageRoot, homeDir: home }).pet.display, value, `${value} 没被读回来`)
+  }
+  // 坏值回落 page：全局模式要额外拉进程，配置写错时宁可少开一个。
+  writeHomeBootPatch(home, { petDisplay: 'window' })
+  assert.equal(manageStatus({ packageRoot, homeDir: home }).pet.display, 'page')
+  fs.rmSync(home, { recursive: true, force: true })
+})
+
+await check('宠物显示位置：旧值 desktop / both 一律迁到 global（不再有"复制成两只"）', () => {
+  assert.equal(petDisplayOf({ petDisplay: 'desktop' }), 'global')
+  assert.equal(petDisplayOf({ petDisplay: 'both' }), 'global')
+  assert.equal(petDisplayOf({ petDisplay: 'global' }), 'global')
+  assert.equal(petDisplayOf({ petDisplay: 'page' }), 'page')
+})
+
+await check('显示位置两档互斥：同一只宠物只会存在于一处', () => {
+  // 这是"一只宠物被复制成两份"那个 bug 的回归点：
+  //   · page   → 只建页面浮层；
+  //   · global → 只建全局窗。
+  for (const value of ['page', 'global']) {
+    const raw = { petDisplay: value }
+    assert.equal(
+      showsInPage(raw) !== showsOnDesktop(raw),
+      true,
+      `${value} 下两处显示开关必须互斥（不能同时为真）`,
+    )
+  }
+  assert.equal(showsInPage({ petDisplay: 'page' }), true)
+  assert.equal(showsOnDesktop({ petDisplay: 'page' }), false)
+  assert.equal(showsInPage({ petDisplay: 'global' }), false)
+  assert.equal(showsOnDesktop({ petDisplay: 'global' }), true)
+  // 缺键/坏值：页面内、非全局（同一套回落）。
+  assert.equal(showsInPage({}), true)
+  assert.equal(showsOnDesktop({}), false)
+  assert.equal(showsOnDesktop({ petDisplay: 42 }), false)
+})
+
+await check('宠物初始位置由包声明：噜噜右下、女仆左下', () => {
+  const home = path.join(tmp, `pet-home-${Math.random().toString(36).slice(2)}`)
+  fs.mkdirSync(home, { recursive: true })
+  const status = manageStatus({ packageRoot, homeDir: home })
+  const byId = new Map(status.pet.pets.map((pet) => [pet.id, pet]))
+  const lulu = byId.get('lulu')
+  const maid = byId.get('maid')
+  assert.ok(lulu, '缺少噜噜')
+  assert.ok(maid, '缺少女仆')
+  assert.equal(lulu.home.x, 100, '噜噜的初始横位应当是右（100）')
+  assert.equal(lulu.home.y, 100, '噜噜的初始纵位应当在下（100）')
+  assert.equal(maid.home.x, 0, '女仆的初始横位应当是左（0）')
+  assert.equal(maid.home.y, 100, '女仆的初始纵位应当在下（100）')
+  // 没有历史记录时，实际位置就取包声明的初始点。
+  assert.equal(lulu.x, 100)
+  assert.equal(lulu.y, 100)
+  assert.equal(maid.x, 0)
+  assert.equal(maid.y, 100)
+  // 两只不该叠在一起（都落右下角就是那个 bug）。
+  assert.notDeepEqual([lulu.x, lulu.y], [maid.x, maid.y], '两只宠物的初始位置不能相同')
+  fs.rmSync(home, { recursive: true, force: true })
+})
+
+await check('manageStatus 带回 pet.desktop（设置页据此决定选项是否可点）', () => {
+  const home = path.join(tmp, `pet-desktop-${Math.random().toString(36).slice(2)}`)
+  fs.mkdirSync(home, { recursive: true })
+  const status = manageStatus({ packageRoot, homeDir: home })
+  assert.ok(status.pet.desktop && typeof status.pet.desktop === 'object', '缺少 pet.desktop')
+  assert.equal(typeof status.pet.desktop.available, 'boolean')
+  assert.equal(typeof status.pet.desktop.reason, 'string')
+  // 非 Windows 一定不可用；Windows 上是否可用取决于本机有没有 Electron。
+  if (process.platform !== 'win32') {
+    assert.equal(status.pet.desktop.available, false)
+    assert.ok(status.pet.desktop.reason.includes('Windows'), '非 Windows 要给出一句原因')
+  }
+  fs.rmSync(home, { recursive: true, force: true })
+})
+
+await check('开关某一只时，新建条目用它自己的 home，不该跳到别的宠物那个角', () => {
+  const home = path.join(tmp, `pet-new-entry-${Math.random().toString(36).slice(2)}`)
+  fs.mkdirSync(home, { recursive: true })
+  // 空配置 → 没有任何 petPets 记录。
+  writeHomeBootPatch(home, { petEnabled: true })
+  // 模拟「打开女仆」：合并出来的新条目必须落在她的左下角 (0,100)，不是右下角。
+  const merged = mergePetState([], 'maid', { enabled: true }, { x: 0, y: 100 })
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].x, 0, `新建条目跑到了 x=${merged[0].x}（应当是 0，女仆在左下）`)
+  assert.equal(merged[0].y, 100)
+  // 不传 home 时仍是右下角兜底（加新宠物包不写 home 也能用）。
+  const fallback = mergePetState([], 'unknown', { enabled: true })
+  assert.equal(fallback[0].x, 100)
+  assert.equal(fallback[0].y, 100)
+  fs.rmSync(home, { recursive: true, force: true })
+})
+
+await check('MERGE 保留已有位置：第二次开关不该重置用户拖过的坐标', () => {
+  const existing = [{ pack: 'maid', enabled: true, x: 42.5, y: 66.6 }]
+  const merged = mergePetState(existing, 'maid', { enabled: false }, { x: 0, y: 100 })
+  assert.equal(merged[0].x, 42.5, '关掉一只时不该把位置冲掉')
+  assert.equal(merged[0].y, 66.6)
+  assert.equal(merged[0].enabled, false)
 })
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILED`)

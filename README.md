@@ -29,7 +29,8 @@
 - **界面主题** —— 同一段视频或同一张图还能铺到应用界面后面当背景。五套预设一键换观感，
   遮罩、模糊、色彩浓度各自可调，**出厂即最透**；字色按壁纸的实测对比度反推，暗壁纸下也看得清。
 - **桌面宠物** —— 透明的小动物浮在界面上，自己轮播动作。能拖着走，甩出去会带着惯性
-  撞边弹回来；每只各记各的大小和位置，可以同时养两只。
+  撞边弹回来；每只各记各的大小和位置，可以同时养两只。**还能住到全局**：
+  切到「全局界面」后它会浮在浏览器、微信等所有窗口之上（Windows，需要本机 Electron）。
 
 插件通过内核的两个扩展点接入：`webserver/index-inject` 注入覆盖层与样式，
 `webServer.register` 提供素材与管理路由。**运行时不依赖任何 npm 包**，浏览器半边只从宿主的
@@ -64,6 +65,7 @@
 - **各走各的** —— 每只自己的位置、大小、待机节奏和甩抛物理，可以同时开两只
 - **拎起来能甩** —— 带惯性地飞、撞到边缘弹回来、停稳回待机，飞的时候还能再抓住
 - **加宠物不改代码** —— 往 `builtin/宠物/<名字>/` 放一个 `pet.json` 和若干 webm 就行
+- **能住到全局** —— 「显示位置」切到「全局界面」，它会浮在浏览器、微信等所有窗口之上（Windows）
 
 **通用**
 
@@ -140,14 +142,14 @@ https://github.com/WWFZS/dsh-plugin-startup-animation/releases/latest/download/d
 **文件的绝对路径**填进「插件名」（例如 `C:\Users\你\Downloads\dsh-plugin-startup-animation.tgz`），
 效果一样。
 
-国内走 Gitee 的话用这条：
+国内走 Gitee 的话用这条（`<版本>` 换成 [Releases 页](https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation/releases) 上的最新版本号）：
 
 ```
-https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation/releases/download/v1.22.1/dsh-plugin-startup-animation.tgz
+https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation/releases/download/<版本>/dsh-plugin-startup-animation.tgz
 ```
 
-Gitee 没有 `latest` 这种永久链接，地址里带着版本号，换版本要换地址 —— 想一次填对就用上面
-GitHub 那条，或者直接下载文件后填本地路径。
+Gitee 没有 `latest` 这种永久链接，地址里必须带版本号 —— 想一次填对就用上面 GitHub 那条，
+或者直接下载文件后填本地路径。
 
 ### 方式三：命令行
 
@@ -158,8 +160,8 @@ dsh plugin --profile <你的 profile> add dsh-plugin-startup-animation
 # 或从 GitHub 直链
 dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-startup-animation/releases/latest/download/dsh-plugin-startup-animation.tgz
 
-# 或从 Gitee 直链
-dsh plugin --profile <你的 profile> add https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation/releases/download/v1.22.1/dsh-plugin-startup-animation.tgz
+# 或从 Gitee 直链（<版本> 换成 Releases 页上的最新版本号）
+dsh plugin --profile <你的 profile> add https://gitee.com/weiwenfengzs/dsh-plugin-startup-animation/releases/download/<版本>/dsh-plugin-startup-animation.tgz
 ```
 
 本地 `.tgz` 文件或本地目录路径同样可以，把最后一个参数换掉即可。然后重启 `dsh`。
@@ -292,6 +294,30 @@ dsh plugin --profile <你的 profile> add https://github.com/WWFZS/dsh-plugin-st
 - **加宠物不用改代码**：`builtin/宠物/<名字>/` 放一个 `pet.json` 和若干 webm，
   文件名就是动作名
 - 素材已经去掉绿幕和脚下的地面投影，所以它是**悬浮**在界面上的
+
+#### 显示位置：DSH界面 / 全局界面
+
+宠物页签最上面有**显示位置**两档：
+
+| 档位 | 效果 |
+| --- | --- |
+| DSH界面 | 浮在 DSH 页面里（默认） |
+| 全局界面 | 一个透明置顶小窗，**浮在浏览器、微信、资源管理器等所有窗口之上**（DSH 里当然也看得见） |
+
+两档**都只有一只宠物**：切到哪档，它就只在那一处，动作、位置、甩抛物理都是同一份状态
+（待机轮播、点击回应、拖拽甩出撞边反弹）。不会出现"页面里一只在堆雪人、桌面上另一只在待机"。
+
+**全局界面仅 Windows。** 需要本机有 Electron：放到 `$DSH_HOME/electron/electron.exe`，
+或设环境变量 `DSA_PET_ELECTRON_PATH` 指向它。设置页里如果这一档是灰的，那一行会直接
+写出原因（找不到 Electron / 不是 Windows）。装过 dsh-pet 的机器已经有了这个目录，
+本插件与它共用同一个位置。
+
+全局窗的行为与页面里一致：待机轮播、点击回应、拖动换位置（松手记住）、甩出去撞边弹回、置顶、
+不占任务栏。差异是**没有右键菜单**（菜单在设置页里），以及多屏时只认主屏工作区。
+关掉总开关或切回「DSH界面」时，那个 Electron 进程会一起退出，不会留在后台。
+
+**初始位置**由宠物包自己声明（`pet.json` 的 `home`）：噜噜在**右下角**，女仆在**左下角**，
+两只不会叠在一起。拖动过之后以你记下的位置为准。
 
 #### 形象与授权
 

@@ -31,6 +31,15 @@ for (const file of ['index.js', 'client.js', 'runtime/boot.js']) {
 step('单元测试')
 run(['selftest.mjs'])
 
+step('壁纸主题测试（预设 / 夹取 / 内联快照）')
+run(['lib/wallpaper-test.mjs'])
+
+step('桌面宠物测试（指纹去重 / 尺寸补推）')
+run(['lib/desktop-pet-test.mjs'])
+
+step('壁纸内联段落同步检查（client.js 与 lib/wallpaper.mjs）')
+run(['tools/sync-wallpaper-inline.mjs', '--check'])
+
 step('运行时行为测试（boot.js）')
 run(['tools/boot-runtime.mjs'])
 

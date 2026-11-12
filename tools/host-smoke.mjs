@@ -276,6 +276,44 @@ const petBad = await postJson({ petToggle: { pack: '不存在的宠物', enabled
 assert.equal(petBad.status, 400, '不存在的宠物包应当 400')
 console.log('  ok   宠物：单只开关 / 位置 / 大小 / 未知包拒绝')
 
+// ── 9.5b 大小预览：拖滑杆期间的实时通道 ──
+// 它是"全局界面下拖大小要跟手"的唯一落点：不写盘、不回状态，只把尺寸推给
+// 正在运行的桌面 helper。这条测试只验契约（写盘没被它改写），进程层面在
+// desktop-e2e 里验。
+{
+  const before = (await call(MANAGE_ROUTE)).json().pet.pets.find((pet) => pet.id === petId).size
+  const preview = await postJson({ petPreview: { pack: petId, size: 200 } })
+  assert.equal(preview.status, 200, preview.body.toString())
+  assert.equal(preview.json().ok, true, 'petPreview 没回 ok')
+  // helper 没跑（页面档 / 刚切档）时如实报 previewed:false，调用方据此不指望它。
+  assert.equal(typeof preview.json().previewed, 'boolean', 'petPreview 没回 previewed')
+  const after = (await call(MANAGE_ROUTE)).json().pet.pets.find((pet) => pet.id === petId).size
+  assert.equal(after, before, 'petPreview 不该写盘（它只负责拖动期间的视觉更新）')
+  const previewBad = await postJson({ petPreview: { pack: petId } })
+  assert.equal(previewBad.status, 400, 'petPreview 缺 size 应当 400')
+  const previewBadPack = await postJson({ petPreview: { size: 200 } })
+  assert.equal(previewBadPack.status, 400, 'petPreview 缺 pack 应当 400')
+  console.log('  ok   宠物大小预览：只推不写盘 / 缺字段 400')
+}
+
+// ── 9.6 宠物显示位置（决定要不要拉 Electron 进程，取值必须严格）──
+assert.equal((await call(MANAGE_ROUTE)).json().pet.display, 'page', '默认应当是 DSH界面')
+for (const value of ['global', 'page']) {
+  const res = await postJson({ petDisplay: value })
+  assert.equal(res.status, 200, res.body.toString())
+  assert.equal(res.json().pet.display, value, `petDisplay=${value} 没写进去`)
+}
+const displayBad = await postJson({ petDisplay: 'both' })
+assert.equal(displayBad.status, 400, '「都显示」已删掉，必须拒绝（它会造出两只宠物）')
+assert.equal((await postJson({ petDisplay: 'desktop' })).status, 400, '旧的 desktop 档也要拒绝写入')
+// 坏值被拒之后，磁盘上的值应当原样留着 —— 拒绝不是"写一半"。
+assert.equal((await call(MANAGE_ROUTE)).json().pet.display, 'page', '被拒的写入污染了配置')
+// 状态里要带 desktop 能力，设置页据此决定选项是否可点。
+const desktop = (await call(MANAGE_ROUTE)).json().pet.desktop
+assert.ok(desktop && typeof desktop === 'object', '缺少 pet.desktop')
+assert.equal(typeof desktop.available, 'boolean', 'pet.desktop.available 必须是布尔值')
+console.log('  ok   宠物：显示位置两档 + 旧档/未知值拒绝 + desktop 能力回显')
+
 // ── 10. 音频域 ──
 const audioFile = Buffer.alloc(5000, 3)
 const upAudio = await call(MANAGE_ROUTE, {

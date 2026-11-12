@@ -13,6 +13,10 @@
     360
   ],
   "cover": "cover.webp",
+  "home": {
+    "x": 0,
+    "y": 100
+  },
   "roles": {
     "idle": "待机呼吸休闲",
     "turn": [

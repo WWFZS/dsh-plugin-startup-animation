@@ -221,6 +221,13 @@
     var skipFadeMs = num(cfg.skipFadeMs, 240, 60, 2000)
     // minMs 的上界 = 展示时长上限（设置页 3–30 秒；素材模式的 minMs 就是 durationSec×1000）。
     var minMs = num(cfg.minMs, 900, 0, 30000)
+    // 素材一旦出画，最短展示要按素材自己的时长走 —— 此时 cfg.minMs 已经被 index.js
+    // 设成了 durationSec*1000。这里再取一次 max：运行时若因任何原因拿到的是旧的、
+    // 更小的 minMs（例如只读了注入快照），也不会让用户设的 5–30 秒缩水成 900ms。
+    // 只在素材模式下这样兜：css 模式的 minMs 是另一套语义（够看出动画即可），
+    // 不能被同包里带过来的 durationSec 抬到几十秒。
+    var mediaMinMs =
+      cfg.mediaMode === true ? Math.max(minMs, num(cfg.durationSec, 0, 0, 30) * 1000) : minMs
     var holdMs = num(cfg.holdMs, 20000, 2000, 120000)
     var holdGraceMs = num(cfg.holdGraceMs, 4000, 0, 30000)
     var noFrameMs = num(cfg.noFrameMs, 10000, 1500, 30000)
@@ -304,6 +311,8 @@
       revealedAt: null,
       mediaNode: null,
       startAt: Date.now(),
+      // 顺延时排的那一个 setTimeout 是否已经挂上（见 enter）。
+      wakeup: false,
       timers: [],
       intervals: [],
       observer: null,
@@ -435,14 +444,29 @@
       // 用户主动跳过（点击/按键）绕过最短展示——他们已经决定不等了；
       // 其余路径（就绪、超时、失败）统一兜 minMs，防止一闪而过。
       var voluntary = reason === 'click' || reason.indexOf('key:') === 0
-      // 最短展示从"素材出画"起算：加载耗时（大文件 moov 在尾等）不吃用户的展示时长；
-      // 从未出画（素材坏了/一直没等到）就用 startAt —— 反正覆盖层是透明的，让开无痕。
-      var clockStart = state.revealedAt !== null ? state.revealedAt : state.startAt
+      // 最短展示从"素材出画"起算：加载耗时（大文件 moov 在尾等）不吃用户的展示时长。
+      // 出画后走 mediaMinMs（素材时长与配置值取大），保证用户设的 5–30 秒绝不缩水。
+      //
+      // 从未出画时用 startAt 起算，并封顶 900ms：素材挂了/一直没来，屏幕上只有很短
+      // 的内置场景或干脆透明（原生启动页在底下），按素材时长扣着用户毫无意义。
+      // 这个封顶只作用于**素材模式**（那里 minMs 是 durationSec×1000，可能长达 30 秒）；
+      // CSS 模式的 minMs 就是用户亲手设的动画时长，原样照办。
+      // 而且它只影响**这一次交接的时钟**，minMs 本身不改 —— 曾经在 mediaGone 里直接
+      // 覆写 minMs = 900，结果媒体中途坏过一次，用户设的时长就永久变 0.9 秒。
+      var revealed = state.revealedAt !== null
+      var clockStart = revealed ? state.revealedAt : state.startAt
+      var limit = revealed || cfg.mediaMode !== true ? mediaMinMs : 900
       var elapsed = Date.now() - clockStart
-      if (!voluntary && elapsed < minMs) {
-        timer(function () {
-          enter(span, reason)
-        }, minMs - elapsed + 10)
+      if (!voluntary && elapsed < limit) {
+        // 顺延只排一次：watchBoot 每 100ms 也会调进来（就绪后每拍收口），
+        // 每次都新排一个 setTimeout 会让旧的那些永远轮不到、定时器越堆越多。
+        if (!state.wakeup) {
+          state.wakeup = true
+          timer(function () {
+            state.wakeup = false
+            enter(span, reason)
+          }, limit - elapsed + 10)
+        }
         return
       }
       state.leaving = true
@@ -490,7 +514,7 @@
       }, ms + 140)
     }
 
-    /** 交接条件：应用树挂上来（+ minMs 由 enter 统一兜）。 */
+    /** 交接条件：应用树挂上来（+ 最短展示由 enter 统一兜，到点由 watchBoot 的 tick 收口）。 */
     function maybeEnter() {
       if (state.leaving || state.failed) return
       if (!state.appReady) return
@@ -592,9 +616,16 @@
       else global.addEventListener('load', onWindowLoad)
       checkReady()
       var ticks = 0
+      // 应用树已经挂上来、只是最短展示还没到：到这里收口，不再重复判就绪。
+      // 注意必须先判 appReady 再判就绪 —— 走持卡路径（watchHold）时会置 appReady
+      // 但不经过 markAppReady，只靠 enter 内部顺延的话这一轮没有再调用的机会。
       interval(function () {
         if (state.leaving) return
         ticks += 1
+        if (state.appReady) {
+          maybeEnter()
+          return
+        }
         checkReady()
         if (ticks % 4 === 0) checkFailure()
       }, TICK_MS)
@@ -708,8 +739,13 @@
       root.setAttribute('data-mode', 'css')
       state.mediaOk = false
       state.mediaNode = null
-      // 从未出画 → 最短展示缩回 900ms（透明层没必要按素材时长扣着交接）。
-      if (state.revealedAt === null) minMs = 900
+      // 已经出画过（用户真的看到了素材），只是后来坏了 → 保持配置里的最短展示，
+      // 不能让「换回徽标场景」这件事顺带把用户的展示时长改掉。
+      //
+      // 从未出画时不在这里改 minMs：覆盖层此刻已经转透明、原生启动页接回来了，
+      // 该等多久由 enter() 的 clockStart 决定（见那里）。这里覆写 minMs 反而会
+      // 把「配置值」这个唯一真源改掉 —— 一旦同一轮里素材又回来，用户设的
+      // 3–30 秒就只剩 0.9 秒了（构建期设置页与运行时看到的不是同一个值）。
       // 出画前失败过 → 标题栏浮层从未被按住/或按住后素材又坏了 → 还原原生取色。
       restoreTitlebar()
       // 覆盖层转透明 = 原生启动页接回来，首帧遮罩必须一起摘掉。
