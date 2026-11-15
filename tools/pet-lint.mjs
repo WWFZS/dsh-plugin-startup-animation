@@ -182,8 +182,12 @@ if (!fs.existsSync(metaPath)) {
       inCategories.add(id)
       if (!filesInPack.has(id)) problems.push(`分类「${category.name}」引用了不存在的动作：${id}`)
     }
-    const cover = category.cover
-    if (cover && !fs.existsSync(path.join(packDir, cover))) problems.push(`分类「${category.name}」缺封面：${cover}`)
+    // 封面不再是 pet.json 里的一张大图：运行时取「分类里第一个动作」的缩略图。
+    // 所以这里只查那个动作的缩略图在不在 —— 缺了卡片就是个空框。
+    const first = (category.clips ?? [])[0]
+    if (first !== undefined && !thumbs.has(first)) {
+      problems.push(`分类「${category.name}」的首个动作「${first}」缺缩略图（thumbs/${first}.webp）`)
+    }
   }
   /**
    * 语义角色引用的动作（待机 / 拖拽 / 点击回应…）：它们本来就不属于任何分类，

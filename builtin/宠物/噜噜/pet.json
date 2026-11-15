@@ -1,22 +1,22 @@
 {
   "id": "lulu",
   "name": "噜噜",
-  "description": "橙色小水豚，13 段动作",
+  "description": "橙色小水豚，18 段动作",
   "canvas": [480, 648],
   "cover": "cover.webp",
   "home": { "x": 100, "y": 100 },
   "roles": {
     "idle": "待机",
     "drag": "拖拽悬空",
-    "clicks": ["点击回应"],
+    "clicks": ["点击回应", "害羞捂脸", "傲娇生气"],
     "turn": [],
     "moves": []
   },
   "ambient": ["interact", "chill", "desk", "festival"],
   "categories": [
-    { "id": "interact", "name": "互动", "cover": "cat-interact.webp", "clips": ["点击回应", "害羞捂脸", "挥手打招呼"] },
-    { "id": "chill", "name": "休闲", "cover": "cat-chill.webp", "clips": ["吃橘子", "原地踏步", "原地小憩", "泡温泉", "堆雪人"] },
-    { "id": "desk", "name": "工作", "cover": "cat-work.webp", "clips": ["玩电脑"] },
-    { "id": "festival", "name": "节庆", "cover": "cat-festival.webp", "clips": ["收红包", "圣诞换装"] }
+    { "id": "interact", "name": "互动", "clips": ["点击回应", "害羞捂脸", "傲娇生气", "挥手打招呼"] },
+    { "id": "chill", "name": "休闲", "clips": ["打哈欠", "喝咖啡", "吃橘子", "原地踏步", "原地小憩", "泡温泉", "追蝴蝶", "堆雪人"] },
+    { "id": "desk", "name": "工作", "clips": ["思考冒泡", "玩电脑"] },
+    { "id": "festival", "name": "节庆", "clips": ["收红包", "圣诞换装"] }
   ]
 }

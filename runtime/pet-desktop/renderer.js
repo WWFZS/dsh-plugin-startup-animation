@@ -262,7 +262,10 @@
     if (!pressed) return
     pressed = false
     hit.dataset.drag = '0'
-    if (stage !== null) stage.style.transform = ''
+    // 松手回正：内联 transform 清掉后由样式表接管。**要显式写回 `translateZ(0)`**，
+    // 不能只写 ''：空字符串会让元素退回主图层，下一次移窗又得重新栅格化，边缘重新发毛
+    // （见 index.html 里 #stage 那段注释）。
+    if (stage !== null) stage.style.transform = 'translateZ(0)'
     try {
       hit.releasePointerCapture(event.pointerId)
     } catch {
@@ -280,6 +283,16 @@
     window.dsaPet.onTap(() => {
       if (pack !== null) playClick()
     })
+    // 拖动中的倾斜：主进程按系统光标算好角度送过来（渲染端在窗口跟手时拿不准真实位移）。
+    // 数值口径与浏览器浮层完全一致：水平位移 × 0.12，夹在 ±9°，见 client.js 的 onPointerMove。
+    if (typeof window.dsaPet.onDragLean === 'function') {
+      window.dsaPet.onDragLean((deg) => {
+        if (!pressed || stage === null) return
+        const lean = Number.isFinite(deg) ? Math.max(-9, Math.min(9, deg)) : 0
+        // 提层那句 translateZ 必须带着，否则倾斜会把舞台退回主图层（边缘发毛）。
+        stage.style.transform = `translateZ(0) rotate(${lean.toFixed(1)}deg)`
+      })
+    }
     window.dsaPet.onBump(() => {
       // 飞行中才有意义：静止时被通知（比如拖动途中刚好压到边）不该抖一下。
       if (mode === 'drag' || mode === 'action' || !pressed) squash()

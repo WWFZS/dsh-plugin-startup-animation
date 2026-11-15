@@ -230,7 +230,14 @@ assert.equal(upWallThumb.body.length, wall.length)
 // 视频请求 thumb=1 不会出错（视频只做首帧，不缩略）。
 const videoThumb = await call(`${ASSET_ROUTE}?path=${encodeURIComponent(builtinMp4)}&thumb=1`)
 assert.equal(videoThumb.status, 200)
-console.log('  ok   缩略图：内置图片变小 / 上传回落原图 / 视频不受影响')
+// 宠物动作缩略图（`thumbs/<动作>.webp`）本身就是成品小图：`thumb=1` 要原样发出去，
+// 不能因为"在 thumbs/ 里找不到 .jpg"就当成加载失败（那会让卡片变成空框）。
+const petThumb = 'builtin/宠物/噜噜/thumbs/点击回应.webp'
+const petThumbRes = await call(`${ASSET_ROUTE}?path=${encodeURIComponent(petThumb)}&thumb=1`)
+assert.equal(petThumbRes.status, 200, `宠物缩略图 thumb=1 失败 ${petThumbRes.status}`)
+assert.equal(petThumbRes.headers['content-type'], 'image/webp', `宠物缩略图 MIME 不对：${petThumbRes.headers['content-type']}`)
+assert.equal(petThumbRes.body.length, fs.statSync(path.join(packageRoot, petThumb)).size, '宠物缩略图被换掉了')
+console.log('  ok   缩略图：内置图片变小 / 上传回落原图 / 视频不受影响 / 宠物缩略图原样')
 
 // ── 8. 移除内置素材（tombstone，包内文件保留）──
 const forgetB = await postJson({ forget: builtinMp4 })
@@ -384,6 +391,25 @@ assert.equal(wallAuto.json().wallpaper.surfaceBlur, 36, "'auto' 没有回落到�
 const wallBadPreset = await postJson({ wallpaperPreset: 'not-a-preset' })
 assert.equal(wallBadPreset.status, 200, wallBadPreset.body.toString())
 assert.equal(wallBadPreset.json().wallpaper.preset, 'frosted', '认不出的预设没退回默认值')
+// 字体颜色：只认调色板里的九色 + auto，其余静默回 auto（不报 400 —— 这是"挑个颜色"的设置）。
+const wallColor = await postJson({ wallpaperTextColor: '#ffe066' })
+assert.equal(wallColor.status, 200, wallColor.body.toString())
+assert.equal(wallColor.json().wallpaper.textColor, '#ffe066', '合法字体颜色没落盘')
+assert.equal(wallColor.json().cfg.wallpaper.textColor, '#ffe066', 'cfg 里没带上字体颜色')
+// 表外颜色（哪怕是个合法的 CSS 色）一律回 auto：放开等于允许把字设成和背景同色。
+const wallColorBad = await postJson({ wallpaperTextColor: '#00ff00' })
+assert.equal(wallColorBad.status, 200, wallColorBad.body.toString())
+assert.equal(wallColorBad.json().wallpaper.textColor, 'auto', '表外颜色没回 auto')
+// 换预设不该把用户挑的颜色带走（颜色不归预设管）。
+// 上一笔已经把颜色写回 auto 了，这里重新挑一个再换预设，才测得出"带不带得走"。
+await postJson({ wallpaperTextColor: '#4dd8e6' })
+const wallColorKeep = await postJson({ wallpaperPreset: 'night' })
+assert.equal(wallColorKeep.status, 200, wallColorKeep.body.toString())
+assert.equal(wallColorKeep.json().wallpaper.textColor, '#4dd8e6', '换预设把字体颜色弄丢了')
+const wallColorAuto = await postJson({ wallpaperTextColor: 'auto' })
+assert.equal(wallColorAuto.status, 200, wallColorAuto.body.toString())
+assert.equal(wallColorAuto.json().wallpaper.textColor, 'auto', '没能回 auto')
+
 // 音频不能当壁纸：静默拒收（不落盘、不炸），壁纸保持关闭。
 const wallAudio = await postJson({ wallpaperFile: audioEntry.path })
 assert.equal(wallAudio.status, 200, wallAudio.body.toString())

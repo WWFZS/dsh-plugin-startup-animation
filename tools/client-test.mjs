@@ -59,7 +59,7 @@ const NATIVE_TOKENS_DARK = {
  * 极小的 React 替身：只实现 client.js 用到的部分。
  * hooks 用一个简单的游标实现 —— 组件函数按顺序调用 hook，渲染器负责重放。
  */
-function createReact() {
+function createReact(onImageSrc) {
   let hookIndex = 0
   /** @type {any[]} */
   let currentHooks = []
@@ -68,6 +68,8 @@ function createReact() {
   const React = {
     createElement(type, props, ...children) {
       const flat = children.flat(Infinity).filter((child) => child !== null && child !== undefined && child !== false)
+      /** 渲染结果上的 img 才对应真实 DOM：把地址发出去看看真实 `<img>` 会请求什么。 */
+      if (String(type).toLowerCase() === 'img') onImageSrc?.(props?.src)
       return { type, props: props ?? {}, children: flat }
     },
     useState(initial) {
@@ -172,7 +174,7 @@ function findByProp(node, prop) {
  * @returns {Promise<{ React: object, render: Function, calls: object[] }>} 测试现场。
  */
 async function loadClient(options = {}) {
-  const React = createReact()
+  const React = createReact((src) => calls.push({ type: 'img', src }))
   const calls = []
   /** window 事件监听（宠物浮层 ↔ 设置页的那条桥）。 */
   const listeners = []
@@ -195,6 +197,18 @@ async function loadClient(options = {}) {
     limitBytes: 128 * 1024 * 1024,
     library: [],
     cfg: {},
+  }
+
+  /** 真 HTML 包装：真实页面里 `<img>` 上的 src 就是这个字符串。 */
+  const RealImage = class {
+    set src(value) {
+      this._src = String(value)
+      calls.push({ type: 'img', src: this._src, owner: this.__owner })
+    }
+
+    get src() {
+      return this._src
+    }
   }
 
   const sandbox = {
@@ -240,7 +254,8 @@ async function loadClient(options = {}) {
       }
     },
     document: {
-      createElement: () => {
+      createElement: (tag) => {
+        if (String(tag).toLowerCase() === 'img') return new RealImage()
         const attrs = {}
         return {
           style: {},
@@ -765,8 +780,8 @@ const LULU_PACK = {
   roles: { idle: '待机', drag: '', clicks: ['点击回应'], turn: [], moves: [] },
   ambient: ['interact', 'chill'],
   categories: [
-    { id: 'interact', name: '互动', cover: 'builtin/宠物/噜噜/cat-interact.webp', clips: ['点击回应', '害羞捂脸'] },
-    { id: 'chill', name: '休闲', cover: 'builtin/宠物/噜噜/cat-chill.webp', clips: ['吃橘子', '待机'] },
+    { id: 'interact', name: '互动', cover: 'builtin/宠物/噜噜/thumbs/点击回应.webp', clips: ['点击回应', '害羞捂脸'] },
+    { id: 'chill', name: '休闲', cover: 'builtin/宠物/噜噜/thumbs/吃橘子.webp', clips: ['吃橘子', '待机'] },
   ],
   clips: [petClip('待机', true), petClip('点击回应'), petClip('害羞捂脸'), petClip('吃橘子')],
   count: 4,
@@ -789,8 +804,8 @@ const MAID_PACK = {
   roles: { idle: '动作001', drag: '', clicks: ['动作002'], turn: [], moves: [] },
   ambient: ['play', 'food'],
   categories: [
-    { id: 'play', name: '玩耍', cover: 'builtin/宠物/女仆/cat-play.webp', clips: MAID_CLIPS.slice(0, 60).map((clip) => clip.id) },
-    { id: 'food', name: '吃什么', cover: 'builtin/宠物/女仆/cat-food.webp', clips: MAID_CLIPS.slice(60).map((clip) => clip.id) },
+    { id: 'play', name: '玩耍', cover: 'builtin/宠物/女仆/thumbs/动作001.webp', clips: MAID_CLIPS.slice(0, 60).map((clip) => clip.id) },
+    { id: 'food', name: '吃什么', cover: 'builtin/宠物/女仆/thumbs/动作061.webp', clips: MAID_CLIPS.slice(60).map((clip) => clip.id) },
   ],
   clips: MAID_CLIPS,
   count: 109,
@@ -959,10 +974,39 @@ await check('大包不铺动作格：分类卡 + 搜索 + 随机一个', async (
   assert.equal(cats.length, 2, `分类卡数量不对：${cats.length}`)
   const names = cats.map((cat) => texts(cat)[0])
   assert.deepEqual(names, ['玩耍', '吃什么'], `分类不对：${names.join(' / ')}`)
+  // 分类卡的封面 = 该分类**第一个动作**的缩略图（不再有单独的 cat-*.webp 拼图）。
+  // 封面 src 会被 petAsset() 包成 /dsh-startup-animation/asset?path=<编码后的包内路径>，先解码再比。
+  const covers = cats.map((cat) => {
+    const src = String(findAll(cat, 'dsa-set-cat-cover')[0].props.src)
+    const raw = src.includes('path=') ? new URLSearchParams(src.split('?')[1]).get('path') : src
+    return raw
+  })
+  assert.deepEqual(
+    covers,
+    ['builtin/宠物/女仆/thumbs/动作001.webp', 'builtin/宠物/女仆/thumbs/动作061.webp'],
+    `分类封面不对：${covers.join(' / ')}`,
+  )
   const search = findAll(petTree, 'dsa-set-input')[0]
   assert.ok(search, '没有搜索框')
   assert.equal(search.props.placeholder, '搜索动作', '搜索框占位文案不对')
   assert.ok(texts(petTree).includes('随机一个'), '没有「随机一个」按钮')
+})
+
+await check('分类卡图片地址真的落到 thumbs/<第一个动作>.webp', async () => {
+  const { render, calls } = await loadClient({ status: petStatus([MAID_PACK], { enabled: true }) })
+  await openPetTab(render)
+  // 走的是渲染时交给 `<img>` 的 src（真实页面里浏览器就请求这个地址），
+  // 不是组件树上的 props —— props 对了但没交给 img，用户看到的仍然是空框。
+  const shown = calls.filter((call) => call.type === 'img' && String(call.src).includes('dsa')).length
+  const covers = calls
+    .filter((call) => call.type === 'img')
+    .map((call) => String(call.src))
+    .filter((src) => src.includes('thumbs'))
+  assert.ok(covers.length >= 2, `分类卡没有把缩略图交给 <img>（共 ${shown} 张图）：${covers.join(' / ')}`)
+  for (const src of covers) {
+    const raw = src.includes('path=') ? new URLSearchParams(src.split('?')[1]).get('path') : src
+    assert.ok(raw.startsWith('builtin/宠物/女仆/thumbs/'), `分类封面指向了非缩略图路径：${raw}`)
+  }
 })
 
 await check('大包搜索：最多 8 条命中，点 chip 播放', async () => {
@@ -1700,6 +1744,73 @@ await check('主题页签：壁纸关闭时滑杆禁用（没有壁纸可调）'
   }
 })
 
+await check('主题页签：字体颜色八个选项（系统默认 + 七色），点一下只发 wallpaperTextColor', async () => {
+  const { render, calls } = await loadClient({ status: themeStatus() })
+  const tree = await openThemeTab(render)
+  const colors = findByClass(tree, 'dsa-set-color')
+  assert.equal(colors.length, 8, `色板应该有 8 格，实际 ${colors.length}`)
+  const names = colors.map((node) => node.props['aria-label'].replace('字体颜色 ', ''))
+  // 不含黑/白：那两个就是系统默认在深底/浅底上的答案，单列出来会显得是两回事。
+  assert.deepEqual(names, ['系统默认', '红', '橙', '黄', '绿', '青', '蓝', '紫'])
+  // 点黄色：只发这一个键，别把整套预设一起重发（那会顺手清掉用户的微调）。
+  const yellow = colors.find((node) => node.props['aria-label'] === '字体颜色 黄')
+  yellow.props.onClick()
+  const post = calls.filter((call) => call.type === 'fetch' && call.init?.method === 'POST').pop()
+  assert.deepEqual(JSON.parse(post.init.body), { wallpaperTextColor: '#ffe066' })
+})
+await check('主题页签：当前字体颜色会被标成选中', async () => {
+  const { render } = await loadClient({ status: themeStatus({ textColor: '#4dd8e6' }) })
+  const tree = await openThemeTab(render)
+  const pressed = findByClass(tree, 'dsa-set-color').filter((node) => node.props['aria-pressed'] === 'true')
+  assert.equal(pressed.length, 1, `应该只有一格选中，实际 ${pressed.length}`)
+  assert.equal(pressed[0].props['aria-label'], '字体颜色 青')
+})
+await check('主题页签：壁纸关闭时色板禁用（没有壁纸可调）', async () => {
+  const { render } = await loadClient({ status: themeStatus({ enabled: false }) })
+  const tree = await openThemeTab(render)
+  for (const node of findByClass(tree, 'dsa-set-color')) {
+    assert.equal(node.props.disabled, true, `${node.props['aria-label']} 在壁纸关闭时仍可点`)
+  }
+})
+await check('字体颜色：点色块后背景层真的重算成新颜色（不只是卡片变）', async () => {
+  // 这条测试盯的是实际踩到的坑：decideAndApply 构造 preset 时漏了 textColor，
+  // 于是设置页的卡片、对比度读数全对，但界面上的字还是自动色 —— 用户点了没反应。
+  const { render, calls } = await loadClient({ status: themeStatus({ textColor: 'auto' }) })
+  const tree = await openThemeTab(render)
+  const purple = findByClass(tree, 'dsa-set-color').find((node) => node.props['aria-label'] === '字体颜色 紫')
+  assert.ok(purple, '没有紫色可选')
+  purple.props.onClick()
+  // paintNow 会在 POST 之前先本地派发一次 dsa:wall-sync，让背景层当场重画。
+  const sync = calls.filter((call) => call.type === 'event' && call.name === 'dsa:wall-sync').pop()
+  assert.ok(sync, '点色块没有派发 dsa:wall-sync')
+  const detail = sync.detail
+  assert.equal(detail.textColor, '#c084fc', `派发出去的 textColor 是 ${detail.textColor}`)
+  // 背景层拿到的这份配置必须能算出紫色字。
+  const wall = await import('../lib/wallpaper.mjs')
+  const preset = wall.resolvePreset({ preset: detail.preset, textColor: detail.textColor })
+  const tokens = wall.deriveTokens(wall.decideTheme(wall.analyzeColors(['#101014', '#16161c']), preset), preset, { dark: false })
+  assert.equal(tokens['dsa-wall-ink'], 'rgb(192, 132, 252)', `界面上的字色是 ${tokens['dsa-wall-ink']}`)
+})
+await check('主题页签：读不清的颜色会被标出来，且读数跟着当前颜色走', async () => {
+  // 亮壁纸（八骏图那类）上紫色只有 1.2:1 —— 之前界面照样显示 5.42:1，
+  // 用户以为"设置生效了但字看不清"，其实是这个颜色在这张壁纸上本来就不行。
+  const bright = themeStatus({ preset: 'frosted', hint: ['#fffefd', '#ede6dd', '#d5c2ae', '#1a0e05'] })
+  const { render } = await loadClient({ status: bright })
+  const tree = await openThemeTab(render)
+  const colors = findByClass(tree, 'dsa-set-color')
+  // 亮壁纸（平均亮度 0.426）上，亮的颜色都不够读，系统默认（深字）够。
+  const autoCell = colors.find((node) => node.props['data-color'] === 'auto')
+  const yellow = colors.find((node) => node.props['data-color'] === 'yellow')
+  const cyan = colors.find((node) => node.props['data-color'] === 'cyan')
+  assert.ok(autoCell, '没有系统默认格')
+  assert.notEqual(autoCell.props['data-weak'], '1', '亮壁纸上的系统默认被误标成读不清')
+  assert.equal(yellow.props['data-weak'], '1', '亮壁纸上的黄字没被标记为读不清')
+  assert.equal(cyan.props['data-weak'], '1', '亮壁纸上的青字没被标记为读不清')
+  // 每个色格的 title 都带这张壁纸上的实测对比度。
+  for (const node of colors) {
+    assert.match(String(node.props.title), /\d+(\.\d+)?:1/, node.props['data-color'] + ' 的提示里没有对比度')
+  }
+})
 await check('MP4/壁纸页签的素材卡上不再有「当壁纸」按钮（选主题只在主题页签里做）', async () => {
   const status = themeStatus()
   const { render } = await loadClient({ status })

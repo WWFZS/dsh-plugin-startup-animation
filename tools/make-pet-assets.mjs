@@ -24,6 +24,7 @@ const CLIPS = [
   { src: '01_待机呼吸休闲.webm', out: '待机.webm', footY: 596 },
   { src: '02_点击回应-开心跃动.webm', out: '点击回应.webm', footY: 596 },
   { src: '03_点击回应-害羞捂脸.webm', out: '害羞捂脸.webm' },
+  { src: '04_点击回应-傲娇生气.webm', out: '傲娇生气.webm' },
   { src: '05_被鼠标拖拽悬空反馈.webm', out: '拖拽悬空.webm', footY: 596 },
   { src: '07_原地踏步.webm', out: '原地踏步.webm' },
   { src: '08_吃橘子小零食.webm', out: '吃橘子.webm' },
@@ -34,6 +35,16 @@ const CLIPS = [
   { src: '12_换上圣诞主题皮肤.webm', out: '圣诞换装.webm' },
   { src: '13_收红包.webm', out: '收红包.webm' },
   { src: '14_堆雪人.webm', out: '堆雪人.webm' },
+  /**
+   * 下面五段是 2026-11-14 补的 04 / 19~22。只有 19/20 落在共享窗口内；
+   * 04「傲娇生气」的右侧、22「追蝴蝶」的蝴蝶左右两翼会超出窗口 50~230px
+   * （`pet-lint.mjs` 会报越界）。这是**有意接受**的裁切：窗口是十五段共用的，
+   * 放宽到装下蝴蝶会让角色在画布里小一圈，而桌宠本来就只有一百多像素。
+   */
+  { src: '19_工作状态-思考冒泡.webm', out: '思考冒泡.webm' },
+  { src: '20_打哈欠伸懒腰.webm', out: '打哈欠.webm' },
+  { src: '21_喝咖啡.webm', out: '喝咖啡.webm' },
+  { src: '22_追蝴蝶.webm', out: '追蝴蝶.webm' },
 ]
 
 /**

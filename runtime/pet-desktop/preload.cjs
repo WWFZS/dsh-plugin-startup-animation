@@ -14,6 +14,18 @@ contextBridge.exposeInMainWorld('dsaPet', {
   dragStart: () => ipcRenderer.send('pet:drag-start'),
   /** 松开：主进程判定是拖拽（甩出去/落盘）还是点击（回传 pet:tap）。 */
   dragEnd: () => ipcRenderer.send('pet:drag-end'),
+  /**
+   * 拖动中的水平位移（相对按下点，px）：主进程算出来回传，渲染端据此做倾斜。
+   *
+   * 为什么不在渲染端自己算：窗口跟手时，渲染端收到的 pointermove 坐标会被
+   * "窗口也在跑"搅乱（同一个光标位置，窗口一挪 clientX 就变了）。主进程拿的是
+   * **系统光标**坐标，才是用户手上真正在动的那个量。
+   */
+  onDragLean: (fn) => {
+    const handler = (_event, dx) => fn(dx)
+    ipcRenderer.on('pet:drag-lean', handler)
+    return () => ipcRenderer.removeListener('pet:drag-lean', handler)
+  },
   /** 被点了一下（主进程判定为非拖拽后回传）。 */
   onTap: (fn) => {
     const handler = () => fn()

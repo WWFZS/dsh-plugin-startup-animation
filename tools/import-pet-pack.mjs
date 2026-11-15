@@ -143,17 +143,17 @@ async function cover(clipName, file) {
 }
 
 await cover(bySlot('idle') || clips[0], 'cover.webp')
+// 分类卡封面由运行时取「分类里第一个动作的缩略图」（见 index.js 的 listPetPacks），
+// 这里不用再另拼 cat-<id>.webp —— 加一个动作也不会有"忘了重拼封面"这种事。
 const categories = []
 for (const c of CATEGORIES) {
   const list = slotClips(c.slot)
   if (!list.length) continue
-  await cover(list[0], `cat-${c.id}.webp`)
-  categories.push({ id: c.id, name: c.name, cover: `cat-${c.id}.webp`, clips: list })
+  categories.push({ id: c.id, name: c.name, clips: list })
 }
 const sleep = SLEEP.slots.flatMap(slotClips)
 if (sleep.length) {
-  await cover(sleep[0], `cat-${SLEEP.id}.webp`)
-  categories.push({ id: SLEEP.id, name: SLEEP.name, cover: `cat-${SLEEP.id}.webp`, clips: sleep })
+  categories.push({ id: SLEEP.id, name: SLEEP.name, clips: sleep })
 }
 
 // manifest 里没归类的文件也要能被点播：待机/转向/拖拽这几个"角色动作"归进「小动作」，
@@ -163,18 +163,12 @@ const extras = clips.filter((name) => !referenced.has(name))
 if (extras.length) {
   const small = categories.find((c) => c.id === 'small')
   if (small) small.clips.push(...extras)
-  else {
-    await cover(extras[0], 'cat-other.webp')
-    categories.push({ id: 'other', name: '其他', cover: 'cat-other.webp', clips: extras })
-  }
+  else categories.push({ id: 'other', name: '其他', clips: extras })
 }
 
-// 换过分类后可能留下没人引用的 cat-*.webp，顺手清掉。
-const usedCovers = new Set(categories.map((c) => c.cover))
+// 历史上拼好的分类拼图已经没有字段引用了，顺手清掉（封面改成取第一个动作的缩略图）。
 for (const file of fs.readdirSync(outDir)) {
-  if (file.startsWith('cat-') && file.endsWith('.webp') && !usedCovers.has(file)) {
-    fs.rmSync(path.join(outDir, file))
-  }
+  if (file.startsWith('cat-') && file.endsWith('.webp')) fs.rmSync(path.join(outDir, file))
 }
 
 const pet = {

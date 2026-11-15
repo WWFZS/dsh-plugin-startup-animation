@@ -19,9 +19,25 @@
         transform-origin: 50% 88%;
         transition: transform 210ms cubic-bezier(0.22, 1.4, 0.36, 1);
       }
+      /*
+       * 整个舞台提成独立合成层（`translateZ(0)` + `will-change`）。
+       *
+       * 为什么必须有：桌面模式的"移动"是 `win.setPosition()` 挪整个操作系统窗口。
+       * 窗口一挪，Chromium 会按新位置重新栅格化整窗内容；视频层如果还在主图层里，
+       * 每一帧都要跟着重新采样一次，画面边缘就会出现游走性的毛边（缩放比例不是
+       * 整数时尤其明显）。提成独立层之后，移动只是把这个层的位图搬过去，视频的
+       * 采样结果不变 —— 这也是浏览器浮层（client.js 的 `.dsa-pet`）看起来更锐利的原因：
+       * 它在同一张页面里改 left/top，图层本来就不重建。
+       */
+      #stage {
+        transform: translateZ(0);
+        will-change: transform;
+        backface-visibility: hidden;
+      }
       /* 撞墙那一帧的挤压：给个明确的"弹到了"的反馈（和浏览器浮层同一套数值）。 */
       #stage[data-squash='1'] {
-        transform: scale(0.88, 1.12);
+        /* 提层的那句 translateZ 要跟着带上，否则挤压会把舞台退回主图层，边缘重新发毛。 */
+        transform: translateZ(0) scale(0.88, 1.12);
         transition: none;
       }
       /* 两个 video 槽位交替：切换只改 opacity，一次只挂两段素材（全建会一口气解码几十 MB）。 */

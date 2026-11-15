@@ -37,7 +37,7 @@ import {
   writeJsonAtomic,
   writeProfileManifest,
 } from './lib/self-manage.mjs'
-import { PRESETS, SCREEN_LIMITS, sanitizeTweak } from './lib/wallpaper.mjs'
+import { PRESETS, SCREEN_LIMITS, normalizeTextColor, sanitizeTweak } from './lib/wallpaper.mjs'
 import { builtinColors } from './lib/wallpaper-colors.mjs'
 import { createDesktopPets, findElectron } from './lib/desktop-pet.mjs'
 
@@ -471,7 +471,6 @@ export function readPetPack(packageRoot, dirName) {
     categories.push({
       id,
       name: typeof rawCategory.name === 'string' && rawCategory.name !== '' ? rawCategory.name : id,
-      cover: typeof rawCategory.cover === 'string' ? fileOf(rawCategory.cover) : '',
       clips: clipIds,
     })
   }
@@ -479,7 +478,20 @@ export function readPetPack(packageRoot, dirName) {
   const extras = [...files.keys()].filter((id) => !seen.has(id))
   for (const id of extras) push(id)
   if (extras.length > 0) {
-    categories.push({ id: 'other', name: '其他', cover: '', clips: extras })
+    categories.push({ id: 'other', name: '其他', clips: extras })
+  }
+
+  /**
+   * 分类卡的封面 = **分类里第一个动作的缩略图**，不单独存图。
+   *
+   * 以前每个分类要配一张 `cat-<id>.webp` 拼图，加一个动作就得重拼一次，而且拼图里
+   * 是哪几个动作、排成什么顺序，全是手工决定的（`pet.json` 里另有一个 `cover` 字段）
+   * —— 和 `clips` 顺序毫无关系。直接用第一个动作的图，加动作时永远不用管封面。
+   * 没有缩略图（`make-pet-thumbs` 还没跑）就是 ''，客户端画空框。
+   */
+  for (const category of categories) {
+    const first = category.clips[0]
+    category.cover = first !== undefined && thumbs.has(first) ? `${relDir}/thumbs/${first}.webp` : ''
   }
 
   /**
@@ -665,6 +677,11 @@ export const DEFAULT_CONFIG = Object.freeze({
   wallpaperScrim: 0,
   wallpaperBlur: 0,
   wallpaperSaturate: 1,
+  /**
+   * 字体颜色：`auto` = 引擎按壁纸画面自动取色（默认）；其余是 TEXT_COLORS 里的固定色值。
+   * 给"这张壁纸上的字看不清"准备的手动出口 —— 自动取色算不准时，用户自己挑一个。
+   */
+  wallpaperTextColor: 'auto',
   /** 玻璃面不透明度：已不开放滑杆，固定 0 = 面板全透。保留键以承接旧配置。 */
   wallpaperGlass: 0,
   /** 面板背后那层的模糊半径（px）。已不开放滑杆，保留键以承接旧配置。 */
@@ -1016,6 +1033,9 @@ function resolveWallpaper(raw, options, warnings) {
     scrim: Number.isFinite(raw.wallpaperScrim) ? raw.wallpaperScrim : undefined,
     blur: Number.isFinite(raw.wallpaperBlur) ? raw.wallpaperBlur : undefined,
     saturate: Number.isFinite(raw.wallpaperSaturate) ? raw.wallpaperSaturate : undefined,
+    // 字体颜色只认调色板里的值（认不出来回 auto）—— 配置是个用户也能改的文件，
+    // 这里放宽会让界面上的"能不能看清"读数失去意义。
+    textColor: normalizeTextColor(raw.wallpaperTextColor),
     // 玻璃厚度没有滑杆了，面板遮挡只由遮罩厚度负责：老配置里若还留着 wallpaperGlass，
     // 直接忽略 —— 否则用户会看到一个自己调不动、却仍在生效的实色面板。
   })
@@ -1316,6 +1336,16 @@ const THUMBABLE = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.apng'])
 export const POSTER_DIR_NAME = '.posters'
 
 /**
+ * 宠物动作缩略图目录名（`builtin/宠物/<包>/thumbs/`）。
+ *
+ * 和素材库的 `.thumbs` 是两套东西：那边是"原图的缩小版"（`.jpg`，文件名带内容哈希），
+ * 这边**本身就是成品小图**（`.webp`，200×200，文件名就是动作名）。所以 `?thumb=1`
+ * 遇到它要原样放行 —— 以前没放行，卡片 `<img>` 拿到的是"再去找一层缩略图"失败的响应，
+ * 界面上就是一块空框。
+ */
+export const PET_THUMB_DIR_NAME = 'thumbs'
+
+/**
  * 找一段视频的**手工封面**（`builtin/<分类>/.posters/<素材名>.jpg`）。
  *
  * 为什么手工封面和自动挑帧都要有：
@@ -1354,7 +1384,10 @@ export function posterFor(filePath) {
  * @returns {string | undefined} 缩略图绝对路径。
  */
 export function thumbnailFor(filePath) {
-  if (!THUMBABLE.has(path.extname(filePath).toLowerCase())) return undefined
+  const ext = path.extname(filePath).toLowerCase()
+  // 宠物缩略图（`thumbs/<动作>.webp`）本来就是图，不再套一层：素材本身就是缩略图。
+  if (ext === '.webp' && path.basename(path.dirname(filePath)) === PET_THUMB_DIR_NAME) return filePath
+  if (!THUMBABLE.has(ext)) return undefined
   const dir = path.join(path.dirname(filePath), THUMB_DIR_NAME)
   const prefix = `${path.parse(filePath).name}.`
   for (const entry of thumbFiles(dir)) {
@@ -2982,6 +3015,11 @@ export function apply(ctx) {
                     const next = body.wallpaperFile.replace(/\\/g, '/')
                     if (next === '' || !next.split('/').includes('..')) patch.wallpaperFile = body.wallpaperFile
                   }
+                  // 字体颜色：只认调色板里的那几个值，认不出来回 'auto'（不报 400 ——
+                  // 这是个"挑一个颜色"的设置，不是协议字段，宽容一点更好用）。
+                  if (typeof body.wallpaperTextColor === 'string') {
+                    patch.wallpaperTextColor = normalizeTextColor(body.wallpaperTextColor)
+                  }
                   if (typeof body.wallpaperPreset === 'string') {
                     patch.wallpaperPreset = PRESETS.some((item) => item.id === body.wallpaperPreset)
                       ? body.wallpaperPreset
@@ -3073,7 +3111,7 @@ export function apply(ctx) {
                     patch.petPets = mergePetState(patch.petPets ?? petsNow, change.pack, next, home)
                   }
                   if (Object.keys(patch).length === 0) {
-                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "wallpaperEnabled", "wallpaperFile", "wallpaperPreset", "wallpaperScrim", "wallpaperBlur", "wallpaperSaturate", "wallpaperGlass", "petEnabled", "petDisplay", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
+                    reply(res, 400, { ok: false, error: 'expected "enabled", "sound", "audioEnabled", "audioVolume", "durationSec", "wallpaperEnabled", "wallpaperFile", "wallpaperPreset", "wallpaperScrim", "wallpaperBlur", "wallpaperSaturate", "wallpaperTextColor", "wallpaperGlass", "petEnabled", "petDisplay", "petToggle", "petResize", "petMove", "use", "useAudio" or "forget"' })
                     return
                   }
                   try {

@@ -652,6 +652,8 @@ function startDrag(win) {
     offsetX: point.x - bounds.x,
     offsetY: point.y - bounds.y,
     moved: false,
+    /** 上一次发给渲染端的倾斜角度（度）；只用来判断"值变了没"，变了才发 IPC。 */
+    lean: 0,
     // 光标采样：松手时用最近 100ms 这段算甩出去的速度。
     samples: [{ x: point.x, y: point.y, t: Date.now() }],
     timer: setInterval(() => {
@@ -667,6 +669,14 @@ function startDrag(win) {
       const b = win.getBounds()
       const at = clampToDesk(deskArea(), now.x - state.offsetX, now.y - state.offsetY, b.width, b.height)
       win.setPosition(at.x, at.y)
+      // 倾斜：按"相对按下点"的水平位移给渲染端（与浏览器浮层同一套手感，见
+      // client.js 的 `stage.style.transform = rotate(...)`）。只在值变了才发，
+      // 停手不动时不该每秒白推 60 条 IPC。
+      const lean = Math.max(-9, Math.min(9, (now.x - state.startX) * 0.12))
+      if (Math.abs(lean - state.lean) >= 0.4) {
+        state.lean = lean
+        win.webContents.send('pet:drag-lean', lean)
+      }
     }, DRAG_TICK_MS),
   })
 }

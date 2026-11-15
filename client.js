@@ -36,7 +36,7 @@ window.__ModuleLoader__.load({
 
 // >>> INLINE lib/wallpaper.mjs（由 tools/sync-wallpaper-inline.mjs 生成，勿手改）
     // 真源：lib/wallpaper.mjs（与宿主、单测共用同一份算法，改那边再跑同步脚本）。
-    // 导出（供 client-test 校验）：CONTRAST_BODY, CONTRAST_LARGE, CONTRAST_SURFACE, INK, READABILITY_FLOOR, READABILITY_FLOOR_DARK, FLOOR_BASE, PRESETS, DEFAULT_PRESET_ID, SCREEN_LIMITS, parseHex, toHex, rgba, relativeLuminance, contrastRatio, pickInk, solveScrim, analyzePixels, analyzeColors, resolvePreset, decideTheme, deriveTokens, layerStyle, sanitizeTweak
+    // 导出（供 client-test 校验）：CONTRAST_BODY, CONTRAST_LARGE, CONTRAST_SURFACE, INK, TEXT_COLORS, READABILITY_FLOOR, READABILITY_FLOOR_DARK, FLOOR_BASE, PRESETS, DEFAULT_PRESET_ID, SCREEN_LIMITS, normalizeTextColor, parseHex, toHex, rgba, relativeLuminance, contrastRatio, pickInk, solveScrim, analyzePixels, analyzeColors, resolvePreset, decideTheme, deriveTokens, layerStyle, sanitizeTweak
     /**
      * 壁纸主题的**纯决策层**：给一个画面（图/视频帧/取色样本），算出"文字要怎么配色、
      * 壁纸上面那层幕要压多厚、面板要不要变实"，以及出厂预设表。
@@ -70,6 +70,48 @@ window.__ModuleLoader__.load({
      * 会像一块洞，`#111` 观感更接近"墨水"。
      */
     const INK = Object.freeze({ light: '#ffffff', dark: '#111111' })
+
+    // ─────────────────────────────────────────────── 字体颜色 ───────────────────────────────────────────────
+
+    /**
+     * 用户可选的字体颜色。
+     *
+     * 为什么是固定七色而不是取色器：
+     * - 这套功能的用途是"这张壁纸上的字看不清，换个颜色"，不是一个调色工具。
+     * - **不含黑/白**：那两个正是自动取色的两个结果，摆出来只会让人以为"系统默认"和
+     *   "白"是两回事。要黑字或白字，就是系统默认在对应壁纸上的答案。
+     * - 颜色进的是 `--dsw-alias-label-*`，会被**整个界面**继承。放开任意取色器，等于允许
+     *   用户把字设成和背景一样的颜色 —— 那不是功能，是把界面弄坏。固定表里每个颜色都带了
+     *   一份"最坏底色"读数，UI 直接按它标出"这个颜色在暗底/亮底上够不够"。
+     *
+     * `value` 就是写进配置的字符串（也是 CSS 颜色）：`auto` = 交给引擎按壁纸画面自动取色。
+     */
+    const TEXT_COLORS = Object.freeze([
+      { id: 'auto', value: 'auto', name: '系统默认', desc: '按壁纸画面自动取色' },
+      { id: 'red', value: '#ff4d4f', name: '红', desc: '偏暖的壁纸' },
+      { id: 'orange', value: '#ff9f0a', name: '橙', desc: '冷色壁纸' },
+      { id: 'yellow', value: '#ffe066', name: '黄', desc: '深色壁纸' },
+      { id: 'green', value: '#4ade80', name: '绿', desc: '深色壁纸' },
+      { id: 'cyan', value: '#4dd8e6', name: '青', desc: '深色壁纸' },
+      { id: 'blue', value: '#6aa9ff', name: '蓝', desc: '中等亮度壁纸' },
+      { id: 'purple', value: '#c084fc', name: '紫', desc: '冷色/中性壁纸' },
+    ])
+
+    /**
+     * 把任意输入规范成 `TEXT_COLORS` 里认得的颜色。
+     *
+     * 只认表里的值：配置是用户手也能改的文件，随便塞一个 `#00ff00` 进来也能用，但
+     * 那样界面上的"能不能看清"读数就失去意义了。认不出来一律回 `auto`，让引擎自己取。
+     *
+     * @param {unknown} value 配置里的原始值。
+     * @returns {string} 表里的 value，或 `'auto'`。
+     */
+    function normalizeTextColor(value) {
+      if (typeof value !== 'string') return 'auto'
+      const hit = TEXT_COLORS.find((item) => item.value.toLowerCase() === value.trim().toLowerCase())
+      return hit === undefined ? 'auto' : hit.value
+    }
+
 
     /**
      * 玻璃面的**可读性下限**（这一套观感的命根子）。
@@ -350,6 +392,9 @@ window.__ModuleLoader__.load({
       const found = PRESETS.find((item) => item.id === tweak.preset)
       const base = found ?? PRESETS.find((item) => item.id === DEFAULT_PRESET_ID)
       const out = { ...base }
+      // 字体颜色**不归预设管**：每套都从 auto 起步。这样换预设不会把用户挑的颜色带走 ——
+      // 微调永远是相对的（和 scrim/blur 同一个规矩）。
+      out.textColor = normalizeTextColor(tweak.textColor)
       if (Number.isFinite(tweak.scrim)) out.scrim = clampRange(tweak.scrim, SCREEN_LIMITS.scrim)
       if (Number.isFinite(tweak.blur)) out.blur = clampRange(tweak.blur, SCREEN_LIMITS.blur)
       if (Number.isFinite(tweak.saturate)) out.saturate = clampRange(tweak.saturate, SCREEN_LIMITS.saturate)
@@ -510,7 +555,16 @@ window.__ModuleLoader__.load({
       // 够亮就上深字，两边都够不着的情况由 clampSurfaceColor 的 4.8:1 余量挡住。
       const whiteOnGlass = contrastRatio(parseHex(INK.light), parseHex(g1.final))
       const darkOnGlass = contrastRatio(parseHex(INK.dark), parseHex(g1.final))
-      const inkLight = darkOnGlass > whiteOnGlass ? false : whiteOnGlass > darkOnGlass ? true : g1.lum < 0.18
+      const autoInkLight = darkOnGlass > whiteOnGlass ? false : whiteOnGlass > darkOnGlass ? true : g1.lum < 0.18
+      // 用户在主题页锁定的字体颜色（`preset.textColor`）。非 null 时它**压过**自动取色：
+      // 用户既然说了"这个颜色看得清"，就按他的来 —— 面板、边框、对比度读数反过来跟着它走
+      // （`inkLight` 下面被 wallAlpha / border / dsa-wall-contrast 共用，改这一处就全对上了）。
+      const customInkRgb = parseHex(preset.textColor)
+      const inkLight = customInkRgb === null
+            // auto：跟着 decideTheme 的结论走（它看的是壁纸画面，这才是该决定字色的量）。
+            ? decision.ink === 'light'
+            // 手动：用户挑的颜色说了算；它够亮就当浅色字，否则当深色字（边框/对比度跟着翻）。
+            : relativeLuminance(customInkRgb) > 0.4
       // 列底不透明度：按**幕布之后**的壁纸反推，而不是按裸壁纸的极端反推。
       //
       // 壁纸层上本来就压着一层幕（`dsa-wall-scrim`，浓度 = decision.scrim，方向跟墨色），
@@ -532,8 +586,15 @@ window.__ModuleLoader__.load({
       // 具体做法：把 p95/p05 这个 0–1 的亮度还原成一块 0–255 的灰（这才是"最亮那块
       // 长什么样"的近似），再压上同一层幕 —— 幕是按墨色方向加的，在两端颜色上
       // 只会把范围再收窄一点。
+      // 亮度（0–1）还原成一块灰：必须用 sRGB 的**精确反函数**，不能用 sqrt 近似。
+      //
+      // 近似解的误差会被放大：0.216 的亮度按 sqrt 反算成 #777，而它真实的线性
+      // 亮度只有 0.185 —— 于是纯中灰壁纸的读数报成 4.16:1，实际是 4.78:1。
+      // 读数系统性偏低，用户会以为某套预设坏了。
       const lumToRgb = (lum) => {
-        const v = Math.round(Math.sqrt(clampRange(lum, [0, 1])) * 255)
+        const l = clampRange(lum, [0, 1])
+        const encoded = l <= 0.0031308 ? l * 12.92 : 1.055 * l ** (1 / 2.4) - 0.055
+        const v = Math.round(clampRange(encoded, [0, 1]) * 255)
         return { r: v, g: v, b: v }
       }
       const hasPercentiles = Number.isFinite(decision.p95) && Number.isFinite(decision.p05)
@@ -575,9 +636,17 @@ window.__ModuleLoader__.load({
       // 面板实际用的颜色：壁纸主色按"墙面透明度"往预设釉色里掺一档，让五套预设仍有区分，
       // 但主调是壁纸自己的颜色。
       const sheetRgb = byte3(mixRgb(g1Rgb(g1.final), wallBase, 0.62))
-      const ink = inkLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(14, 16, 22, 0.95)'
-      const dim = inkLight ? 'rgba(255, 255, 255, 0.76)' : 'rgba(14, 16, 22, 0.70)'
-      const faint = inkLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(14, 16, 22, 0.54)'
+      // 三档字色。自定义颜色时三档都以它为准，只改透明度来表达层级 ——
+      // 色相是用户挑的，动它就等于没听用户的。
+      const ink = customInkRgb === null
+        ? inkLight ? 'rgb(255, 255, 255)' : 'rgb(14, 16, 22)'
+        : 'rgb(' + byte(customInkRgb.r) + ', ' + byte(customInkRgb.g) + ', ' + byte(customInkRgb.b) + ')'
+      const dim = customInkRgb === null
+        ? inkLight ? 'rgba(255, 255, 255, 0.76)' : 'rgba(14, 16, 22, 0.70)'
+        : rgba(customInkRgb, 0.76)
+      const faint = customInkRgb === null
+        ? inkLight ? 'rgba(255, 255, 255, 0.58)' : 'rgba(14, 16, 22, 0.54)'
+        : rgba(customInkRgb, 0.58)
       // 面板背后要糊成什么样：把**真实壁纸色**按透底量掺进玻璃面 ——
       // 这就是面板后面看到的那层"壁纸雾"，也是五套预设肉眼能分开的最后一把力。
       //
@@ -660,8 +729,22 @@ window.__ModuleLoader__.load({
             0.6,
           ),
         ),
-        // 对比度实报（字 vs 面板）：预设卡和滑杆提示都读它。
-        'dsa-wall-contrast': String(Math.round(contrastRatio(parseHex(inkLight ? INK.light : INK.dark), parseHex(g1.final)) * 100) / 100),
+        // 对比度实报：**实际落地的字色**压在**幕之后的壁纸平均色**上。
+        //
+        // 这条数不是"最坏情况"，是"典型情况"——文字大部分压平均色那一带。
+        // 报最坏块（p05/p95 取 min）在花壁纸上会把一切都压成 1:1：没有哪个颜色
+        // 能同时压住纯白纸片和纯黑阴影，那个数字既选不出颜色，也不反映眼前观感。
+        //
+        // 旧实现报"字 vs 玻璃色"，两个都不在屏幕上的量，所以出现过
+        // "设置页 18.9:1、实际 1.01:1"；自定义颜色上线后更是恒定 1:1，完全没法用。
+        'dsa-wall-contrast': String(
+          Math.round(
+            contrastRatio(
+              customInkRgb ?? parseHex(inkLight ? INK.light : INK.dark),
+              mixRgb(parseHex(decision.tint) ?? g1Rgb(g1.final), scrimRgb, decision.scrim),
+            ) * 100,
+          ) / 100,
+        ),
       }
     }
 
@@ -826,6 +909,7 @@ window.__ModuleLoader__.load({
         surfaceBlur: Math.round(clampRange(Number.isFinite(p.surfaceBlur) ? p.surfaceBlur : 20, SCREEN_LIMITS.surfaceBlur)),
         text: p.text ?? 'auto',
         surface: p.surface ?? 'solid',
+        textColor: p.textColor ?? 'auto',
       }
     }
 // <<< INLINE lib/wallpaper.mjs
@@ -856,6 +940,7 @@ window.__ModuleLoader__.load({
       wallScrim: '遮罩厚度',
       wallBlur: '壁纸模糊',
       wallSaturate: '色彩浓度',
+      wallTextColor: '字体颜色',
       wallPick: '壁纸素材',
       wallUse: '当壁纸',
       wallUsing: '主题使用中',
@@ -964,6 +1049,7 @@ window.__ModuleLoader__.load({
       wallScrim: 'Scrim',
       wallBlur: 'Blur',
       wallSaturate: 'Saturation',
+      wallTextColor: 'Text color',
       wallPick: 'Wallpaper media',
       wallUse: 'Use as wallpaper',
       wallUsing: 'Theme in use',
@@ -1115,6 +1201,25 @@ window.__ModuleLoader__.load({
 .dsa-set-seg:hover:not(:disabled) { color: var(--dsw-alias-label-primary); }
 .dsa-set-seg[data-on="1"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); font-weight: 600; }
 .dsa-set-seg:disabled { opacity: 0.45; cursor: default; }
+/* 字体颜色色板：一排色块 + 名字。auto 排最前，用字母 A 表示"交给引擎算"。
+   用网格而不是横向滚动：十个选项在 380px 宽的面板里两行正好放满，
+   横向滚动会让人以为只有前几个可选。 */
+.dsa-set-colors { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; margin-top: 8px; }
+.dsa-set-color { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px 6px; font: inherit; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-secondary); cursor: pointer; transition: border-color 120ms ease, background 120ms ease; }
+.dsa-set-color:hover:not(:disabled) { border-color: var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-2); }
+.dsa-set-color[aria-pressed="true"] { border-color: var(--dsw-alias-brand-primary); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.dsa-set-color:disabled { opacity: 0.45; cursor: default; }
+/* 这张壁纸上读不清的颜色：只降低存在感，不禁用 —— 用户仍可以选（也许他就想要那个观感）。
+   ⚠ 的实现在 title / aria-label 里，视觉上靠这一条虚线边框提示。 */
+.dsa-set-color[data-weak="1"] { border-style: dashed; opacity: 0.55; }
+.dsa-set-color:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
+/* 色块本身：描一圈边框，白色在浅底上才不会"消失"（它的用途恰恰是深色壁纸）。 */
+.dsa-set-color-dot { width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--dsw-alias-border-l2); flex-shrink: 0; }
+/* auto 没有具体颜色可画：用字母代替，并保持和色块同样的占位。 */
+.dsa-set-color-auto { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; border: 1px dashed var(--dsw-alias-border-l2); font-size: 11px; font-weight: 600; flex-shrink: 0; }
+.dsa-set-color-name { font-size: 11px; line-height: 1.2; white-space: nowrap; }
+.dsa-set-color-on { position: absolute; top: 3px; right: 4px; font-size: 10px; color: var(--dsw-alias-brand-primary); }
+
 .dsa-set-seg:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
 .dsa-set-panel { display: flex; flex-direction: column; }
 .dsa-set-desc { font-size: 13px; line-height: 1.55; color: var(--dsw-alias-label-secondary); margin-bottom: 10px; max-width: 720px; }
@@ -1727,6 +1832,16 @@ window.__ModuleLoader__.load({
     const PET_IDLE_MS = 15000
     /** 动作演完到回待机的停顿：直接跳回待机会在最后一帧上"啪"地一闪。 */
     const PET_RETURN_MS = 550
+    /**
+     * 旧片淡出用多久。
+     *
+     * **只用来淡出，不用来淡入。** 新片是"直接就位"的（见 `startAction`）：两层画面重叠的
+     * 那 180ms 里，只要两张图不一样，用户看到的就是重影 —— 动作差得越远糊得越明显。
+     * 淡出单独留是很保险的：底色是空的，看到旧片慢慢消失，不会出现两张。
+     */
+    const PET_CROSSFADE_MS = 140
+    /** 一段演完之后隔多久去预热另一条空闲槽位（别和新片的解码抢带宽）。 */
+    const PET_WARM_MS = 300
 
     /**
      * 甩抛物理：松手后按手部速度飞出去，撞视口边缘反弹，衰减到停下。
@@ -1743,16 +1858,20 @@ window.__ModuleLoader__.load({
     const PET_MAX_SPEED = 4
     /** 取样窗口：只拿最近这段的手部位移算速度 —— 松手前停住不动就不该起飞。 */
     const PET_VELOCITY_WINDOW_MS = 100
+    /** 浮层级叠的起点：每多一只就 +1，谁也不会把谁盖住。 */
+    const PET_Z_BASE = 999999
 
     /** 浮层样式。挂 body 的常驻元素，不走组件局部样式，单独注入一份 <style>。 */
     const PET_STYLE = `
-.dsa-pet { position: fixed; left: 0; top: 0; z-index: 999999; pointer-events: none; }
+.dsa-pet { position: fixed; left: 0; top: 0; z-index: ${PET_Z_BASE}; pointer-events: none; }
 .dsa-pet[data-on="0"] { display: none; }
 .dsa-pet-stage { position: relative; width: 100%; pointer-events: auto; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; transform-origin: 50% 88%; transition: transform 210ms cubic-bezier(.22, 1.4, .36, 1); }
 .dsa-pet-stage[data-drag="1"] { cursor: grabbing; transition: none; }
-/* 两只 video 叠在同一格交替：切换只改 opacity。一次只挂两段素材 —— 全建元素会一口气解码几十 MB。 */
-.dsa-pet-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 160ms linear; pointer-events: none; }
+/* 三只 video 叠在同一格交替：切换只改 opacity。一次只挂三段素材 —— 全建元素会一口气解码几十 MB。 */
+/* 只有"下台"那条才过渡：上场是直接切过去的，两张图永远不会同时出现在画面上。 */
+.dsa-pet-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; pointer-events: none; }
 .dsa-pet-video[data-on="1"] { opacity: 1; }
+.dsa-pet-video[data-off] { transition: opacity ${PET_CROSSFADE_MS}ms linear; }
 /* 右键菜单：跟随应用深浅色（同一份文档，--dsw-alias-* 全局可用）。 */
 .dsa-pet-menu { position: fixed; z-index: 1000000; min-width: 150px; max-height: 62vh; overflow: auto; overscroll-behavior: contain; padding: 6px; border-radius: 10px; border: 1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.35)); background: var(--dsw-alias-bg-layer-1, #fff); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16); }
 .dsa-pet-menu-head { font-size: 11px; color: var(--dsw-alias-label-tertiary, #999); padding: 4px 8px 2px; }
@@ -1773,7 +1892,7 @@ window.__ModuleLoader__.load({
      * 渲染树没有关系（关掉设置页宠物还在）。原生 DOM 让"进设置页才创建、退出就
      * 销毁"这类错误不可能发生，也省掉一次 createRoot。
      *
-     * 一只 = 一个 host + 一个舞台 + 两个 video 槽位 + 一套自己的节奏与物理状态。
+     * 一只 = 一个 host + 一个舞台 + 三个 video 槽位（一个在演，两个缓冲下一段）+ 一套自己的节奏与物理状态。
      * 多只同屏就是多个实例，彼此不共享任何可变状态（大小除外，那是全局的）。
      *
      * 节奏：待机动作循环；每隔 15–35 秒随机演一个分类里的动作，演完回待机；
@@ -1787,6 +1906,9 @@ window.__ModuleLoader__.load({
      *   入口配置（宠物包 + 它的位置）、共用大小、文案、落盘回调、开菜单前通知外层。
      * @returns {{ update: (entry: object) => void, setSize: (size: number) => void, play: (id: string) => void, playCategory: (id: string) => void, random: () => void, report: () => void, reset: () => void, closeMenu: () => void, destroy: () => void }} 实例控制器。
      */
+    /** 已有的浮层宿主数量：新宿主按这个往下排 z-index，先来的不会被后来的盖住也盖不住。 */
+    let petLayerSeq = 0
+
     function createPetInstance(options) {
       const onPersist = options.onPersist
       const t = options.t
@@ -1798,9 +1920,21 @@ window.__ModuleLoader__.load({
       let host = null
       /** @type {HTMLDivElement | null} */
       let stage = null
-      /** @type {HTMLVideoElement[]} 两个槽位：一个在演，一个在预载下一段。 */
+      /** @type {HTMLVideoElement[]} 三个槽位：一个在演，两个轮流准备下一段（预载缓冲够不够随时能切）。 */
       const videos = []
       let active = 0
+      /** 下一段的槽位（A→B→C→A 轮转）。 */
+      let spare = 1
+      /** 已发出、还没 `loadeddata` 的地址：同一个地址不重复请求（点选会连发好几次）。 */
+      const loading = new Set()
+      /** 缓冲区里已经准备好、还没上场的槽位（每个槽只有一份，所以用 Set 去重）。 */
+      const ready = new Set()
+      /** @type {{ id: string, loop: boolean, once: boolean } | null} 点了、但槽位还没就绪的动作。 */
+      let pending = null
+      /** 旧片淡出到点的计时器：到点把 `data-off` 摘掉，别再让过渡挂着。 */
+      let fadeTimer = 0
+      /** 拉长预热的计时器：点选之后的一小段内把另一条空闲槽也准备好。 */
+      let warmTimer = 0
       /** 已构建的包指纹：换宠物（或素材数变了）才重置 DOM。 */
       let builtKey = ''
       /** 这一只自己的位置与大小（大小是全层共用的，由 setSize 推下来）。 */
@@ -1879,7 +2013,7 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * 按当前宠物包准备 DOM：宿主、舞台、两只 video。
+       * 按当前宠物包准备 DOM：宿主、舞台、三只 video（外加一张定格帧）。
        *
        * 只建一次。换宠物时会清掉 video 的 src，但**保留元素** —— 重建元素意味着
        * 重新申请解码器，切换宠物时会白屏一下。
@@ -1912,8 +2046,10 @@ window.__ModuleLoader__.load({
           stage = document.createElement('div')
           stage.className = 'dsa-pet-stage'
           host.appendChild(stage)
+          petLayerSeq += 1
+          host.style.zIndex = String(PET_Z_BASE + petLayerSeq)
           document.body.appendChild(host)
-          for (let index = 0; index < 2; index += 1) {
+          for (let index = 0; index < 3; index += 1) {
             const video = document.createElement('video')
             video.className = 'dsa-pet-video'
             video.muted = true
@@ -1925,6 +2061,12 @@ window.__ModuleLoader__.load({
               if (mode !== 'action' || videos[active] !== video) return
               scheduleReturn()
             })
+            // 准备好的那段先挂着：`startAction` 拿到它就立刻起播（预载的意义就在这）。
+            video.addEventListener('loadeddata', () => {
+              loading.delete(video.getAttribute('src') ?? '')
+              ready.add(video)
+              startAction()
+            })
             stage.appendChild(video)
             videos.push(video)
           }
@@ -1935,11 +2077,15 @@ window.__ModuleLoader__.load({
         }
         for (const video of videos) {
           video.dataset.on = '0'
+          delete video.dataset.off
           video.pause()
           video.removeAttribute('src')
           video.load()
         }
         active = 0
+        spare = 1
+        ready.clear()
+        loading.clear()
       }
 
       /** 把百分比位置换算成像素并应用（窗口尺寸变了就重算）。 */
@@ -1966,55 +2112,155 @@ window.__ModuleLoader__.load({
       }
 
       /**
+       * 给某个槽位换上这一段素材（已缓冲着同一个地址就不动，免得白丢掉缓冲）。
+       * @param {HTMLVideoElement} video 目标槽位。
+       * @param {string} url 素材地址。
+       */
+      const loadInto = (video, url) => {
+        if (video.getAttribute('src') === url) {
+          ready.add(video)
+          return
+        }
+        // 换片前先停：不拦的话，给"空闲槽"换待机片时，那条槽会接着往下播，
+        // 等它被轮上台时早就播到一半，动作整个错位。
+        try {
+          video.pause()
+        } catch {
+          /* 本来就没在播 */
+        }
+        video.dataset.on = '0'
+        ready.delete(video)
+        video.src = url
+        video.preload = 'auto'
+        loading.add(url)
+      }
+
+      /**
+       * 把 `pending` 里排队的动作交给一个**已缓冲就绪**的槽位。
+       *
+       * 切换之所以会闪，是因为老代码不管对方准没准备好，一点就把新槽换上并立刻交叉淡化：
+       * 新片还在跑网络请求，那 160ms 里两边都是空的 → 整只宠物淡掉一下。
+       * 现在只有 `loadeddata` 过的槽位才上场，没就绪就让当前这段继续演。
+       */
+      const startAction = () => {
+        if (pending === null || pack === null) return
+        const clip = clipById(pending.id)
+        if (clip === null || videos.length === 0) {
+          pending = null
+          return
+        }
+        const url = `${ASSET}?path=${encodeURIComponent(clip.file)}`
+        // 优先用"已经缓冲着这一段"的槽位；否则取任一空闲且就绪的槽位。
+        const slot = videos.find((video) => video !== videos[active] && video.getAttribute('src') === url && ready.has(video))
+          ?? videos.find((video) => video !== videos[active] && ready.has(video))
+          ?? null
+        if (slot !== null && slot.getAttribute('src') !== url) loadInto(slot, url)
+        if (slot === null) {
+          // 还没有槽位就绪：先把它排进管线，等 `loadeddata` 回来再上场。
+          const target = videos[spare]
+          if (target !== undefined && target.getAttribute('src') !== url && !loading.has(url)) loadInto(target, url)
+          return
+        }
+
+        const { loop, once } = pending
+        pending = null
+        const previous = videos[active]
+        active = videos.indexOf(slot)
+        spare = (active + 1) % videos.length
+        const incoming = slot
+
+        incoming.loop = loop
+        try {
+          incoming.currentTime = 0
+        } catch {
+          /* 元数据没到就 play，它自己从头播 */
+        }
+        // **先亮新的，后淡旧的。** 而且"亮"这一步不能有过渡：两张不同的动作图叠在一起
+        // 哪怕只有一百毫秒，看着也是重影/糊一下 —— 动作差得越远越明显（换衣服、换姿势）。
+        // 旧片留在原地慢慢淡出，底下已经换成新片了，所以淡的是"旧演员走开"，看不到两张。
+        incoming.dataset.on = '1'
+        for (const video of videos) {
+          if (video === incoming) continue
+          // 三个槽位轮转，被轮掉的那个早就不是"上一个"了，所以这里必须全部扫一遍；
+          // 而且光把 `data-on` 拧回 '0' 不够，它还在后台解码播放，要顺手停掉。
+          video.dataset.on = '0'
+          // `data-off` 只给"刚才还在演的那条"挂：它才需要慢慢淡出；
+          // 一直在后台缓冲的槽位本来就是透明的，没必要跟着做过渡。
+          if (video === previous) {
+            video.dataset.off = ''
+            if (fadeTimer !== 0) window.clearTimeout(fadeTimer)
+            fadeTimer = window.setTimeout(() => {
+              fadeTimer = 0
+              delete video.dataset.off
+            }, PET_CROSSFADE_MS)
+          } else {
+            delete video.dataset.off
+          }
+          video.pause()
+        }
+        const played = incoming.play()
+        if (played && typeof played.catch === 'function') played.catch(() => {})
+        currentId = clip.id
+        // **不在这里改 mode**：调用方比这里更清楚这次是"待机""一次性动作"还是"拖拽"。
+        // 以前在这里按 loop/once 反推，会把待机（loop=true）写成 'loop'，
+        // 于是 15 秒后的随机回调一看到 `mode !== 'idle'` 就早退 —— 随机动作永远不触发。
+        // 告诉设置页"现在在演哪一段"（宠物自己切的时候也要高亮到对的位置）。
+        window.dispatchEvent(
+          new CustomEvent('dsa:pet-state', { detail: { id: clip.id, name: clip.name, pack: pack.id, loop } }),
+        )
+      }
+
+
+      /**
+       * 演完一段之后，把两条空闲槽位都预热成待机段。
+       *
+       * 点一次只用得上一个槽位，但**下一次点击来得比预热还快**是常态（连点、拖拽）。
+       * 只烤一条的话，第二下就要等网络 —— 等待期间用户看到的是上一段动作还在演。
+       * 两条都烤上：第一下用一条，第二下换个方向轮转，另一条正好还是待机。
+       *
+       * 只在**已经回到待机**时预热。动作演完还会剩 `PET_RETURN_MS` 那么久才回待机，
+       * 那段时间在台上的是动作本身，把待机塞进别的槽毫无用处，只是白白抢解码。
+       */
+      const scheduleWarm = () => {
+        if (warmTimer !== 0) window.clearTimeout(warmTimer)
+        warmTimer = window.setTimeout(() => {
+          warmTimer = 0
+          if (pack === null || pending !== null || mode !== 'idle') return
+          const id = idleId()
+          if (id === '') return
+          const clip = clipById(id)
+          if (clip === null) return
+          const url = `${ASSET}?path=${encodeURIComponent(clip.file)}`
+          if (videos.some((video) => video.getAttribute('src') === url)) return
+          for (const video of videos) {
+            if (video === videos[active] || ready.has(video) || loading.has(video.getAttribute('src') ?? '')) continue
+            // 预热只是"装好等上场"：不亮、不播。亮或播都会被看成宠物叠加成了两只。
+            video.dataset.on = '0'
+            video.pause()
+            loadInto(video, url)
+          }
+        }, PET_WARM_MS)
+      }
+
+      /**
        * 演一个动作。
+       *
+       * 就是往管线里排一个"想演的目标"，真正上场由 `startAction` 在槽位就绪时完成；
+       * 同一时刻只认最后一个目标（连点几下就该演最后点的那个）。
+       *
        * @param {string} id 动作 id（素材文件名去扩展名）。
        * @param {boolean} loop 是否循环。
        * @param {boolean} once 是否在演完后回待机（一次性动作）。
        */
       const show = (id, loop, once) => {
         const clip = clipById(id)
-        if (clip === null || videos.length < 2) {
+        if (clip === null || videos.length === 0) {
           if (!once) return
           if (mode !== 'idle') startIdle()
           return
         }
-        const prev = active
-        active = 1 - prev
-        const incoming = videos[active]
-        const outgoing = videos[prev]
-        const url = `${ASSET}?path=${encodeURIComponent(clip.file)}`
-        if (incoming.getAttribute('src') !== url) {
-          incoming.src = url
-          incoming.preload = 'auto'
-        }
-        incoming.loop = loop
-        incoming.dataset.on = '1'
-        outgoing.dataset.on = '0'
-        try {
-          incoming.currentTime = 0
-        } catch {
-          /* 还没元数据，play 之后自己从头播 */
-        }
-        const played = incoming.play()
-        if (played && typeof played.catch === 'function') played.catch(() => {})
-        // 淡出跑完再暂停：立刻 pause 会让上一段定在最后一帧，交叉时看得见。
-        window.setTimeout(() => {
-          if (videos[active] !== outgoing) {
-            try {
-              outgoing.pause()
-            } catch {
-              /* 已停 */
-            }
-          }
-        }, 200)
-        currentId = id
-        // **不在这里改 mode**：调用方比这里更清楚这次是"待机""一次性动作"还是"拖拽"。
-        // 以前在这里按 loop/once 反推，会把待机（loop=true）写成 'loop'，
-        // 于是 15 秒后的随机回调一看到 `mode !== 'idle'` 就早退 —— 随机动作永远不触发。
-        // 告诉设置页"现在在演哪一段"（宠物自己切的时候也要高亮到对的位置）。
-        window.dispatchEvent(
-          new CustomEvent('dsa:pet-state', { detail: { id, name: clip.name, pack: pack.id, loop } }),
-        )
+        pending = { id, loop, once }
+        startAction()
       }
 
       /** 回待机：循环 idle 动作，并重新排下一次随机。 */
@@ -2027,6 +2273,9 @@ window.__ModuleLoader__.load({
         if (id === '') return
         show(id, true, false)
         scheduleAmbience()
+        // 待机是一段循环，演多久都还是待机 —— 所以这里就预热另外两条槽位，
+        // 下一个动作不管点得多快都撞在已经缓冲好的槽上。
+        scheduleWarm()
       }
 
       /** 演一个一次性动作，演完回待机。 */
@@ -2528,6 +2777,14 @@ window.__ModuleLoader__.load({
         closeMenu()
         stopFlight()
         pauseAll()
+        // 淡出/预热都挂在 window 定时器上，销毁时必须一起撤，否则它们会去碰已经拆掉的 DOM。
+        if (fadeTimer !== 0) window.clearTimeout(fadeTimer)
+        fadeTimer = 0
+        if (warmTimer !== 0) window.clearTimeout(warmTimer)
+        warmTimer = 0
+        pending = null
+        ready.clear()
+        loading.clear()
         videos.length = 0
         if (host !== null) host.remove()
         if (styleEl !== null) styleEl.remove()
@@ -2879,6 +3136,9 @@ window.__ModuleLoader__.load({
           saturate: cfg.saturate,
           glassAlpha: cfg.glassAlpha,
           surfaceBlur: cfg.surfaceBlur,
+          // 漏掉这一行 = 用户在设置页挑的字体颜色永远进不到 deriveTokens，
+          // 点了色块界面纹丝不动（读数是新的，字还是自动色）。
+          textColor: cfg.textColor,
         }
         const resolved = resolvePreset(preset)
         const decision = decideTheme(analysis, resolved)
@@ -3027,7 +3287,8 @@ window.__ModuleLoader__.load({
           cfg.blur !== next.blur ||
           cfg.saturate !== next.saturate ||
           (cfg.glassAlpha ?? 0) !== (next.glassAlpha ?? 0) ||
-          (cfg.surfaceBlur ?? 0) !== (next.surfaceBlur ?? 0)
+          (cfg.surfaceBlur ?? 0) !== (next.surfaceBlur ?? 0) ||
+          (cfg.textColor ?? 'auto') !== (next.textColor ?? 'auto')
         cfg = next
         wallLog('sync', { enabled: next.enabled, src: next.src, changed })
         if (next.enabled !== true || next.src === '') {
@@ -3151,7 +3412,9 @@ window.__ModuleLoader__.load({
             cfg.blur === next.blur &&
             cfg.saturate === next.saturate &&
             (cfg.glassAlpha ?? 0) === (next.glassAlpha ?? 0) &&
-            (cfg.surfaceBlur ?? 0) === (next.surfaceBlur ?? 0)
+            (cfg.surfaceBlur ?? 0) === (next.surfaceBlur ?? 0) &&
+            // 少了这一项，换颜色会被当成"配置没变"直接跳过 —— 界面不动，只有卡片变。
+            (cfg.textColor ?? 'auto') === (next.textColor ?? 'auto')
           )
         },
         sync,
@@ -3175,6 +3438,7 @@ window.__ModuleLoader__.load({
             saturate: Number.isFinite(tweak.saturate) ? tweak.saturate : cfg.saturate,
             glassAlpha: Number.isFinite(tweak.glassAlpha) ? tweak.glassAlpha : cfg.glassAlpha,
             surfaceBlur: Number.isFinite(tweak.surfaceBlur) ? tweak.surfaceBlur : cfg.surfaceBlur,
+            textColor: typeof tweak.textColor === 'string' ? tweak.textColor : cfg.textColor,
           })
           cfg = {
             ...cfg,
@@ -3183,6 +3447,7 @@ window.__ModuleLoader__.load({
             saturate: clean.saturate,
             glassAlpha: clean.glassAlpha,
             surfaceBlur: clean.surfaceBlur,
+            textColor: clean.textColor,
           }
           const resolved = resolvePreset(cfg)
           const hint = Array.isArray(cfg.hint) ? cfg.hint : []
@@ -3841,14 +4106,24 @@ window.__ModuleLoader__.load({
          *      或者根本没收到广播，就用它兜底。**不能返回 null**：那样七格预设一个
          *      数字都没有，用户看到的就是"这些卡片是死的"。
          */
-        const presetPreview = (presetId) => {
+        const presetPreview = (presetId, textColor = 'auto') => {
           const sampled = liveDecision && liveDecision.analysis ? liveDecision.analysis : null
           const hint = wallpaper !== null && Array.isArray(wallpaper.hint) ? wallpaper.hint : []
           const analysis = sampled !== null ? sampled : hint.length > 0 ? analyzeColors(hint) : null
           if (analysis === null) return null
-          const resolved = resolvePreset({ preset: presetId, scrim: 'auto', blur: 'auto', saturate: 'auto' })
+          const resolved = resolvePreset({ preset: presetId, scrim: 'auto', blur: 'auto', saturate: 'auto', textColor })
           try {
-            return decideTheme(analysis, resolved)
+            // 必须走 deriveTokens 再取数：decideTheme 的 `contrast` 是"字 vs 壁纸平均色"，
+            // 和用户挑的字体颜色**无关**（它算的时候还没有颜色这回事）。
+            // 真正要报给用户、并用来判断"这颜色够不够读"的，是落地令牌里那份。
+            const decision = decideTheme(analysis, resolved)
+            const tokens = deriveTokens(decision, resolved, { dark: false })
+            return {
+              ...decision,
+              contrast: Number(tokens['dsa-wall-contrast']),
+              ink: tokens['dsa-wall-ink'],
+              tokens,
+            }
           } catch {
             return null
           }
@@ -3900,6 +4175,8 @@ window.__ModuleLoader__.load({
             else if (Number.isFinite(patch[from])) next[to] = patch[from]
           }
           if (typeof patch.wallpaperEnabled === 'boolean') next.enabled = patch.wallpaperEnabled
+          // 字体颜色不进预设微调表：它是个独立设置，换预设时不该被清掉（见 resolvePreset）。
+          if (typeof patch.wallpaperTextColor === 'string') next.textColor = patch.wallpaperTextColor
           const tweak = sanitizeTweak({
             preset: next.preset,
             scrim: next.scrim,
@@ -3907,6 +4184,7 @@ window.__ModuleLoader__.load({
             saturate: next.saturate,
             glassAlpha: next.glassAlpha,
             surfaceBlur: next.surfaceBlur,
+            textColor: next.textColor,
           })
           window.dispatchEvent(
             new CustomEvent('dsa:wall-sync', {
@@ -4404,7 +4682,7 @@ window.__ModuleLoader__.load({
             },
             cat.cover
               ? h('img', { className: 'dsa-set-cat-cover', src: petAsset(cat.cover), alt: '', loading: 'lazy' })
-              : h('div', { className: 'dsa-set-cat-cover' }),
+              : h('div', { className: 'dsa-set-cat-cover', 'aria-hidden': 'true' }),
             h('span', { className: 'dsa-set-cat-name' }, cat.name),
             h('span', { className: 'dsa-set-cat-count' }, `${cat.clips.length} ${t('petUnit')}`),
           )
@@ -4550,6 +4828,7 @@ window.__ModuleLoader__.load({
             saturate: cfg.saturate,
             glassAlpha: cfg.glassAlpha,
             surfaceBlur: cfg.surfaceBlur,
+            textColor: cfg.textColor,
           })
           /**
            * 幕浓度的滑杆下限：用户可以把幕调薄，但**不能薄到字看不清**。
@@ -4561,7 +4840,9 @@ window.__ModuleLoader__.load({
            * 的对比度也会整排消失 —— 看着就像"这些数字是假的"。所以统一走 presetPreview
            * （它自己会退回内置取色）。
            */
-          const liveNow = presetPreview(cfg.preset)
+          // 读数跟着**当前选中的字体颜色**走：不然选了紫、数字还停在自动色那一份，
+          // 用户会以为"没生效"（这正是上一轮报上来的现象之一）。
+          const liveNow = presetPreview(cfg.preset, shown.textColor)
           const liveContrast = liveNow !== null && typeof liveNow.contrast === 'number' ? liveNow.contrast : null
 
           const slider = (key, label, min, max, step, value, unit) => {
@@ -4711,6 +4992,58 @@ window.__ModuleLoader__.load({
                 ),
               ),
               h('div', { className: 'dsa-set-presets' }, PRESETS.map(presetCard)),
+            ),
+            // ── ③ 字体颜色：自动取色算不准时的手动出口 ──
+            //
+            // 放在预设下面而不是塞进预设里：预设是"整套观感"，字体颜色是"这张壁纸上
+            // 字看不清"的补救。两者职责不同 —— 换预设不该把用户挑的颜色带走，所以它
+            // 也存在预设之外（见 resolvePreset）。
+            h(
+              'div',
+              { className: 'dsa-set-stack' },
+              h(
+                'div',
+                { className: 'dsa-set-stack-head' },
+                h('div', { className: 'dsa-set-label' }, t('wallTextColor')),
+              ),
+              h(
+                'div',
+                { className: 'dsa-set-colors' },
+                TEXT_COLORS.map((item) => {
+                  const active = shown.textColor === item.value
+                  // 这个颜色在**当前壁纸**上够不够读？够不够是算出来的，不是猜的：
+                  // 拿同一套决策链跑一遍，读它压在最坏块上的真实对比度。
+                  // 亮壁纸选紫色只有 1.2:1 —— 不标出来用户会以为是自己没点对。
+                  const probe = presetPreview(cfg.preset, item.value)
+                  const ratio = probe !== null && typeof probe.contrast === 'number' ? probe.contrast : null
+                  // 4.5 是正文可读线：低于它的颜色在这张壁纸上就是"看不清"，
+                  // 标出来比让用户一个个试要诚实。
+                  const weak = ratio !== null && ratio < 4.5
+                  return h(
+                    'button',
+                    {
+                      key: item.id,
+                      type: 'button',
+                      className: 'dsa-set-color',
+                      'aria-pressed': active ? 'true' : 'false',
+                      'data-weak': weak ? '1' : undefined,
+                      // 机器可读 id 单独给一个：aria-label 是给人读的，别往里塞读数
+                      // （读数是动态的，塞进去等于把标签变成"每次都不一样"）。
+                      'data-color': item.id,
+                      'aria-label': `${t('wallTextColor')} ${item.name}`,
+                      // 提示里直接给出这张壁纸上的实测值：能不能读，用户不用试。
+                      title: ratio === null ? item.desc : `${item.desc} · ${ratio.toFixed(1)}:1`,
+                      disabled: busy || !wallpaperOn,
+                      onClick: () => wallCfg({ wallpaperTextColor: item.value }, t('saved')),
+                    },
+                    item.value === 'auto'
+                      ? h('span', { className: 'dsa-set-color-auto' }, 'A')
+                      : h('span', { className: 'dsa-set-color-dot', style: { background: item.value } }),
+                    h('span', { className: 'dsa-set-color-name' }, item.name),
+                    active ? h('span', { className: 'dsa-set-color-on' }, '✓') : null,
+                  )
+                }),
+              ),
             ),
             // 预设只管颜色（每套一套釉色），**遮挡**归滑杆：出厂全是 0，所以"刚装上、
             // 刚换预设"看到的一定是原样的壁纸 —— 想看更有遮挡的面板就往上加。
