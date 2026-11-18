@@ -176,6 +176,9 @@ function findByProp(node, prop) {
 async function loadClient(options = {}) {
   const React = createReact((src) => calls.push({ type: 'img', src }))
   const calls = []
+  /** 惰性 interval 句柄：只记账、不真的触发（见 window.setInterval 垫片）。 */
+  const intervals = []
+  let intervalSeq = 0
   /** window 事件监听（宠物浮层 ↔ 设置页的那条桥）。 */
   const listeners = []
   const status = options.status ?? {
@@ -230,6 +233,21 @@ async function loadClient(options = {}) {
       // 真实窗口上这两个就是全局函数的别名，垫片里补上（宠物浮层切动画时会用）。
       setTimeout: (fn, ms) => setTimeout(fn, ms),
       clearTimeout: (id) => clearTimeout(id),
+      // 壁纸层的自愈看门狗用 setInterval（见 createWallpaperLayer 的 healIfStalled）。
+      // 垫片缺了它，凡是挂到壁纸层的用例都会报 "window.setInterval is not a function"。
+      //
+      // 这里**不转发给真实的 setInterval**：真实定时器会一直挂着，测试跑完进程不退。
+      // 改成一个惰性句柄 —— 只记下"有人设了 interval"，从不真的触发；测试关心的是
+      // 配置/渲染结果，不是看门狗真的过了 4 秒。`unref` 语义在这里用不到，直接返回递增 id。
+      setInterval: () => {
+        intervalSeq += 1
+        intervals.push(intervalSeq)
+        return intervalSeq
+      },
+      clearInterval: (id) => {
+        const at = intervals.indexOf(id)
+        if (at >= 0) intervals.splice(at, 1)
+      },
       requestAnimationFrame: (fn) => setTimeout(() => fn(0), 16),
       cancelAnimationFrame: (id) => clearTimeout(id),
       // 宠物浮层用 window 事件和设置页通信（两边不在同一棵渲染树上）。
@@ -1913,6 +1931,40 @@ await check('主题壁纸：点预设当场换掉屏幕上的观感（不止广�
   assert.ok(layer3(css2) !== undefined, `样式表里没有浮层色：${css2.slice(-320)}`)
   assert.notEqual(css2, beforeCss, '换预设没重画样式表，说明只是换了卡片')
   assert.notEqual(layer3(css2), layer3(beforeCss), '浮层色没跟着预设换，界面看起来不会变')
+})
+
+console.log('== 壁纸视频卡住自愈（用户报"动着动着不动了"）==')
+
+await check('壁纸视频有自愈看门狗：该播却没播时才拉，且尊重减少动态效果', () => {
+  // 这条是回归锚点。事故形状：主题视频停在半路不再动，而这条链路上当时
+  // **只有 visibilitychange 一个恢复入口** —— 任何不翻转 document.hidden 的暂停
+  // （Chromium 媒体优化、系统休眠唤醒、遮挡解除）都会让它永久卡死。
+  const src = fs.readFileSync(new URL('../client.js', import.meta.url), 'utf8')
+
+  // ① 必须真的有一个周期性检查，并且条件齐全。
+  assert.ok(src.includes('HEAL_TICK_MS'), '缺少自愈轮询的间隔常量')
+  const heal = /const healIfStalled = \(\) => \{([\s\S]{0,900}?)\n      \}/.exec(src)
+  assert.ok(heal !== null, '找不到 healIfStalled —— 壁纸视频停了就再没人拉回来')
+  const body = heal[1]
+  assert.ok(body.includes('document.hidden'), '看门狗没有排除"页面本来就不可见"')
+  assert.ok(body.includes('el.autoplay'), '看门狗没有区分"本来就该播"与"故意不播"')
+  assert.ok(body.includes('el.paused'), '看门狗没有判断"确实停住了"')
+  assert.ok(body.includes('el.ended'), '看门狗没有排除"播到结尾"')
+  assert.ok(body.includes('.play()'), '看门狗没有真的去起播')
+
+  // ② 看门狗必须挂在真实定时器上，且在 destroy 里收掉（否则销毁后还在碰 DOM）。
+  assert.ok(/setInterval\(healIfStalled/.test(src), '看门狗没有挂到 setInterval')
+  assert.ok(/startHeal\(\)/.test(src), '看门狗没被启动')
+  const destroy = src.slice(src.indexOf('destroy() {'), src.indexOf('destroy() {') + 600)
+  assert.ok(/stopHeal\(\)/.test(destroy), 'destroy 没有停掉看门狗')
+
+  // ③ 减少动态效果：只关 autoplay（= 从头就不播），**不许再关 loop**。
+  //    关 loop 的旧写法意味着"允许播、但不回头"，一旦有别的路径让它跑起来，
+  //    就停在最后一帧 —— 那正是用户看到的那个症状。
+  const reduceBlock = /prefers-reduced-motion: reduce[\s\S]{0,400}?\n          \}/.exec(src)
+  assert.ok(reduceBlock !== null, '找不到 prefers-reduced-motion 分支')
+  assert.ok(reduceBlock[0].includes('next.autoplay = false'), '减少动态效果没有关掉 autoplay')
+  assert.ok(!reduceBlock[0].includes('next.loop = false'), '减少动态效果又在关 loop —— 会停在最后一帧')
 })
 
 console.log('')

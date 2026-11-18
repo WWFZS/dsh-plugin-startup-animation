@@ -3247,10 +3247,15 @@ window.__ModuleLoader__.load({
           next.autoplay = true
           next.playsInline = true
           next.preload = 'auto'
-          // 尊重系统"减少动态效果"：退到静帧（后台标签页也照此处理，见 visibilitychange）。
+          // 尊重系统"减少动态效果"：干脆不播，停成一张静帧。
+          //
+          // 这里曾经设成 `autoplay = false; loop = false` —— 那等于"允许它播、
+          // 但播到结尾不回头"：一旦有别的路径（浏览器恢复播放、用户点了一下）
+          // 让它跑起来，5 秒后就僵在最后一帧，用户看到的就是"动着动着不动了"。
+          // 现在的语义是**从一开始就不播**，并把 autoplay 这个"该不该播"的开关
+          // 关掉，看门狗据此也不会去把它叫醒。
           if (window.matchMedia !== undefined && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
             next.autoplay = false
-            next.loop = false
           }
         }
         next.src = cfg.src
@@ -3317,10 +3322,10 @@ window.__ModuleLoader__.load({
         window.setTimeout(() => {
           if (alive && cfg !== null && cfg.enabled === true) probe()
         }, 1200)
-        if (mediaEl !== null && mediaEl.tagName === 'VIDEO' && mediaEl.paused && mediaEl.autoplay) {
-          const played = mediaEl.play()
-          if (played !== undefined && typeof played.catch === 'function') played.catch(() => {})
-        }
+        // 新挂上的视频可能还没起播（`preload` 刚回来、或 `prefers-reduced-motion`
+        // 关掉了 autoplay）。这里不再单写一段 play()，交给下面的看门狗统一管：
+        // 它每 4 秒看一次"该播却没播"，是同一个判断的唯一入口。
+        // 代价是冷启动最多多等一个 tick —— 换来的是"恢复播放"只有一处逻辑。
       }
 
       /** 后台标签页/失焦：暂停视频 —— 别在用户看不见的时候烧 GPU。 */
@@ -3338,6 +3343,49 @@ window.__ModuleLoader__.load({
         }
       }
       document.addEventListener('visibilitychange', onVisibility)
+
+      /**
+       * 自愈看门狗：把"自己停下来的"视频拉回来。
+       *
+       * 为什么需要（用户报的是"主题的视频动着动着突然不动了"）：这条链路上
+       * **只有 `visibilitychange` 一个恢复入口**。而视频停下来的原因不止它：
+       *
+       *   · Chromium 的媒体优化（MediaOptimization）判定长时不可见 → 静默 `pause()`，
+       *     不派发任何事件，`document.hidden` 仍然是 `false`；
+       *   · 系统休眠 / 唤醒 → 解码器被挂起，回来时停在原地；
+       *   · 窗口被完全遮挡（occlusion）之后又解除，某些路径下同样不给 visibilitychange。
+       *
+       * 这几种情况都没有事件可监听，所以只能轮询。条件卡得很死：
+       *   页面可见 + 是个视频 + `autoplay`（说明"本来就该播"）+ 确实 `paused`
+       *   + 没播到结尾（`ended`）→ 才拉一次。
+       * `prefers-reduced-motion` 的用户 `autoplay` 是 false，天然被排除。
+       *
+       * 开销：每 tick 只读四个属性；页面不可见时第一句就 return。
+       * 4 秒是本机实测的感受下限 —— 更密没有意义（用户已经在等），更疏会明显"愣一下"。
+       */
+      const HEAL_TICK_MS = 4000
+      let healTimer = 0
+      const healIfStalled = () => {
+        if (!alive || cfg === null || cfg.enabled !== true) return
+        const el = mediaEl
+        if (el === null || el.tagName !== 'VIDEO') return
+        if (document.hidden) return
+        if (el.autoplay !== true) return
+        if (!el.paused || el.ended) return
+        wallLog('自愈：视频停住了，重新起播')
+        const played = el.play()
+        if (played !== undefined && typeof played.catch === 'function') played.catch(() => {})
+      }
+      const startHeal = () => {
+        if (healTimer !== 0) return
+        healTimer = window.setInterval(healIfStalled, HEAL_TICK_MS)
+      }
+      const stopHeal = () => {
+        if (healTimer === 0) return
+        window.clearInterval(healTimer)
+        healTimer = 0
+      }
+      startHeal()
 
       /**
        * 深浅色主题变化后重新决策一次。
@@ -3458,6 +3506,8 @@ window.__ModuleLoader__.load({
         destroy() {
           alive = false
           document.removeEventListener('visibilitychange', onVisibility)
+          // 看门狗必须先停：它在 interval 里碰 mediaEl，销毁后再跑会去操作已拆掉的 DOM。
+          stopHeal()
           if (themeObserver !== null) {
             themeObserver.disconnect()
             themeObserver = null
