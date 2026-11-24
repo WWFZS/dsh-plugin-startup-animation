@@ -1,7 +1,7 @@
 # 已改名：`dsh-ui-stage`
 
-这个插件已经改名为 **[dsh-ui-stage](https://github.com/WWFZS/dsh-ui-stage)** —— 它早就不只是开机动画了，
-同时提供**界面主题**（壁纸 / 遮罩 / 色彩浓度）与**桌面宠物**，旧名字装不下这三件事。
+插件已经改名为 **[dsh-ui-stage](https://github.com/WWFZS/dsh-ui-stage)**，
+同时提供**界面主题**（壁纸 / 遮罩 / 色彩浓度）与**桌面宠物**。
 
 - 新仓库：https://github.com/WWFZS/dsh-ui-stage
 - npm：`dsh-plugin-startup-animation@1.35.0` 是**最后一版用旧名的版本**，它会自动把自己搬到 `dsh-ui-stage`
